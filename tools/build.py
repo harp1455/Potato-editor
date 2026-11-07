@@ -28,7 +28,9 @@ def page(kind, extra):
         main = main.replace(f'/*@@{name}@@*/\n', read(os.path.join(S, name.lower() + '.js')), 1)
     assert main.startswith('<script>')
     build = '<script>window.POTATO_BUILD = ' + json.dumps({'kind': kind, 'version': VERSION}) + ';</script>'
-    parts = [head, build, read(os.path.join(S, 'sfx-packs.html')).rstrip('\n'), main, NOTICE] + extra + ['</body>', '</html>']
+    mux = read(os.path.join(ROOT, 'vendor', 'mp4-muxer', 'mp4-muxer.js'))  # MP4 저장 (MIT)
+    assert '</script' not in mux.lower()
+    parts = [head, build, '<script>' + mux + '</script>', read(os.path.join(S, 'sfx-packs.html')).rstrip('\n'), main, NOTICE] + extra + ['</body>', '</html>']
     return '\n'.join(parts) + '\n'
 
 

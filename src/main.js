@@ -3308,8 +3308,8 @@ function quantize(d, maxN) { // 중앙값 자르기로 색 고르기 (15비트 �
   const near = c => { let m = map[c]; if (m >= 0) return m; const r = (c >> 10) * 8 + 4, g = ((c >> 5) & 31) * 8 + 4, b = (c & 31) * 8 + 4; let bd = 1e9; for (let i = 0; i < np; i++) { const dr = pal[i * 3] - r, dg = pal[i * 3 + 1] - g, db = pal[i * 3 + 2] - b, dd = dr * dr * 2 + dg * dg * 4 + db * db * 3; if (dd < bd) { bd = dd; m = i; } } map[c] = m; return m; };
   return { pal, near };
 }
-function indexFrame(d, W, H, dither) {
-  const { pal, near } = quantize(d, 256), idx = new Uint8Array(W * H);
+function indexFrame(d, W, H, dither, colors) {
+  const { pal, near } = quantize(d, colors || 256), idx = new Uint8Array(W * H);
   if (!dither) { for (let i = 0, j = 0; i < d.length; i += 4, j++) idx[j] = near(((d[i] >> 3) << 10) | ((d[i + 1] >> 3) << 5) | (d[i + 2] >> 3)); return { pal, idx }; }
   let cur = new Float32Array(W * 3), nxt = new Float32Array(W * 3);
   for (let y = 0; y < H; y++) {
@@ -3354,13 +3354,13 @@ function lzw(pixels, out) { // GIF용 LZW 압축 (8비트)
   }
   output(ent); output(EOFC); out.byte(0);
 }
-async function encodeGif(W, H, frames, renderFrame, progress) {
+async function encodeGif(W, H, frames, renderFrame, progress, colors) {
   const o = new ByteOut(); o.str('GIF89a'); o.u16(W); o.u16(H); o.byte(0x70); o.byte(0); o.byte(0);
   if (gs.set.loop) { o.byte(0x21); o.byte(0xff); o.byte(11); o.str('NETSCAPE2.0'); o.byte(3); o.byte(1); o.u16(0); o.byte(0); }
   const c = newCanvas(W, H), g = c.getContext('2d', { willReadFrequently: true }); let tc = 0, done = 0;
   for (const f of frames) {
     renderFrame(g, f.t / 1000, W, H);
-    const { pal, idx } = indexFrame(g.getImageData(0, 0, W, H).data, W, H, gs.set.dither);
+    const { pal, idx } = indexFrame(g.getImageData(0, 0, W, H).data, W, H, gs.set.dither, colors);
     const end = Math.round((f.s + f.dur) / 10), cs = Math.max(2, end - tc); tc += cs;
     o.byte(0x21); o.byte(0xf9); o.byte(4); o.byte(0x04); o.u16(cs); o.byte(0); o.byte(0);
     o.byte(0x2c); o.u16(0); o.u16(0); o.u16(W); o.u16(H); o.byte(0x87); o.bytes(pal);
@@ -3369,13 +3369,13 @@ async function encodeGif(W, H, frames, renderFrame, progress) {
   }
   o.byte(0x3b); return o.blob('image/gif');
 }
-async function encodeWebp(W, H, frames, renderFrame, progress) {
+async function encodeWebp(W, H, frames, renderFrame, progress, q) {
   const c = newCanvas(W, H), g = c.getContext('2d'), parts = []; let done = 0, tc = 0, alpha = false;
   const le = (n, b) => { const a = []; for (let i = 0; i < b; i++) a.push((n >> (8 * i)) & 255); return a; };
   const chunk = (id, data) => { const pad = data.length & 1; const u = new Uint8Array(8 + data.length + pad); for (let i = 0; i < 4; i++) u[i] = id.charCodeAt(i); u.set(le(data.length, 4), 4); u.set(data, 8); return u; };
   for (const f of frames) {
     renderFrame(g, f.t / 1000, W, H);
-    const b = await new Promise(r => c.toBlob(r, 'image/webp', gs.set.q / 100));
+    const b = await new Promise(r => c.toBlob(r, 'image/webp', (q || gs.set.q) / 100));
     if (!b || b.type !== 'image/webp') throw new Error('nowebp');
     const u = new Uint8Array(await b.arrayBuffer()), sub = []; let p = 12;
     while (p + 8 <= u.length) { const id = String.fromCharCode(u[p], u[p + 1], u[p + 2], u[p + 3]), sz = u[p + 4] | (u[p + 5] << 8) | (u[p + 6] << 16) | (u[p + 7] << 24); if (id === 'ALPH') alpha = true; if (id === 'VP8 ' || id === 'VP8L' || id === 'ALPH') sub.push(u.subarray(p, p + 8 + sz + (sz & 1))); p += 8 + sz + (sz & 1); }
@@ -3399,7 +3399,7 @@ function buildGifStudio() {
   d.innerHTML = `<div class="gs-top"><b>움짤 만들기</b><span class="muted small">사진을 장면으로 이어 붙여 GIF나 움직이는 WebP로 저장해요</span><div class="flex1"></div><button class="btn" data-g="close">편집기로 돌아가기</button></div>
     <div class="gs-body">
       <aside class="gs-left">
-        <div class="gs-add"><button class="btn sm" data-g="add-file" title="사진, GIF, 움직이는 WebP">+ 사진·GIF</button><button class="btn sm" data-g="add-lib">+ 보관함에서</button><button class="btn sm" data-g="add-page" title="편집기의 지금 페이지(고른 것이 있으면 그 부분만)">+ 지금 페이지</button></div>
+        <div class="gs-add"><button class="btn sm" data-g="add-file" title="사진, GIF, 움직이는 WebP, 영상(MP4·WebM)">+ 사진·GIF·영상</button><button class="btn sm" data-g="add-lib">+ 보관함에서</button><button class="btn sm" data-g="add-page" title="편집기의 지금 페이지(고른 것이 있으면 그 부분만)">+ 지금 페이지</button></div>
         <div id="gsList" class="gs-list"></div>
         <div id="gsSum" class="gs-sum muted small"></div>
       </aside>
@@ -3409,7 +3409,7 @@ function buildGifStudio() {
       </main>
       <aside class="gs-right" id="gsProps"></aside>
     </div>
-    <input type="file" id="gsFile" accept="image/*" multiple hidden>`;
+    <input type="file" id="gsFile" accept="image/*,video/*" multiple hidden>`;
   document.body.appendChild(d);
   d.addEventListener('click', gsClick);
   $('#gsProps').addEventListener('input', gsInput); $('#gsProps').addEventListener('change', gsInput);
@@ -3456,7 +3456,7 @@ function gsPlay() {
 function gsPause() { gs.playing = false; cancelAnimationFrame(gs.raf); const b = $('#gsPlay'); if (b) { b.textContent = '재생'; b.classList.remove('on'); } }
 function gsRenderList() {
   const S = gs.slides; let acc = 0;
-  $('#gsList').innerHTML = S.length ? S.map((s, i) => { const st = acc; acc += gsDur(s); return `<div class="gs-item ${i === gs.sel ? 'on' : ''}" data-si="${i}" draggable="true" title="끌어서 순서를 바꿔요">
+  $('#gsList').innerHTML = S.length ? S.map((s, i) => { const st = acc; acc += gsDur(s); return `<div class="gs-item ${i === gs.sel || gs.pick.has(s.id) ? 'on' : ''} ${gs.pick.has(s.id) ? 'pk' : ''}" data-si="${i}" draggable="true" title="끌어서 순서를 바꿔요">
       <span class="no">${i + 1}</span><canvas data-th="${i}" width="64" height="64"></canvas>
       <span class="meta"><b>${gsDur(s).toFixed(1)}초</b><span>움직임: ${esc(GS_MOTIONS.find(m => m[0] === gsMo(s))[1])}</span></span>
       <span class="ops"><button class="ic" data-g="up" data-i="${i}" title="위로" aria-label="위로">▲</button><button class="ic" data-g="down" data-i="${i}" title="아래로" aria-label="아래로">▼</button><button class="ic" data-g="del" data-i="${i}" title="빼기" aria-label="빼기">×</button></span></div>`; }).join('') : '<div class="gs-none muted small">아직 장면이 없어요.</div>';
@@ -3466,12 +3466,13 @@ function gsRenderList() {
 }
 function gsRenderProps() {
   const s = gs.slides[gs.sel], set = gs.set, opt = (arr, cur) => arr.map(([v, l]) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${l}</option>`).join('');
-  $('#gsProps').innerHTML = `${s ? `<div class="sec"><h3>${gs.sel + 1}번 장면</h3>
+  $('#gsProps').innerHTML = `${gsBatchHtml()}${s && gs.pick.size < 2 ? `<div class="sec"><h3>${gs.sel + 1}번 장면</h3>
       ${row('길이', `<input type="number" data-gk="s.dur" min="0.05" max="60" step="0.1" value="${s.dur ?? ''}" placeholder="${set.dur}"> 초`)}
       ${row('움직임', `<select data-gk="s.motion"><option value="">전체 설정 따름</option>${opt(GS_MOTIONS, s.motion ?? '')}</select>`)}
       ${row('맞추기', `<select data-gk="s.fit"><option value="">전체 설정 따름</option>${opt([['cover', '꽉 채우기'], ['contain', '전체 보이기']], s.fit ?? '')}</select>`)}
       ${row('넘어갈 때', `<select data-gk="s.tr"><option value="">전체 설정 따름</option>${opt(GS_TRANS, s.tr ?? '')}</select>`)}
-      <div class="btnrow"><button class="btn sm" data-g="dup">이 장면 복제</button><button class="btn sm danger" data-g="del" data-i="${gs.sel}">빼기</button></div></div>` : ''}
+      <div class="btnrow"><button class="btn sm" data-g="dup">이 장면 복제</button><button class="btn sm danger" data-g="del" data-i="${gs.sel}">빼기</button></div>
+      ${s.clip && gs.slides.filter(x => x.clip === s.clip).length > 1 ? `<div class="btnrow"><button class="btn sm" data-g="pick-clip" title="같은 GIF·영상에서 나온 장면을 모두 골라 속도·거꾸로·부메랑을 한꺼번에">이 GIF·영상 장면 모두 고르기 (${gs.slides.filter(x => x.clip === s.clip).length}장)</button></div>` : ''}</div>` : ''}
     <div class="sec"><h3>전체 설정</h3>
       ${row('크기', `<select data-gk="size">${opt(GS_SIZES, set.size)}</select>`)}
       ${set.size === 'custom' ? `<div class="grid2"><span>폭</span><input type="number" data-gk="cw" value="${set.cw}" min="16" max="2400"><span>높이</span><input type="number" data-gk="ch" value="${set.ch}" min="16" max="2400"></div>` : ''}
@@ -3483,12 +3484,15 @@ function gsRenderProps() {
       ${set.trans !== 'none' ? row('효과 길이', `<input type="number" data-gk="trDur" min="0.05" max="3" step="0.05" value="${set.trDur}"> 초`) : ''}
       <div class="btnrow"><button class="btn sm" data-g="all-follow" title="장면마다 따로 정한 길이, 움직임 등을 지우고 전체 설정으로 맞춰요">모든 장면을 전체 설정으로</button></div></div>
     <div class="sec"><h3>저장</h3>
-      ${row('형식', `<div class="seg"><button class="btn sm ${set.fmt === 'gif' ? 'on' : ''}" data-g="fmt" data-v="gif">GIF</button><button class="btn sm ${set.fmt === 'webp' ? 'on' : ''}" data-g="fmt" data-v="webp">움직이는 WebP</button></div>`)}
+      ${row('형식', `<div class="seg"><button class="btn sm ${set.fmt === 'gif' ? 'on' : ''}" data-g="fmt" data-v="gif">GIF</button><button class="btn sm ${set.fmt === 'webp' ? 'on' : ''}" data-g="fmt" data-v="webp">움직이는 WebP</button><button class="btn sm ${set.fmt === 'mp4' ? 'on' : ''}" data-g="fmt" data-v="mp4">MP4 영상</button></div>`)}
       ${row('부드러움', `<select data-gk="fps">${opt([['8', '초당 8장 (가볍게)'], ['10', '초당 10장'], ['12', '초당 12장'], ['15', '초당 15장'], ['20', '초당 20장'], ['24', '초당 24장 (매끄럽게)']], String(set.fps))}</select>`)}
       ${row('반복', `<label class="chk"><input type="checkbox" data-gk="loop" ${set.loop ? 'checked' : ''}> 계속 반복</label>`)}
-      ${set.fmt === 'gif' ? row('', `<label class="chk"><input type="checkbox" data-gk="dither" ${set.dither ? 'checked' : ''}> 색 경계 부드럽게</label>`) : row('화질', `<input type="range" data-gk="q" min="40" max="100" value="${set.q}"> <span class="muted small">${set.q}</span>`)}
-      <div class="btnrow"><button class="btn primary" data-g="export" id="gsExport" ${gs.slides.length ? '' : 'disabled'}>${set.fmt === 'gif' ? 'GIF로 저장' : 'WebP로 저장'}</button></div>
-      <p class="muted small">GIF는 256색이라 사진은 조금 거칠어질 수 있어요. 움직이는 WebP가 더 선명하고 가벼워요.</p></div>`;
+      ${set.fmt === 'gif' ? row('', `<label class="chk"><input type="checkbox" data-gk="dither" ${set.dither ? 'checked' : ''}> 색 경계 부드럽게</label>`) + row('색 수', `<select data-gk="colors">${opt([['256', '256색 (선명)'], ['128', '128색'], ['64', '64색 (가볍게)'], ['32', '32색']], String(set.colors))}</select>`)
+        : set.fmt === 'mp4' ? row('화질', `<input type="range" data-gk="mq" min="40" max="100" value="${set.mq}"> <span class="muted small">${set.mq}</span>`) : row('화질', `<input type="range" data-gk="q" min="40" max="100" value="${set.q}"> <span class="muted small">${set.q}</span>`)}
+      ${row('용량 맞추기', `<input type="number" data-gk="target" min="0" max="500" step="0.5" value="${set.target || 0}" style="width:70px"> MB 이하 <span class="muted small">(0 = 안 맞춤)</span>`)}
+      <div class="btnrow"><button class="btn sm" data-g="est">예상 용량 보기</button><span class="muted small" id="gsEst"></span></div>
+      <div class="btnrow"><button class="btn primary" data-g="export" id="gsExport" ${gs.slides.length ? '' : 'disabled'}>${set.fmt === 'gif' ? 'GIF로 저장' : set.fmt === 'mp4' ? 'MP4로 저장' : 'WebP로 저장'}</button></div>
+      <p class="muted small">GIF는 256색이라 사진은 조금 거칠어질 수 있어요. 움직이는 WebP가 더 선명하고 가벼워요. MP4는 가장 가볍지만 소리 없는 영상이에요. 용량을 정하면 넘을 때 화질·색 수·크기를 줄여 다시 만들어요.</p></div>`;
 }
 function gsRenderAll() { gsRenderList(); gsRenderProps(); gsFitCanvas(); }
 let gsSaveT = 0;
@@ -3501,14 +3505,15 @@ function gsInput(e) {
     const s = gs.slides[gs.sel]; if (!s) return; const f = k.slice(2);
     if (f === 'dur') s.dur = v === '' ? null : clamp(+v || 0.05, 0.05, 60); else s[f] = v === '' ? null : v;
   } else {
-    if (['dur', 'trDur', 'cw', 'ch', 'q', 'fps'].includes(k)) v = +v || gs.set[k];
+    if (['dur', 'trDur', 'cw', 'ch', 'q', 'fps', 'mq', 'colors'].includes(k)) v = +v || gs.set[k];
+    if (k === 'target') v = Math.max(0, +v || 0);
     gs.set[k] = v;
   }
   gsChanged(e.type === 'input');
 }
 async function gsClick(e) {
   const b = e.target.closest('[data-g]'), it = e.target.closest('[data-si]');
-  if (!b) { if (it) { gs.sel = +it.dataset.si; gsPause(); let acc = 0; for (let i = 0; i < gs.sel; i++) acc += gsDur(gs.slides[i]); gs.t = acc + 0.001; gsRenderList(); gsRenderProps(); gsDraw(); } return; }
+  if (!b) { if (it) { gsPickClick(+it.dataset.si, e); gsPause(); let acc = 0; for (let i = 0; i < gs.sel; i++) acc += gsDur(gs.slides[i]); gs.t = acc + 0.001; gsRenderList(); gsRenderProps(); gsDraw(); } return; }
   const a = b.dataset.g, i = +b.dataset.i;
   if (a === 'close') closeGifStudio();
   else if (a === 'add-file') $('#gsFile').click();
@@ -3522,11 +3527,17 @@ async function gsClick(e) {
   else if (a === 'fmt') { gs.set.fmt = b.dataset.v; gsChanged(); }
   else if (a === 'all-follow') { for (const s of gs.slides) { s.dur = s.motion = s.fit = s.tr = null; } gsChanged(); }
   else if (a === 'export') gsExport();
+  else if (a === 'est') gsEstimate();
+  else if (a === 'pick-clip') { const s = gs.slides[gs.sel]; if (s && s.clip) { gs.pick = new Set(gs.slides.filter(x => x.clip === s.clip).map(x => x.id)); gsRenderList(); gsRenderProps(); } }
+  else if (a === 'b-clear') { gs.pick.clear(); gsRenderList(); gsRenderProps(); }
+  else if (a === 'b-dur') gsBatch(a, ($('#gsBDur') || {}).value);
+  else if (a.startsWith('b-')) gsBatch(a, b.dataset.v);
 }
 function gsKey(e) {
   if (e.key === 'Escape') { if (modalOpen()) closeModal(); else closeGifStudio(); e.preventDefault(); return; }
   if (isTyping(e.target) || modalOpen()) return;
   if (e.key === ' ') { e.preventDefault(); gs.playing ? gsPause() : gsPlay(); }
+  else if ((e.key === 'Delete' || e.key === 'Backspace') && gs.pick.size > 1) { e.preventDefault(); gsBatch('b-del'); }
   else if ((e.key === 'Delete' || e.key === 'Backspace') && gs.sel >= 0) { e.preventDefault(); gs.slides.splice(gs.sel, 1); gs.sel = Math.min(gs.sel, gs.slides.length - 1); gsChanged(); }
   else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); gs.sel = clamp(gs.sel + (e.key === 'ArrowUp' ? -1 : 1), 0, gs.slides.length - 1); gsRenderList(); gsRenderProps(); }
 }
@@ -3562,13 +3573,14 @@ async function decodeAnimated(file, onFrame) {
   } catch (e) { try { dec && dec.close(); } catch (_) { } return -1; }
 }
 async function gsAddFiles(files) {
-  files = files.filter(isImageFile); if (!files.length) return;
+  files = files.filter(f => isImageFile(f) || isVideoFile(f)); if (!files.length) return;
   files.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ko', { numeric: true }));
   toast('장면을 넣는 중…', 1500); let n = 0, full = false;
   for (const f of files) {
     if (full) break;
-    const before = gs.slides.length;
-    const k = await decodeAnimated(f, (im, dur) => { const first = gs.slides.length === before; const s = gsAddBitmap(im, f.name, { dur: Math.round(dur * 1000) / 1000, motion: 'none', tr: first ? null : 'none', fit: 'contain' }, 1080); if (!s) full = true; return !!s; });
+    if (isVideoFile(f)) { n += await gsAddVideo(f); if (gs.slides.length && gsPixels() > GS_BUDGET * 0.98) full = true; continue; }
+    const before = gs.slides.length, gclip = 'c' + uid();
+    const k = await decodeAnimated(f, (im, dur) => { const first = gs.slides.length === before; const s = gsAddBitmap(im, f.name, { dur: Math.round(dur * 1000) / 1000, motion: 'none', tr: first ? null : 'none', fit: 'contain', clip: gclip }, 1080); if (!s) full = true; return !!s; });
     if (k >= 0) { n += gs.slides.length - before; continue; }
     try { const bm = await createImageBitmap(f); const s = gsAddBitmap(bm, f.name); bm.close(); if (s) n++; else full = true; }
     catch (e) { try { const im = await loadImg(await readAsDataURL(f)); if (gsAddBitmap(im, f.name)) n++; else full = true; } catch (_) { toast(`${f.name}을 열지 못했어요`); } }
@@ -3598,14 +3610,17 @@ function gsAddPage() {
 }
 async function gsExport() {
   if (gs.busy || !gs.slides.length) return; gsPause();
-  const [W, H] = gsSize(), frames = gsFramePlan(gs.set.fps), btn = $('#gsExport');
-  if (frames.length > 600) { toast('장면이 너무 많아요. 초당 장면 수를 줄이거나 길이를 줄여 주세요.', 4000); return; }
+  const fmt = gs.set.fmt, btn = $('#gsExport'), frames = gsFramePlan(+gs.set.fps);
+  if (fmt !== 'mp4' && frames.length > 900) { toast('장면이 너무 많아요. 초당 장 수를 줄이거나 길이를 줄여 주세요.', 4000); return; }
   gs.busy = true; btn.disabled = true;
-  const prog = (i, n) => { btn.textContent = `만드는 중 ${i} / ${n}`; };
+  const prog = (i, n, tries) => { btn.textContent = (tries ? `용량 맞추는 중 (${tries + 1}번째) ` : '만드는 중 ') + `${i} / ${n}`; };
   try {
-    const blob = gs.set.fmt === 'gif' ? await encodeGif(W, H, frames, gsRenderAt, prog) : await encodeWebp(W, H, frames, gsRenderAt, prog);
-    if (await download(blob, `${safeName(doc.name)}_움짤.${gs.set.fmt}`)) toast(`${gs.set.fmt === 'gif' ? 'GIF' : 'WebP'}로 저장했어요 (${(blob.size / 1048576).toFixed(1)}MB)`, 3500);
-  } catch (e) { toast(e && e.message === 'nowebp' ? '이 브라우저는 WebP 저장을 못 해요. 크롬이나 엣지에서 해 보세요.' : '저장하지 못했어요. 크기를 줄여 다시 해 보세요.', 4500); }
+    const { blob, W, H } = await gsEncodeTarget(fmt, prog), [W0] = gsSize();
+    if (await download(blob, `${safeName(doc.name)}_움짤.${fmt}`)) toast(`${fmt === 'gif' ? 'GIF' : fmt === 'mp4' ? 'MP4' : 'WebP'}로 저장했어요 (${(blob.size / 1048576).toFixed(1)}MB${W !== W0 ? `, 용량에 맞춰 ${W}×${H}로 줄였어요` : ''})`, 4500);
+  } catch (e) {
+    const m = e && e.message;
+    toast(m === 'nowebp' ? '이 브라우저는 WebP 저장을 못 해요. 크롬이나 엣지에서 해 보세요.' : m === 'nomp4' ? '이 컴퓨터에서는 MP4로 저장할 수 없어요. GIF나 WebP로 저장해 주세요.' : '저장하지 못했어요. 크기를 줄여 다시 해 보세요.', 4500);
+  }
   gs.busy = false; btn.disabled = false; gsRenderProps();
 }
 async function gsSave() {
@@ -3626,6 +3641,7 @@ async function gsLoad() {
   gs.sel = gs.slides.length ? 0 : -1;
 }
 
+/*@@GIF2@@*/
 /*@@CZ@@*/
 /* ================= 모달 ================= */
 function modal(html, opts = {}) {
