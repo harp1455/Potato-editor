@@ -17,7 +17,8 @@ NAI 그림용 로컬 컷·이미지 편집기예요. 그림은 내 컴퓨터 안
 
 | 경로 | 내용 |
 |---|---|
-| `src/` | 편집기 화면: `head.html`, `main.js`, 자동 흰칠 `cz.js`, 효과음 팩 `sfx-packs.html` |
+| `src/` | 편집기 화면: `head.html`, `main.js`, 자동 흰칠 `cz.js`, 고급 보정 `adv.js`, 레이어·크기 `layers.js`, 선택·고치기 붓 `sel.js`, AI 도구 `ai.js`, 움짤 `gif2.js`·`anim.js`, 효과음 팩 `sfx-packs.html` |
+| `tools/gen_presets.py` | Animate.css·gl-transitions로 움짤 프리셋 `src/presets.js`를 만들어요 |
 | `tools/build.py app` | 설치판에 들어가는 화면(`dist/app`) |
 | `tools/build.py full packs` | HTML판(`dist/감자편집기.html`) |
 | `tools/make_packs.py` | 원본 모델을 받아 변환하고 팩(`packs/`)을 만들어요 |

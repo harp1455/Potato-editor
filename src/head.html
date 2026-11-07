@@ -248,7 +248,7 @@ body.moding #toast{bottom:112px}
 .gs-item .ic:hover{background:var(--tint);color:var(--ink)}
 .gs-none{padding:22px 10px;text-align:center;border:1px dashed var(--line2);border-radius:8px}
 .gs-sum{padding:8px 10px;border-top:1px solid var(--line);min-height:34px}
-.gs-main{display:grid;grid-template-rows:1fr auto;min-width:0;min-height:0;background:var(--desk)}
+.gs-main{display:grid;grid-template-rows:1fr auto auto;min-width:0;min-height:0;background:var(--desk)}
 .gs-stage{position:relative;display:flex;align-items:center;justify-content:center;min-height:0;overflow:hidden}
 .gs-stage.drop{outline:3px dashed var(--blue);outline-offset:-10px}
 .gs-stage canvas{box-shadow:0 4px 18px rgba(0,0,0,.25);background:#fff}
@@ -261,6 +261,42 @@ body.moding #toast{bottom:112px}
 .gs-ctrl span{min-width:110px;text-align:right;font-variant-numeric:tabular-nums}
 .gs-right{overflow:auto;border-left:1px solid var(--line)}
 .gs-right .row > .l{width:70px}
+.gs-tabs{display:flex;gap:2px;padding:6px 10px 0;position:sticky;top:0;background:var(--paper);z-index:2;border-bottom:1px solid var(--line)}
+.gs-tabs button{flex:1;border:0;background:transparent;padding:8px 4px 9px;font:inherit;font-size:13px;color:var(--ink2);border-bottom:2px solid transparent;cursor:pointer;white-space:nowrap}
+.gs-tabs button.on{color:var(--ink);font-weight:700;border-bottom-color:var(--blue)}
+.gs-tabs i{font-style:normal;font-size:11px;background:var(--tint);border-radius:8px;padding:0 5px;margin-left:2px}
+.ov-list{display:flex;flex-direction:column;gap:3px;margin-top:6px;max-height:210px;overflow:auto}
+.ov-it{display:flex;align-items:center;gap:6px;padding:4px 6px;border:1px solid var(--line);border-radius:7px;cursor:pointer;font-size:12.5px;background:var(--paper)}
+.ov-it:hover{border-color:var(--ink3)}
+.ov-it.on{border-color:var(--blue);box-shadow:0 0 0 1px var(--blue)}
+.ov-it .ov-k{font-size:10.5px;color:var(--ink3);flex:none;width:24px}
+.ov-it .ov-t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ov-it .ic{width:22px;height:20px;border:0;background:transparent;border-radius:4px;cursor:pointer;color:var(--ink2);padding:0;flex:none}
+.ov-it .ic:hover{background:var(--tint);color:var(--ink)}
+.ov-pre{display:flex;flex-wrap:wrap;gap:4px;margin:6px 0}
+.emo{display:grid;grid-template-columns:repeat(8,1fr);gap:2px;padding-bottom:6px}
+.emo button{border:0;background:transparent;font-size:19px;line-height:1.2;padding:3px 0;border-radius:6px;cursor:pointer}
+.emo button:hover{background:var(--tint)}
+.gs-right .row input[type=range]{flex:1;min-width:60px}
+.gs-right .rv{min-width:34px;text-align:right;font-variant-numeric:tabular-nums}
+.gs-right textarea{font:inherit;font-size:13px;padding:6px 8px;border:1px solid var(--line);border-radius:7px;background:var(--paper);color:var(--ink);box-sizing:border-box;margin-bottom:4px}
+.gs-track{position:relative;max-height:150px;overflow:auto;background:var(--paper);border-top:1px solid var(--line);padding:6px 14px}
+.gs-track[hidden]{display:none}
+.tr-row{display:flex;align-items:center;gap:8px;height:22px}
+.tr-l{width:92px;flex:none;font-size:11.5px;color:var(--ink2);overflow:hidden;white-space:nowrap;text-overflow:ellipsis;cursor:pointer}
+.tr-lane{position:relative;flex:1;height:16px;background:var(--side);border-radius:4px;cursor:pointer;touch-action:none}
+.tr-lane i{position:absolute;top:0;bottom:0;width:1px;background:var(--line2)}
+.tr-bar{position:absolute;top:2px;bottom:2px;border-radius:4px;background:#7aa7ff;cursor:grab;min-width:4px}
+.tr-bar.f{background:#f0a24b}
+.tr-bar.on{box-shadow:0 0 0 2px var(--blue)}
+.tr-head{position:absolute;top:0;bottom:0;width:2px;background:#ff4d4d;pointer-events:none}
+#gsCv{touch-action:none}
+.glt-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;max-height:60vh;overflow:auto;padding:2px}
+.glt-tile{display:flex;flex-direction:column;align-items:center;gap:4px;padding:5px;border:1px solid var(--line);border-radius:8px;background:var(--paper);cursor:pointer;font:inherit;font-size:12px;color:var(--ink)}
+.glt-tile canvas{max-width:100%;height:116px;object-fit:contain;border-radius:5px;background:var(--side)}
+.glt-tile:hover{border-color:var(--ink3)}
+.glt-tile.on{border-color:var(--blue);box-shadow:0 0 0 1px var(--blue)}
+.glt-tile[hidden]{display:none}
 /* 자동 흰칠 */
 .menu button:disabled{opacity:.45;cursor:default;background:transparent}
 .czbar{height:8px;border-radius:4px;background:var(--side);overflow:hidden;margin:4px 0 6px}
