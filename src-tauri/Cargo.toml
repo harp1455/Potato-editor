@@ -1,6 +1,6 @@
 [package]
 name = "potato-editor"
-version = "8.0.0"
+version = "8.0.1"
 description = "감자 편집기"
 edition = "2021"
 

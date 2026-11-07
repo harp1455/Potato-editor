@@ -84,6 +84,8 @@ function czCall(msg, tr) { // 일꾼에게 보내는 일은 하나씩 차례로 
   });
   const p = cz.q.then(send, send); cz.q = p.catch(() => { }); return p;
 }
+// exe판: 처음 준비가 멈춘 채 끝나지 않으면(엔진이 이 PC와 안 맞는 경우) 기다리다 끊고 다른 방식으로 다시 해요
+const czTimed = (p, ms) => !czIsApp() || cz.firstOk ? p : Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
 function czReset(err) {
   if (cz.w) { try { cz.w.terminate(); } catch (_) { } }
   for (const p of cz.wait.values()) p.rej(err || new Error('reset'));
@@ -269,7 +271,7 @@ function czInit() {
     if (!cz.w) throw new Error('worker');
     // 여러 스레드는 교차 출처 격리(exe판)일 때만. 코어 절반, 많아도 4개
     const threads = mod && !cz.noThreads && self.crossOriginIsolated ? Math.max(1, Math.min(4, Math.ceil((navigator.hardwareConcurrency || 2) / 2))) : 1;
-    const r = await czCall({ t: 'init', wasm, device: czCfg.device, threads }, [wasm]);
+    const r = await czTimed(czCall({ t: 'init', wasm, device: czCfg.device, threads }, [wasm]), 60000);
     cz.ep = r.ep; cz.threads = r.threads || 1;
     return true;
   })();
@@ -283,8 +285,8 @@ function czLoad(key) {
         try {
           await czInit();
           const b = await czBytes('czM_' + key);
-          const r = await czCall({ t: 'load', key, bytes: b }, [b]);
-          cz.ep = r.ep; return;
+          const r = await czTimed(czCall({ t: 'load', key, bytes: b }, [b]), 120000);
+          cz.ep = r.ep; cz.firstOk = true; return;
         } catch (e) {
           // exe판: 여러 스레드 → 한 스레드 → 예전 일꾼 순서로 물러나요 (팩이 없거나 멈춘 건 그대로 알려요)
           const msg = String((e && e.message) || '');
@@ -302,6 +304,7 @@ const czDevText = () => cz.ep === 'webgpu' ? '그래픽카드로 처리하는 �
 function czErrText(e) {
   const m = String((e && e.message) || e || '');
   if (m === 'notready') return '편집기 파일을 아직 다 읽지 못했어요. 몇 초 뒤에 다시 눌러 주세요.';
+  if (m === 'timeout') return '자동 흰칠 준비가 너무 오래 걸려서 멈췄어요. 설정에서 처리 장치를 CPU로 바꾸거나 프로그램을 다시 켜 보세요.';
   if (m.startsWith('nopack')) return "자동 흰칠 팩이 없어요. '자동 흰칠 설정'에서 팩을 받아 주세요.";
   if (/memory|Memory|allocation/.test(m)) return '메모리가 모자라서 멈췄어요. 다른 탭을 닫거나 처리 장치를 CPU로 바꿔 보세요.';
   return '자동 흰칠을 준비하지 못했어요. 크롬이나 엣지 최신 버전에서 다시 열어 주세요. (' + m.slice(0, 80) + ')';
