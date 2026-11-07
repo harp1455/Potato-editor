@@ -239,7 +239,7 @@ function restoreHist(h) {
 function undo() { if (hi <= 0) return; hi--; restoreHist(hist[hi]); }
 function redo() { if (hi >= hist.length - 1) return; hi++; restoreHist(hist[hi]); }
 function updateUndo() { $('#bUndo').disabled = hi <= 0; $('#bRedo').disabled = hi >= hist.length - 1; }
-function afterChange() { updateUndo(); scheduleSave(); scheduleThumbs(); updateHint(); renderLibSoon(); }
+function afterChange() { updateUndo(); scheduleSave(); scheduleThumbs(); updateHint(); renderLibSoon(); renderLayersSoon(); }
 
 /* ================= 저장소 (자동 저장) ================= */
 const idb = {
@@ -865,7 +865,7 @@ function hitEl(el, p, solid) {
 }
 function hitTest(p, onlyType) {
   const els = page().els;
-  for (let i = els.length - 1; i >= 0; i--) { const el = els[i]; if (onlyType && el.type !== onlyType) continue; if (hitEl(el, p)) return el; }
+  for (let i = els.length - 1; i >= 0; i--) { const el = els[i]; if (el.hidden || el.ulock) continue; if (onlyType && el.type !== onlyType) continue; if (hitEl(el, p)) return el; }
   return null;
 }
 function imgRec(el) { return el.img ? images.get(el.img) : null; }
@@ -1206,6 +1206,7 @@ const isErase = st => !!(st && st[0] && st[0][3]); // 첫 점의 네 번째 값�
 const hasErase = el => (el.strokes || []).some(isErase);
 function fxShapes(g, el, k, color, grow = 0) { // grow: 칠한 모양을 사방으로 이만큼 넓혀서 (부드럽게 할 때)
   g.fillStyle = color;
+  if (el.mask) fxMaskDraw(g, el, color);
   for (const [u, v, rx, ry] of el.shapes || []) { g.beginPath(); g.ellipse((u - 0.5) * el.w, (v - 0.5) * el.h, Math.max(0.5, rx * el.w + grow), Math.max(0.5, ry * el.h + grow), 0, 0, Math.PI * 2); g.fill(); }
   // 윤곽을 딴 모양 (pad: 윤곽 바깥으로 더 칠할 폭)
   const ex = (el.pad || 0) + grow;
@@ -1237,8 +1238,9 @@ function drawSoftPaint(ctx, el, k) {
   go.globalCompositeOperation = 'source-in'; go.fillStyle = el.color || '#ffffff'; go.fillRect(0, 0, W, H);
   ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.imageSmoothingQuality = 'high'; ctx.drawImage(out, x0, y0, W * q, H * q); ctx.restore();
 }
-function drawFxEl(ctx, el) {
+function drawFxEl(ctx, el, opt) {
   const k = Math.sqrt(el.w * el.h) / (el.s0 || 1);
+  if (el.kind === 'erase' || el.kind === 'clone' || el.kind === 'heal') { drawFixEl(ctx, el, k, opt); return; }
   if (el.kind === 'paint') { if (el.soft > 0 || hasErase(el)) drawSoftPaint(ctx, el, k); else fxShapes(ctx, el, k, el.color || '#ffffff'); return; }
   const m = ctx.getTransform(), cw = ctx.canvas.width, ch = ctx.canvas.height;
   const pts = [[-el.w / 2, -el.h / 2], [el.w / 2, -el.h / 2], [el.w / 2, el.h / 2], [-el.w / 2, el.h / 2]].map(([x, y]) => [m.a * x + m.c * y + m.e, m.b * x + m.d * y + m.f]);
@@ -1389,7 +1391,7 @@ function bmpGet(key, make) {
   return c;
 }
 function clearImgCaches(id) {
-  layerCache.clear();
+  layerCache.clear(); if (typeof advDrop === 'function') advDrop(id);
   if (!id) { bmpCache.clear(); bmpBytes = 0; return; }
   for (const k of [...bmpCache.keys()]) if (k.startsWith(id + '|')) { bmpBytes -= bmpCache.get(k).bytes; bmpCache.delete(k); }
 }
@@ -1408,13 +1410,14 @@ function imgSource(id, im, rec, dw, ctx, L) {
   const m = ctx.getTransform(), need = dw * Math.hypot(m.a, m.b);
   let lv = 1; while (rec.w / (lv * 2) >= need * 1.2 && lv < 64) lv *= 2;
   const cf = L ? colorFilter(L) : '', W = Math.max(1, Math.round(rec.w / lv)), H = Math.max(1, Math.round(rec.h / lv));
-  const bl = L ? Math.round(fx(L, 'blur') * W / dw * 2) / 2 : 0;
-  if (!cf && !bl && lv === 1) return { src: im, pad: 0 };
+  const bl = L ? Math.round(fx(L, 'blur') * W / dw * 2) / 2 : 0, ak = L ? advKey(L) : '';
+  if (!cf && !bl && !ak && lv === 1) return { src: im, pad: 0 };
   const P = bl > 0 ? Math.ceil(bl * 2.5) : 0;
-  const c = bmpGet(`${id}|${lv}|${cf}|${bl}`, () => {
+  const c = bmpGet(`${id}|${lv}|${cf}|${bl}|${ak}`, () => {
+    const base = ak ? (advProcess(id, im, W, H, L, lv) || im) : im; // 고급 보정 먼저, 그 위에 기본 보정
     const c = newCanvas(W + P * 2, H + P * 2), g = c.getContext('2d');
     const f = [cf, bl > 0 ? `blur(${bl}px)` : ''].filter(Boolean).join(' ');
-    if (f) g.filter = f; g.imageSmoothingQuality = 'high'; g.drawImage(im, P, P, W, H); return c;
+    if (f) g.filter = f; g.imageSmoothingQuality = 'high'; g.drawImage(base, P, P, W, H); return c;
   });
   return { src: c, pad: P * dw / W };
 }
@@ -1525,6 +1528,11 @@ function drawPanelBorderAA(ctx, el, soft) {
   return true;
 }
 function drawEl(ctx, el, opt) {
+  if (el.hidden) return; // 레이어 목록에서 숨긴 것
+  if ((el.eop ?? 100) < 100 || (el.eblend && el.eblend !== 'source-over')) { drawElGroup(ctx, el, opt, g => drawElInner(g, el, opt)); return; }
+  drawElInner(ctx, el, opt);
+}
+function drawElInner(ctx, el, opt) {
   ctx.save(); ctx.translate(el.x + el.w / 2, el.y + el.h / 2); if (el.rot) ctx.rotate(el.rot * DEG);
   const soft = aaSoft();
   if (soft > 0 && (el.type === 'bubble' || el.type === 'text' || el.type === 'draw') && drawVecAA(ctx, el, opt, soft)) { ctx.restore(); return; }
@@ -1534,7 +1542,7 @@ function drawEl(ctx, el, opt) {
     case 'text': drawTextEl(ctx, el, opt); break;
     case 'stamp': drawStamp(ctx, el, opt); break;
     case 'draw': drawDrawEl(ctx, el); break;
-    case 'fx': drawFxEl(ctx, el); break;
+    case 'fx': drawFxEl(ctx, el, opt); break;
   }
   ctx.restore();
 }
@@ -1547,7 +1555,8 @@ function elBounds(el) {
 }
 const inView = (b, v) => !v || !(b.x1 < v.x0 || b.x0 > v.x1 || b.y1 < v.y0 || b.y0 > v.y1);
 function drawPage(ctx, p, opt) {
-  ctx.fillStyle = p.bg || '#fff'; ctx.fillRect(0, 0, p.w, p.h);
+  if (p.bgT) { if (opt.screen) { ctx.save(); ctx.fillStyle = checkerPat(); ctx.fillRect(0, 0, p.w, p.h); ctx.restore(); } } // 투명 바탕: 화면에는 바둑판
+  else { ctx.fillStyle = p.bg || '#fff'; ctx.fillRect(0, 0, p.w, p.h); }
   const list = [];
   for (const el of p.els) { const b = elBounds(el); if (inView(b, opt.view)) list.push({ el, out: b.x0 < 0 || b.y0 < 0 || b.x1 > p.w || b.y1 > p.h }); }
   if (opt.screen && list.some(o => o.out)) {
@@ -1582,6 +1591,8 @@ function toPage(e) {
   return { x: (sx - originX) / zoom, y: (sy - originY) / zoom, sx, sy };
 }
 function requestRender() { if (!rq) { rq = true; requestAnimationFrame(render); } }
+let checkerP = null;
+function checkerPat() { if (checkerP) return checkerP; const c = newCanvas(16, 16), g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, 16, 16); g.fillStyle = '#d9dde3'; g.fillRect(0, 0, 8, 8); g.fillRect(8, 8, 8, 8); return checkerP = ctx.createPattern(c, 'repeat'); }
 function getDesk(dpr) {
   if (deskPat && deskDpr === dpr) return deskPat;
   const s = Math.round(9 * dpr), c = newCanvas(s, s);
@@ -1709,6 +1720,11 @@ function drawOverlay(dpr) {
   }
   if (mode === 'split') drawSplitPreview();
   if (mode === 'crop' && cropSt) drawCropOverlay();
+  if (mode === 'select') drawSelOverlay();
+  if (mode === 'brush' && cloneSrc && brushSt && brushSt.el.kind === 'clone') { // 도장: 복사할 곳 표시
+    const c = S(cloneSrc); ctx.save(); ctx.lineWidth = 2; ctx.strokeStyle = '#fff'; ctx.beginPath(); ctx.arc(c.x, c.y, 9, 0, Math.PI * 2); ctx.moveTo(c.x - 14, c.y); ctx.lineTo(c.x + 14, c.y); ctx.moveTo(c.x, c.y - 14); ctx.lineTo(c.x, c.y + 14); ctx.stroke();
+    ctx.lineWidth = 1; ctx.strokeStyle = '#000'; ctx.stroke(); ctx.restore();
+  }
   if (mode === 'brush' && brushHover) {
     const s = S(brushHover), r = Math.max(2, doc.defaults.fx.bw / 2 * zoom);
     ctx.save(); ctx.beginPath(); ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
@@ -1764,14 +1780,15 @@ function snapMove(bb, dx, dy) {
 function setMode(m, kind) {
   if (mode === 'pen' && m !== 'pen') finishPen();
   if (mode === 'brush') finishBrush();
-  mode = m; splitSt = null; penSt = null; brushSt = null; cropSt = null;
+  mode = m; splitSt = null; penSt = null; brushSt = null; cropSt = null; selSt = null;
   if (m === 'crop') { const p = page(); cropSt = { r: { x: 0, y: 0, w: p.w, h: p.h }, ratio: '0' }; sel = []; }
   if (m === 'split') splitSt = { kind: kind || 'line', phase: 'idle' };
   if (m === 'pen') { penSt = { strokes: [], cur: null, last: null }; sel = []; }
   if (m === 'brush') startBrush(kind);
+  if (m === 'select') { selStart(); sel = []; }
   imageEditId = null; closeMenus(); renderModebar(); renderProps(); updateHint(); requestRender();
   document.body.classList.toggle('moding', !!m);
-  $('#bPen').classList.toggle('on', m === 'pen'); $('#bSplit').classList.toggle('on', m === 'split'); $('#bBrush').classList.toggle('on', m === 'brush'); $('#bCrop').classList.toggle('on', m === 'crop');
+  $('#bPen').classList.toggle('on', m === 'pen'); $('#bSplit').classList.toggle('on', m === 'split'); $('#bBrush').classList.toggle('on', m === 'brush'); $('#bCrop').classList.toggle('on', m === 'crop'); $('#bSel').classList.toggle('on', m === 'select');
   scroller.style.cursor = m ? 'crosshair' : 'default';
 }
 function renderModebar() {
@@ -1789,12 +1806,14 @@ function renderModebar() {
     const D = doc.defaults.fx, el = brushSt && brushSt.el, kind = el ? el.kind : D.kind;
     mb.innerHTML = `<b>가리기</b>
       <div class="seg" title="칠하기(B) / 지우개(E): 지우개는 이미 가린 곳(자동 흰칠 포함)을 지워요"><button class="btn sm ${brushErase ? '' : 'on'}" data-mb="tool-paint">칠하기</button><button class="btn sm ${brushErase ? 'on' : ''}" data-mb="tool-erase">지우개</button></div>
-      ${brushErase ? '' : `<div class="seg">${[['blur', '블러'], ['mosaic', '모자이크'], ['paint', '흰칠']].map(([v, l]) => `<button class="btn sm ${kind === v ? 'on' : ''}" data-mb="k-${v}">${l}</button>`).join('')}</div>`}
+      ${brushErase ? '' : `<div class="seg">${[['blur', '블러'], ['mosaic', '모자이크'], ['paint', '흰칠'], ['erase', '지우기'], ['clone', '도장'], ['heal', '잡티 지우기']].map(([v, l]) => `<button class="btn sm ${kind === v ? 'on' : ''}" data-mb="k-${v}">${l}</button>`).join('')}</div>`}
       <label>굵기 <input type="range" id="mbBw" min="6" max="260" step="1" value="${D.bw}"></label>
-      ${brushErase ? '' : kind === 'paint' ? `<label>색 <input type="color" id="mbFc" value="${el ? el.color : D.color}"></label><label title="가장자리를 에어브러쉬처럼 흐리게 해요. 0이면 또렷하게">부드럽게 <input type="range" id="mbSoft" min="0" max="24" step="1" value="${el ? (el.soft ?? 0) : (D.soft ?? 4)}"></label>` : `<label>세기 <input type="range" id="mbStr" min="2" max="${kind === 'mosaic' ? 60 : 40}" step="1" value="${el ? el.str : D.str}"></label>`}
+      ${brushErase ? '' : (kind === 'erase' || kind === 'clone' || kind === 'heal') ? `<label title="가장자리를 부드럽게">부드럽게 <input type="range" id="mbSoft" min="0" max="24" step="1" value="${el ? (el.soft ?? 0) : (D.soft ?? 4)}"></label>${kind === 'clone' ? `<span class="mtxt">${cloneSrc ? 'Alt+클릭으로 복사할 곳을 바꿔요' : '먼저 Alt를 누른 채 복사할 곳을 클릭하세요'}</span>` : kind === 'heal' ? '<span class="mtxt">잡티 위를 칠하면 둘레 색으로 메워요</span>' : '<span class="mtxt">칠한 곳이 투명해져요 (PNG로 저장)</span>'}` : kind === 'paint' ? `<label>색 <input type="color" id="mbFc" value="${el ? el.color : D.color}"></label><label title="가장자리를 에어브러쉬처럼 흐리게 해요. 0이면 또렷하게">부드럽게 <input type="range" id="mbSoft" min="0" max="24" step="1" value="${el ? (el.soft ?? 0) : (D.soft ?? 4)}"></label>` : `<label>세기 <input type="range" id="mbStr" min="2" max="${kind === 'mosaic' ? 60 : 40}" step="1" value="${el ? el.str : D.str}"></label>`}
       <button class="btn sm" data-mb="undo">한 획 되돌리기</button>
       <button class="btn sm" data-mb="auto" title="이 페이지에서 성기를 자동으로 찾아 흰칠해요">자동 흰칠</button>
       <button class="btn sm primary" data-mb="done">다 칠했어요</button>`;
+  } else if (mode === 'select') {
+    mb.innerHTML = selModebar();
   } else if (mode === 'crop') {
     mb.innerHTML = `<b>자르기</b><span class="mtxt">남길 곳을 끌어서 고르세요. 가장자리를 끌면 크기가, 안쪽을 끌면 자리가 바뀌어요.</span>
       <div class="seg">${CROP_RATIOS.map(([v, l]) => `<button class="btn sm ${cropSt.ratio === v ? 'on' : ''}" data-mb="cr-${v}">${l}</button>`).join('')}</div>
@@ -1812,6 +1831,7 @@ function renderModebar() {
 $('#modebar').addEventListener('click', e => {
   const b = e.target.closest('[data-mb]'); if (!b) return;
   const a = b.dataset.mb;
+  if (mode === 'select' && selModebarAct(a)) return;
   if (a === 'line' || a === 'curve') { splitSt = { kind: a, phase: 'idle' }; renderModebar(); requestRender(); }
   else if (a === 'done') setMode(null);
   else if (a.startsWith('cr-') && cropSt) { cropSt.ratio = a.slice(3); cropFit(); renderModebar(); requestRender(); }
@@ -1886,7 +1906,12 @@ function rebuildFx(bs) {
 }
 function r4(v) { return Math.round(v * 10000) / 10000; }
 function brushDown(p, e) {
-  const bs = brushSt; if (!bs) return;
+  let bs = brushSt; if (!bs) return;
+  if (!brushErase && bs.el.kind === 'clone') { // 도장: Alt+클릭 = 복사할 곳, 칠하기 시작할 때 거리를 정해요
+    if (e.altKey) { if (bs.world.length) { finishBrush(); startBrush(); brushSt.el.kind = 'clone'; } cloneSrc = { x: p.x, y: p.y }; renderModebar(); requestRender(); return; }
+    if (!cloneSrc) { toast('먼저 Alt를 누른 채 복사해 올 곳을 클릭하세요'); return; }
+    if (!bs.world.some(st => !isErase(st))) { bs.el.cdx = cloneSrc.x - p.x; bs.el.cdy = cloneSrc.y - p.y; }
+  }
   bs.erase = brushErase;
   if (bs.erase) { bs.cur = [[p.x, p.y, doc.defaults.fx.bw, 1]]; bs.ext = new Map(); eraseApply(bs); }
   else { if (bs.isNew && !page().els.includes(bs.el)) page().els.push(bs.el); bs.cur = [[p.x, p.y, doc.defaults.fx.bw]]; }
@@ -2120,6 +2145,7 @@ function onDown(e) {
   if (mode === 'pen') { penDown(p, e); return; }
   if (mode === 'brush') { brushDown(p, e); return; }
   if (mode === 'crop') { cropDown(p, e); return; }
+  if (mode === 'select') { selDown(p, e); return; }
   if (sel.length === 1 && !imageEditId) {
     const el = findEl(sel[0]); const h = el && hitHandle(el, p);
     if (h) {
@@ -2164,6 +2190,7 @@ function onMove(e) {
   if (mode === 'pen') { if (drag) penMove(e); return; }
   if (mode === 'brush') { if (drag) brushMove(e); else { brushHover = p; requestRender(); } return; }
   if (mode === 'crop') { if (drag && drag.mode === 'crop') cropMove(p); else cropHover(p); return; }
+  if (mode === 'select') { if (drag && drag.mode === 'sel') selMove(p); return; }
   if (!drag) { updateHover(p); return; }
   const d = drag; guides = [];
   if (d.mode === 'move') {
@@ -2193,6 +2220,7 @@ function onMove(e) {
 }
 function onUp() {
   if (drag && drag.mode === 'crop') { drag = null; requestRender(); return; }
+  if (drag && drag.mode === 'sel') { selUp(); return; }
   if (drag && drag.mode === 'split') { splitUp(); return; }
   if (drag && drag.mode === 'pen') { penUp(); return; }
   if (drag && drag.mode === 'brush') { brushUp(); return; }
@@ -2358,7 +2386,7 @@ const TEXT_FIT = new Set(['text', 'font', 'fs', 'bold', 'italic', 'sw', 'sw2', '
 const BUBBLE_FIT = new Set(['text', 'font', 'fs', 'bold', 'italic', 'lh', 'shape', 'auto']);
 function getProp(o, k) {
   if (VIRT[k]) return VIRT[k].get(o);
-  if (o[k] === undefined) { if ((o.type === 'panel' || !o.type) && k in LDEF) return LDEF[k]; if ((o.type === 'panel' || !o.type) && k in FX) return FX[k]; }
+  if (o[k] === undefined) { if ((o.type === 'panel' || !o.type) && k in LDEF) return LDEF[k]; if ((o.type === 'panel' || !o.type) && k in FX) return FX[k]; if ((o.type === 'panel' || !o.type) && k in ADV) return ADV[k]; }
   return o[k];
 }
 function setProp(o, k, v) {
@@ -2473,7 +2501,7 @@ function panelProps(el) {
     ${row('세피아', range('sepia', 0, 100, 1))}
     ${row('색조', range('hue', -180, 180, 1))}
     <div class="btnrow">${check('gray', '흑백')}</div>`) + `
-    <div class="btnrow"><button class="btn sm" data-act="adj-reset">보정 처음대로</button></div>`, adjOn ? '켜짐' : '') : '') +
+    <div class="btnrow"><button class="btn sm" data-act="adj-reset">보정 처음대로</button></div>`, adjOn ? '켜짐' : '') : '') + (r ? advSec(el, A) : '') +
   sec('mood', '분위기', `
     <p class="muted small" style="margin:0 0 6px">한 번에 바꾸기</p>${moodBtns()}
     <div class="sub">${check('tintOn', '색 입히기', 'head')}
@@ -2608,10 +2636,10 @@ function drawProps() {
 function fxProps(el) {
   if (el.kind === 'paint' && el.soft === undefined) el.soft = 0; // 예전에 칠한 것은 또렷한 그대로
   return `<div class="sec"><h3>가리기</h3>
-    ${segBtns('fx-kind', el.kind, [['blur', '블러'], ['mosaic', '모자이크'], ['paint', '흰칠']])}
-    ${el.kind === 'paint' ? row('색', color('color')) + row('부드럽게', range('soft', 0, 24, 1)) : row('세기', range('str', 2, el.kind === 'mosaic' ? 60 : 40, 1))}
+    ${segBtns('fx-kind', el.kind, [['blur', '블러'], ['mosaic', '모자이크'], ['paint', '흰칠'], ['erase', '지우기'], ['clone', '도장'], ['heal', '잡티 지우기']])}
+    ${el.kind === 'paint' ? row('색', color('color')) + row('부드럽게', range('soft', 0, 24, 1)) : (el.kind === 'erase' || el.kind === 'clone' || el.kind === 'heal') ? row('부드럽게', range('soft', 0, 24, 1)) : row('세기', range('str', 2, el.kind === 'mosaic' ? 60 : 40, 1))}
     ${el.polys && el.polys.length ? row('윤곽 여유', range('pad', 0, 16, 1)) : ''}
-    <div class="btnrow"><button class="btn sm" data-act="fx-continue">이어서 칠하기</button></div>
+    ${el.mask ? '<p class="muted small">선택 도구로 만든 거예요.</p>' : '<div class="btnrow"><button class="btn sm" data-act="fx-continue">이어서 칠하기</button></div>'}
     ${el.inPanel ? `<p class="muted small">자동 흰칠로 칠한 거예요. 그 컷 안에만 칠해지고, 컷을 옮기면 같이 움직여요. 잘못 칠했으면 <kbd>Delete</kbd>로 지우세요.</p>` : ''}
     <p class="muted small">이 요소보다 아래에 있는 것만 가려져요. 말풍선이나 효과음까지 가리려면 '맨 앞으로'를 누르세요.</p>
   </div>${commonSec()}`;
@@ -2643,8 +2671,9 @@ function imgPageProps() {
     <div class="btnrow"><button class="btn sm" data-act="crop">자르기</button><button class="btn sm" data-act="rot-l">왼쪽으로 돌리기</button><button class="btn sm" data-act="rot-r">오른쪽으로 돌리기</button>${B ? '<button class="btn sm" data-act="flip-img">좌우 뒤집기</button>' : ''}</div>
     <div class="btnrow"><button class="btn sm" data-act="img-reset" ${changed ? '' : 'disabled'}>처음 상태로</button><button class="btn sm danger" data-act="img-del">목록에서 빼기</button></div>
     ${row('바탕색', `<input type="color" data-k="bg" data-scope="page">`)}
-    <p class="muted small">바탕색은 투명한 그림 뒤에 깔리는 색이에요.</p>
+    <p class="muted small">바탕색은 투명한 그림 뒤나 늘린 캔버스에 깔리는 색이에요.</p>
   </div>
+  ${sizeSec()}
   ${aaSec()}
   <div class="sec"><h3>이렇게 써요</h3><ol class="tips">
     <li>왼쪽 목록에서 고칠 그림을 눌러요. <kbd>PageUp</kbd>/<kbd>PageDown</kbd>으로 앞뒤 그림을 넘겨요.</li>
@@ -2695,7 +2724,7 @@ function renderProps() {
   const st = $('#right').scrollTop;
   propsEl.innerHTML = html;
   if (ss.length === 1) { const f = $('select[data-k="font"]', propsEl); if (f) f.value = ss[0].font; }
-  syncProps(); $('#right').scrollTop = st;
+  syncProps(); $('#right').scrollTop = st; renderLayersSoon();
 }
 propsEl.addEventListener('toggle', e => { const d = e.target; if (d.dataset && d.dataset.sec) { d.open ? openSecs.add(d.dataset.sec) : openSecs.delete(d.dataset.sec); } }, true);
 propsEl.addEventListener('input', e => {
@@ -2743,6 +2772,8 @@ async function stampWhite(el) {
 }
 function doAct(act, v) {
   const ss = selEls(), el = ss[0], pg = page();
+  if (act.startsWith('adv-')) { advAct(act, v); return; }
+  if (act.startsWith('sz-')) { sizeAct(act, v); return; }
   switch (act) {
     case 'shape': for (const o of ss) setProp(o, 'shape', v); break;
     case 'talign': for (const o of ss) setProp(o, 'align', v); break;
@@ -2861,6 +2892,9 @@ function deleteSel() {
   page().els = page().els.filter(e => !ids.has(e.id)); sel = []; imageEditId = null; commit(); renderProps(); requestRender();
 }
 
+/*@@ADV@@*/
+/*@@LAYERS@@*/
+/*@@SEL@@*/
 /* ================= 그림 보관함 ================= */
 let libT = null;
 function renderLibSoon() { if (isImg()) return; clearTimeout(libT); libT = setTimeout(renderLib, 120); }
@@ -3094,8 +3128,9 @@ function pageCmd(cmd) {
 /* ================= 탭, 힌트 ================= */
 function switchTab(t) {
   $$('.tab').forEach(b => b.classList.toggle('on', b.dataset.tab === t));
-  $('#tab-lib').hidden = t !== 'lib'; $('#tab-sfx').hidden = t !== 'sfx'; $('#tab-pages').hidden = t !== 'pages';
+  $('#tab-lib').hidden = t !== 'lib'; $('#tab-sfx').hidden = t !== 'sfx'; $('#tab-pages').hidden = t !== 'pages'; $('#tab-layers').hidden = t !== 'layers';
   if (t === 'pages') renderPages();
+  if (t === 'layers') renderLayers();
   if (t === 'sfx') renderStamps();
 }
 $$('.tab').forEach(b => b.addEventListener('click', () => switchTab(b.dataset.tab)));
@@ -3732,7 +3767,10 @@ async function renderImageFile(p, o) {
   const rec = p.img && images.get(p.img), st = rec && /^data:image\/(png|jpeg|webp)/.exec(rec.src || '');
   const type = o.fmt === 'jpg' ? 'image/jpeg' : o.fmt === 'png' ? 'image/png' : (st ? 'image/' + st[1] : 'image/png');
   const sc = o.scale, c = newCanvas(p.w * sc, p.h * sc), g = c.getContext('2d', { willReadFrequently: true });
-  g.setTransform(sc, 0, 0, sc, 0, 0); drawPage(g, p, { screen: false, rs: sc, view: { x0: 0, y0: 0, x1: p.w, y1: p.h } });
+  g.setTransform(sc, 0, 0, sc, 0, 0);
+  if (p.bgT && type === 'image/jpeg') { g.fillStyle = '#ffffff'; g.fillRect(0, 0, p.w, p.h); } // JPG는 투명이 없어서 흰색
+  drawPage(g, p, { screen: false, rs: sc, view: { x0: 0, y0: 0, x1: p.w, y1: p.h } });
+  if (type === 'image/jpeg') { g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = 'destination-over'; g.fillStyle = '#ffffff'; g.fillRect(0, 0, c.width, c.height); g.restore(); }
   const keep = o.meta === 'keep' && type === 'image/png' && rec && /^data:image\/png/.test(rec.src || '');
   if (keep) { // 자르거나 돌리지 않았을 때만 투명도 정보도 그대로
     const B = baseEl(p), im = imgCache.get(rec.id);
@@ -3913,6 +3951,11 @@ function openHelp() {
       <li><b>저장</b>: '내보내기'에서 PNG/JPG로 저장해요. 이미지 편집은 원래 이름 그대로, 여러 장이면 폴더째 ZIP으로 묶여요. 'NAI 정보'에서 생성 정보를 지울지 남길지 골라요.</li>
       <li><b>가장자리 매끄럽게</b>: 아무것도 안 고른 상태에서 오른쪽 아래 '가장자리 매끄럽게'로 말풍선·글자 가장자리를 더 곱게 할 수 있어요.</li>
       <li><b>보관</b>: 작업은 이 브라우저에 자동 저장돼요. 다른 컴퓨터로 옮기거나 백업하려면 '저장'으로 파일을 받아 두세요. 오른쪽 위 달 모양 버튼으로 어두운 화면을 켜요.</li>
+      <li><b>고급 보정</b>: 그림이나 컷을 고르면 오른쪽 '고급 보정'에서 빛·색, 곡선, 레벨, 색상별, 선명하게·필름 질감, 보정 프리셋을 써요. 같은 보정을 폴더나 모든 그림에 한 번에 넣을 수 있어요.</li>
+      <li><b>선택</b>: 위쪽 '선택'으로 사각형·타원·올가미·비슷한 색을 골라요(<kbd>Shift</kbd> 더하기, <kbd>Alt</kbd> 빼기). 고른 곳을 흐리게·모자이크·칠하기·지우기 하거나, '새 레이어로 복사'해서 그 부분만 보정해요.</li>
+      <li><b>고치기 붓</b>: '가리기'에서 지우기(투명), 도장(<kbd>Alt</kbd>+클릭으로 복사할 곳), 잡티 지우기를 골라 칠해요.</li>
+      <li><b>레이어</b>: 왼쪽 '레이어' 탭에서 숨기기·잠그기·끌어서 순서 바꾸기·불투명도·섞는 법을 바꿔요. 두 번 누르면 이름을 바꿔요.</li>
+      <li><b>크기</b>: 이미지 편집에서 아무것도 안 고르면 오른쪽 '크기 바꾸기'로 그림 크기, 캔버스 크기, 정사각형·4:5 여백을 바꿔요.</li>
     </ol>
     <p class="muted small" style="margin-top:12px">되돌리기 <kbd>Ctrl+Z</kbd>, 다시 하기 <kbd>Ctrl+Y</kbd>, 복제 <kbd>Ctrl+D</kbd>, 복사와 붙여넣기 <kbd>Ctrl+C</kbd>/<kbd>V</kbd>, 삭제 <kbd>Delete</kbd>, 조금씩 옮기기 방향키(<kbd>Shift</kbd>와 함께 10칸), 화면 끌기 <kbd>Space</kbd>+드래그, 확대 <kbd>Ctrl</kbd>+휠, 비율 유지 <kbd>Shift</kbd>+모서리, 자석 잠시 끄기 <kbd>Alt</kbd></p>
     <div class="foot">${window.POTATO_BUILD ? `<span class="muted small" style="margin-right:auto;align-self:center">감자 편집기 ${esc(window.POTATO_BUILD.version)}</span>` : ''}${appApi() ? '<button class="btn" id="helpUpd">업데이트 확인</button>' : ''}<button class="btn primary" data-close>알겠어요</button></div>`, { wide: true });
@@ -3924,7 +3967,7 @@ const CMDS = {
   'add-text': () => addText(), pen: () => setMode(mode === 'pen' ? null : 'pen'), brush: () => setMode(mode === 'brush' ? null : 'brush'),
   'zoom-in': () => zoomStep(1), 'zoom-out': () => zoomStep(-1), 'zoom-fit': fitView,
   export: openExportModal, help: openHelp, theme: () => setTheme(isDark() ? 'light' : 'dark'), gif: openGifStudio, import: () => pickFiles(false), 'import-dir': () => pickFiles(true), 'new-folder': newFolder,
-  'img-prev': () => navImg(-1), 'img-next': () => navImg(1), crop: () => setMode(mode === 'crop' ? null : 'crop'), autolayout: openAutoLayout,
+  'img-prev': () => navImg(-1), 'img-next': () => navImg(1), crop: () => setMode(mode === 'crop' ? null : 'crop'), select: () => setMode(mode === 'select' ? null : 'select'), autolayout: openAutoLayout,
   'import-stamp': () => $('#fileStamp').click(), 'import-pack': () => $('#filePack').click(),
   'page-add': () => pageCmd('page-add'), 'page-dup': () => pageCmd('page-dup'), 'page-up': () => pageCmd('page-up'), 'page-down': () => pageCmd('page-down'), 'page-del': () => pageCmd('page-del'),
 };
@@ -3976,6 +4019,7 @@ document.addEventListener('keydown', e => {
   if (mode === 'brush' && mod && k === 'z') { e.preventDefault(); brushUndo(); return; }
   if (mode === 'brush' && !mod && (k === 'e' || k === 'b')) { e.preventDefault(); brushErase = k === 'e'; if (brushSt) brushSt.erase = brushErase; renderModebar(); requestRender(); return; }
   if (mode === 'crop' && e.key === 'Enter') { e.preventDefault(); applyCrop(); return; }
+  if (mode === 'select' && (e.key === 'Enter' || e.key === 'Escape')) { e.preventDefault(); setMode(null); return; }
   if ((mode === 'pen' || mode === 'brush') && e.key === 'Enter') { e.preventDefault(); setMode(null); return; }
   if (mod && k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
   if (mod && k === 'y') { e.preventDefault(); redo(); return; }

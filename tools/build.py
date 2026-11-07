@@ -22,9 +22,10 @@ def ort_classic():
 def page(kind, extra):
     head = read(os.path.join(S, 'head.html')).rstrip('\n')
     main = read(os.path.join(S, 'main.js')).rstrip('\n')
-    cz = read(os.path.join(S, 'cz.js'))
-    assert main.count('/*@@CZ@@*/') == 1
-    main = main.replace('/*@@CZ@@*/\n', cz, 1)
+    # main.js 안의 /*@@이름@@*/ 자리에 src/이름(소문자).js를 끼워요 (자동 흰칠 cz, 고급 보정 adv 등)
+    for name in re.findall(r'/\*@@([A-Z0-9]+)@@\*/', main):
+        assert main.count(f'/*@@{name}@@*/') == 1, name
+        main = main.replace(f'/*@@{name}@@*/\n', read(os.path.join(S, name.lower() + '.js')), 1)
     assert main.startswith('<script>')
     build = '<script>window.POTATO_BUILD = ' + json.dumps({'kind': kind, 'version': VERSION}) + ';</script>'
     parts = [head, build, read(os.path.join(S, 'sfx-packs.html')).rstrip('\n'), main, NOTICE] + extra + ['</body>', '</html>']
