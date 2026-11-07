@@ -23,10 +23,10 @@ NAI 그림용 로컬 컷·이미지 편집기예요. 그림은 내 컴퓨터 안
 | `tools/make_packs.py` | 원본 모델을 받아 변환하고 팩(`packs/`)을 만들어요 |
 | `src-tauri/` | 설치판 껍데기(Tauri 2) |
 
-릴리스는 깃허브 액션이 만들어요.
+릴리스는 깃허브 액션이 만들어요. 액션 탭에서 직접 실행(Run workflow)할 수도 있어요.
 
-- `packs-N` 태그를 올리면 팩 릴리스가 생겨요.
-- `vX.Y.Z` 태그를 올리면 윈도우 설치판, HTML판, 업데이트 정보가 생겨요.
+- `src/cz.js`의 `CZ_PACK_TAG`(예: packs-1) 릴리스가 없으면 main에 올릴 때 팩 릴리스가 생겨요.
+- `src-tauri/tauri.conf.json`의 version을 올려 main에 올리면 그 버전의 윈도우 설치판, HTML판, 업데이트 정보가 생겨요.
 - 버전은 `src-tauri/tauri.conf.json`과 `src-tauri/Cargo.toml`에서 같이 올려요. 릴리스 설명은 `release-notes.md`에 써요.
 
 업데이트 서명 키는 저장소 Settings → Secrets → Actions에 `TAURI_SIGNING_PRIVATE_KEY`로 넣어 둬요. 키를 잃어버리면 이미 설치된 프로그램이 새 버전을 받지 못해요.

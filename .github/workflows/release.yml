@@ -1,13 +1,31 @@
-# 새 버전 내기: v로 시작하는 태그(예: v8.0.1)를 올리면 윈도우 설치 파일과 HTML판을 만들어 릴리스에 올려요
-# 설치된 감자 편집기는 이 릴리스의 latest.json을 보고 업데이트해요
+# 새 버전 내기: src-tauri/tauri.conf.json의 version을 올려 main에 올리면, 그 버전(v8.0.1 등) 릴리스가 아직 없을 때
+# 윈도우 설치 파일과 HTML판을 만들어 릴리스에 올려요. 설치된 감자 편집기는 최신 릴리스의 latest.json을 보고 업데이트해요
 name: release
 on:
   push:
-    tags: ['v*']
+    branches: [main]
+    paths: ['src-tauri/tauri.conf.json', '.github/workflows/release.yml']
+  workflow_dispatch:
 permissions:
   contents: write
 jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.v.outputs.tag }}
+      skip: ${{ steps.v.outputs.skip }}
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        run: |
+          tag="v$(python3 -c "import json; print(json.load(open('src-tauri/tauri.conf.json'))['version'])")"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if gh release view "$tag" -R "${{ github.repository }}" >/dev/null 2>&1; then echo "skip=1" >> "$GITHUB_OUTPUT"; echo "$tag 릴리스가 이미 있어요"; fi
   windows:
+    needs: check
+    if: needs.check.outputs.skip != '1'
     runs-on: windows-latest
     env:
       PYTHONIOENCODING: utf-8
@@ -42,8 +60,9 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: 감자 편집기 ${{ github.ref_name }}
+          tagName: ${{ needs.check.outputs.tag }}
+          releaseCommitish: ${{ github.sha }}
+          releaseName: 감자 편집기 ${{ needs.check.outputs.tag }}
           releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: false
           prerelease: false
@@ -51,7 +70,7 @@ jobs:
           assetNamePattern: PotatoEditor_[version]_[arch][setup][ext]
           args: ${{ steps.key.outputs.args }}
   html:
-    needs: windows
+    needs: [check, windows]
     runs-on: ubuntu-latest
     env:
       PYTHONIOENCODING: utf-8
@@ -68,5 +87,5 @@ jobs:
       - run: python tools/build.py full packs
       - name: HTML판 올리기
         run: |
-          cp "dist/감자편집기.html" "dist/PotatoEditor_${{ github.ref_name }}_html.html"
-          gh release upload "${{ github.ref_name }}" "dist/PotatoEditor_${{ github.ref_name }}_html.html" --clobber -R "${{ github.repository }}"
+          cp "dist/감자편집기.html" "dist/PotatoEditor_${{ needs.check.outputs.tag }}_html.html"
+          gh release upload "${{ needs.check.outputs.tag }}" "dist/PotatoEditor_${{ needs.check.outputs.tag }}_html.html" --clobber -R "${{ github.repository }}"
