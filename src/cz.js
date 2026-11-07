@@ -103,7 +103,7 @@ async function czBytes(id) { // 파일 안에 넣어 둔 압축 데이터를 원
 }
 /* ---- 팩 (exe판): 모델과 실행 도구는 처음 쓸 때 한 번 받아 두고 써요 ---- */
 // 팩 목록(packs.json)과 파일은 깃허브 Releases의 packs-N에 있어요. 팩이 바뀌면 N을 올리고 편집기도 같이 업데이트해요
-const CZ_PACK_TAG = 'packs-1';
+const CZ_PACK_TAG = 'packs-2';
 const CZ_PACK_URL = 'https://github.com/harp1455/Potato-editor/releases/download/' + CZ_PACK_TAG + '/';
 const czIsApp = () => !!(window.POTATO_BUILD && window.POTATO_BUILD.kind === 'app');
 const czTauri = () => (window.__TAURI__ && window.__TAURI__.fs && window.__TAURI__.upload) ? window.__TAURI__ : null;
@@ -114,16 +114,27 @@ async function czSha(u8) { return [...new Uint8Array(await crypto.subtle.digest(
 const czStore = (() => {
   const T = czTauri();
   if (T) {
-    const B = { baseDir: T.fs.BaseDirectory.AppData }, dir = 'packs/' + CZ_PACK_TAG;
-    let abs = null; const absDir = async () => abs || (abs = await T.path.join(await T.path.appDataDir(), 'packs', CZ_PACK_TAG));
+    const B = { baseDir: T.fs.BaseDirectory.AppData }, dir = 'packs/files';
+    let abs = null; const absDir = async () => abs || (abs = await T.path.join(await T.path.appDataDir(), 'packs', 'files'));
+    let moved = false;
+    const migrate = async () => { // 예전(packs/packs-1)에 받아 둔 파일은 옮겨 써요
+      if (moved) return; moved = true;
+      try {
+        if (!(await T.fs.exists('packs/packs-1', B))) return;
+        await T.fs.mkdir(dir, Object.assign({ recursive: true }, B));
+        for (const e of await T.fs.readDir('packs/packs-1', B)) if (e.isFile && !e.name.endsWith('.json') && !(await T.fs.exists(dir + '/' + e.name, B))) await T.fs.rename('packs/packs-1/' + e.name, dir + '/' + e.name, { oldPathBaseDir: B.baseDir, newPathBaseDir: B.baseDir });
+        await T.fs.remove('packs/packs-1', Object.assign({ recursive: true }, B));
+      } catch (_) { }
+    };
     return {
+      migrate,
       async size(f) { try { if (!(await T.fs.exists(dir + '/' + f, B))) return -1; return (await T.fs.stat(dir + '/' + f, B)).size; } catch (_) { return -1; } },
       async read(f) { return new Uint8Array(await T.fs.readFile(dir + '/' + f, B)); },
-      async fetchTo(f, onBytes) { // 받아서 .part로 → 다 받으면 이름 바꾸기
+      async fetchTo(f0, onBytes, saveAs) { // 받아서 .part로 → 다 받으면 이름 바꾸기
         await T.fs.mkdir(dir, Object.assign({ recursive: true }, B));
-        const part = f + '.part';
+        const f = saveAs || f0, part = f + '.part';
         try { await T.fs.remove(dir + '/' + part, B); } catch (_) { }
-        await T.upload.download(CZ_PACK_URL + f, await T.path.join(await absDir(), part), p => onBytes(p.progressTotal || 0));
+        await T.upload.download(CZ_PACK_URL + f0, await T.path.join(await absDir(), part), p => onBytes(p.progressTotal || 0));
         return {
           read: async () => new Uint8Array(await T.fs.readFile(dir + '/' + part, B)),
           keep: async () => { try { await T.fs.remove(dir + '/' + f, B); } catch (_) { } await T.fs.rename(dir + '/' + part, dir + '/' + f, { oldPathBaseDir: B.baseDir, newPathBaseDir: B.baseDir }); },
@@ -133,12 +144,13 @@ const czStore = (() => {
       async remove(f) { try { await T.fs.remove(dir + '/' + f, B); } catch (_) { } },
     };
   }
-  const base = new URL('packs/', location.href).href, cname = 'potato-' + CZ_PACK_TAG;
+  const base = new URL('packs/', location.href).href, cname = 'potato-packs';
   return {
+    async migrate() { },
     async size(f) { try { const r = await (await caches.open(cname)).match(base + f); return r ? (await r.arrayBuffer()).byteLength : -1; } catch (_) { return -1; } },
     async read(f) { const r = await (await caches.open(cname)).match(base + f); if (!r) throw new Error('nopack'); return new Uint8Array(await r.arrayBuffer()); },
-    async fetchTo(f, onBytes) {
-      const res = await fetch(base + f, { cache: 'no-store' }); if (!res.ok) throw new Error('HTTP ' + res.status);
+    async fetchTo(f0, onBytes, saveAs) {
+      const f = saveAs || f0, res = await fetch(base + f0, { cache: 'no-store' }); if (!res.ok) throw new Error('HTTP ' + res.status);
       const rd = res.body.getReader(), parts = []; let n = 0;
       for (;;) { const { done, value } = await rd.read(); if (done) break; parts.push(value); n += value.length; onBytes(n); }
       const u8 = new Uint8Array(n); let o = 0; for (const p of parts) { u8.set(p, o); o += p.length; }
@@ -150,9 +162,11 @@ const czStore = (() => {
 // 팩 목록: 받아 둔 게 있으면 그걸, 없으면 인터넷에서
 async function czPackMan(online) {
   if (czPk.man) return czPk.man;
-  if (await czStore.size('packs.json') > 0) { try { return czPk.man = JSON.parse(new TextDecoder().decode(await czStore.read('packs.json'))); } catch (_) { } }
+  await czStore.migrate();
+  const mf = CZ_PACK_TAG + '.json';
+  if (await czStore.size(mf) > 0) { try { return czPk.man = JSON.parse(new TextDecoder().decode(await czStore.read(mf))); } catch (_) { } }
   if (!online) return null;
-  const t = await czStore.fetchTo('packs.json', () => { });
+  const t = await czStore.fetchTo('packs.json', () => { }, mf);
   const man = JSON.parse(new TextDecoder().decode(await t.read()));
   if (!man || !Array.isArray(man.files) || !man.packs) { await t.drop(); throw new Error('팩 목록 모양이 이상해요'); }
   await t.keep(); return czPk.man = man;
@@ -198,19 +212,19 @@ async function czPackDel(pack) {
 }
 // 자동 흰칠 시작 전: 필요한 팩이 없으면 받을지 물어봐요. 준비되면 true
 const czNeedPacks = () => ['base'].concat(czCfg.model === 'precise' ? ['precise'] : []);
-async function czPacksReady() {
+async function czPacksReady(need) {
   if (!czIsApp()) return true;
   let st;
   try { st = await czPackState(true); }
   catch (e) { toast('팩 목록을 받지 못했어요. 인터넷 연결을 확인해 주세요. (' + String((e && e.message) || e).slice(0, 60) + ')', 5200); return false; }
-  const miss = czNeedPacks().filter(k => !st[k]);
+  const miss = (need || czNeedPacks()).filter(k => !st[k]);
   return miss.length ? czPackAsk(miss) : true;
 }
 function czPackAsk(miss) {
   return new Promise(resolve => {
     const man = czPk.man, size = miss.reduce((a, k) => a + man.packs[k].size, 0);
-    const m = modal(`<h2>자동 흰칠 팩 받기</h2>
-      <p class="sub">자동 흰칠을 쓰려면 아래 팩을 한 번 받아야 해요. 받은 뒤에는 인터넷 없이 써요. 그림은 어디로도 보내지 않아요.</p>
+    const m = modal(`<h2>${miss.some(k => k === 'bg' || k === 'sr') ? 'AI 팩 받기' : '자동 흰칠 팩 받기'}</h2>
+      <p class="sub">${miss.some(k => k === 'bg' || k === 'sr') ? '이 기능' : '자동 흰칠'}을 쓰려면 아래 팩을 한 번 받아야 해요. 받은 뒤에는 인터넷 없이 써요. 그림은 어디로도 보내지 않아요.</p>
       <div class="czpk-list">${miss.map(k => `<div class="czpk"><b>${man.packs[k].label}</b> <span class="muted small">${czMB(man.packs[k].size)} · ${man.packs[k].desc}</span></div>`).join('')}</div>
       <div class="czbar"><i id="czPkBar"></i></div><p class="muted small" id="czPkMsg">&nbsp;</p>
       <div class="foot"><button class="btn" id="czPkNo">나중에</button><button class="btn primary" id="czPkGo">받기 (${czMB(size)})</button></div>`);

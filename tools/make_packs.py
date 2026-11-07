@@ -18,6 +18,12 @@ SRC = {  # 원본: 주소 + sha256 (주소 내용이 바뀌면 멈춰요)
               'sha256': 'a12ac5532e93be9dfeb96a77fc3f3647791335c9df0de9a18fcd503f7877a828'},
     'sam_e': {'url': HF.format(repo='Acly/MobileSAM', rev='0d3b403339b4674a82493d5e97964dd78089ddc8', path='mobile_sam_image_encoder.onnx'),
               'sha256': '580f5fb648ea1062c0aabc26217aed56921985f03f0cbbd852bba81d760cc749'},
+    'isnet': {'url': HF.format(repo='skytnt/anime-seg', rev='493cb60893f47441b26ec4fb9a306bce9e342982', path='isnetis.onnx'),
+              'sha256': 'f15622d853e8260172812b657053460e20806f04b9e05147d49af7bed31a6e99'},
+    'sr4': {'url': HF.format(repo='deepghs/imgutils-models', rev='35e0ed8f35ce0dbea674568161a48b31ba7d2a99', path='real_esrgan/RealESRGAN_x4plus_anime_4B32F.onnx'),
+            'sha256': '2208c7ae8db793330abf1248fbce15585ad317e921c456265572836b92926c9a'},
+    'sr6': {'url': HF.format(repo='deepghs/imgutils-models', rev='35e0ed8f35ce0dbea674568161a48b31ba7d2a99', path='real_esrgan/RealESRGAN_x4plus_anime_6B.onnx'),
+            'sha256': '2648cab4c4343541c1aa291c6754e9e8edbe7a813fffc2a677423dd12cb6b7f7'},
     'sam_d': {'url': HF.format(repo='Acly/MobileSAM', rev='0d3b403339b4674a82493d5e97964dd78089ddc8', path='sam_mask_decoder_multi.onnx'),
               'sha256': '8976b90a87ba50a6a72217a5ff994f7d25ce16f2229fcc1ed259e1294c622ffe'},
 }
@@ -30,9 +36,14 @@ FILES = [
     ('czM_samE', 'sam_e', 'fp16w', 'mobilesam-encoder.onnx.gz', 'base'),
     ('czM_samD', 'sam_d', 'fp16w', 'mobilesam-decoder.onnx.gz', 'base'),
     ('czM_segM', 'seg_m', 'fp16to32', 'nsfw-segm-medium.onnx.gz', 'precise'),
+    ('czM_isnet', 'isnet', 'fp16w', 'anime-seg-isnetis.onnx.gz', 'bg'),
+    ('czM_sr4', 'sr4', 'fp16w', 'realesrgan-anime-4b32f.onnx.gz', 'sr'),
+    ('czM_sr6', 'sr6', 'fp16w', 'realesrgan-anime-6b.onnx.gz', 'sr'),
 ]
 PACKS = {'base': {'label': '기본 팩', 'desc': "AI 실행 도구, 찾기 모델, '빠르게' 모양 모델, 윤곽 따기"},
-         'precise': {'label': '정밀 팩', 'desc': "'정밀하게' 모양 모델"}}
+         'precise': {'label': '정밀 팩', 'desc': "'정밀하게' 모양 모델"},
+         'bg': {'label': 'AI 배경 지우기 팩', 'desc': '애니 캐릭터만 따내는 모델 (skytnt/anime-seg)'},
+         'sr': {'label': 'AI 화질 키우기 팩', 'desc': 'Real-ESRGAN 애니 업스케일 모델 (빠르게·고화질)'}}
 sha = lambda b: hashlib.sha256(b).hexdigest()
 
 

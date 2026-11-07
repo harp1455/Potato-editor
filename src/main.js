@@ -2529,7 +2529,7 @@ function panelProps(el) {
     ${row('세피아', range('sepia', 0, 100, 1))}
     ${row('색조', range('hue', -180, 180, 1))}
     <div class="btnrow">${check('gray', '흑백')}</div>`) + `
-    <div class="btnrow"><button class="btn sm" data-act="adj-reset">보정 처음대로</button></div>`, adjOn ? '켜짐' : '') : '') + (r ? advSec(el, A) : '') +
+    <div class="btnrow"><button class="btn sm" data-act="adj-reset">보정 처음대로</button></div>`, adjOn ? '켜짐' : '') : '') + (r ? advSec(el, A) + aiSec() : '') +
   sec('mood', '분위기', `
     <p class="muted small" style="margin:0 0 6px">한 번에 바꾸기</p>${moodBtns()}
     <div class="sub">${check('tintOn', '색 입히기', 'head')}
@@ -2802,6 +2802,7 @@ function doAct(act, v) {
   const ss = selEls(), el = ss[0], pg = page();
   if (act.startsWith('adv-')) { advAct(act, v); return; }
   if (act.startsWith('sz-')) { sizeAct(act, v); return; }
+  if (act.startsWith('ai-')) { aiAct(act, v); return; }
   switch (act) {
     case 'shape': for (const o of ss) setProp(o, 'shape', v); break;
     case 'talign': for (const o of ss) setProp(o, 'align', v); break;
@@ -2923,6 +2924,7 @@ function deleteSel() {
 /*@@ADV@@*/
 /*@@LAYERS@@*/
 /*@@SEL@@*/
+/*@@AI@@*/
 /* ================= 그림 보관함 ================= */
 let libT = null;
 function renderLibSoon() { if (isImg()) return; clearTimeout(libT); libT = setTimeout(renderLib, 120); }
@@ -3834,7 +3836,7 @@ async function renderImageFile(p, o) {
   const keep = o.meta === 'keep' && type === 'image/png' && rec && /^data:image\/png/.test(rec.src || '');
   if (keep) { // 자르거나 돌리지 않았을 때만 투명도 정보도 그대로
     const B = baseEl(p), im = imgCache.get(rec.id);
-    if (sc === 1 && B && !B.rot && !B.flip && Math.abs(B.x) < 0.01 && Math.abs(B.y) < 0.01 && p.w === rec.w && p.h === rec.h && Math.abs(B.w - p.w) < 0.01 && Math.abs(B.h - p.h) < 0.01 && im && im.complete) copyAlpha(c, im);
+    if (sc === 1 && B && B.img === p.img && !B.rot && !B.flip && Math.abs(B.x) < 0.01 && Math.abs(B.y) < 0.01 && p.w === rec.w && p.h === rec.h && Math.abs(B.w - p.w) < 0.01 && Math.abs(B.h - p.h) < 0.01 && im && im.complete) copyAlpha(c, im);
   } else if (type === 'image/png') flattenAlpha(c);
   let blob = await new Promise(r => c.toBlob(r, type, 0.93)); if (!blob) throw new Error('canvas');
   if (keep) blob = await pngWithText(blob, pngTextChunks(b64ToBuf(rec.src.slice(rec.src.indexOf(',') + 1))));
@@ -4014,6 +4016,7 @@ function openHelp() {
       <li><b>고급 보정</b>: 그림이나 컷을 고르면 오른쪽 '고급 보정'에서 빛·색, 곡선, 레벨, 색상별, 선명하게·필름 질감, 보정 프리셋을 써요. 같은 보정을 폴더나 모든 그림에 한 번에 넣을 수 있어요.</li>
       <li><b>선택</b>: 위쪽 '선택'으로 사각형·타원·올가미·비슷한 색을 골라요(<kbd>Shift</kbd> 더하기, <kbd>Alt</kbd> 빼기). 고른 곳을 흐리게·모자이크·칠하기·지우기 하거나, '새 레이어로 복사'해서 그 부분만 보정해요.</li>
       <li><b>고치기 붓</b>: '가리기'에서 지우기(투명), 도장(<kbd>Alt</kbd>+클릭으로 복사할 곳), 잡티 지우기를 골라 칠해요.</li>
+      <li><b>AI 도구</b> (설치판): 그림을 고르면 오른쪽 'AI 도구'에서 배경 지우기·인물만 새 레이어로·배경만 흐리게, 화질 키우기(2배·4배)를 써요. 처음 쓸 때 팩을 받아요.</li>
       <li><b>레이어</b>: 왼쪽 '레이어' 탭에서 숨기기·잠그기·끌어서 순서 바꾸기·불투명도·섞는 법을 바꿔요. 두 번 누르면 이름을 바꿔요.</li>
       <li><b>크기</b>: 이미지 편집에서 아무것도 안 고르면 오른쪽 '크기 바꾸기'로 그림 크기, 캔버스 크기, 정사각형·4:5 여백을 바꿔요.</li>
     </ol>

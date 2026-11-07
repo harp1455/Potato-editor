@@ -44,7 +44,8 @@ def build_app():
 def build_full(packdir):
     man = json.load(open(os.path.join(packdir, 'packs.json'), encoding='utf-8'))
     extra = ['<script type="text/plain" id="czOrt">' + ort_classic() + '</script>']
-    for f in man['files']:  # 팩 파일은 이미 gzip이라 그대로 base64만
+    for f in man['files']:  # 팩 파일은 이미 gzip이라 그대로 base64만 (HTML판에는 자동 흰칠 팩만, AI 팩은 설치판 전용)
+        if f['pack'] not in ('base', 'precise'): continue
         b = open(os.path.join(packdir, f['file']), 'rb').read()
         extra.append(f'<script type="application/octet-stream" id="{f["id"]}">' + base64.b64encode(b).decode() + '</script>')
     html = page('full', extra)

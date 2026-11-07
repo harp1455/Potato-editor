@@ -8,6 +8,10 @@
   - MobileSAM : Apache License 2.0 (https://github.com/ChaoningZhang/MobileSAM, 전문 https://www.apache.org/licenses/LICENSE-2.0)
       ONNX 변환: Acly/MobileSAM, MIT License (https://huggingface.co/Acly/MobileSAM)
       바꾼 점: 가중치를 16비트로 줄여 저장
+  - skytnt/anime-seg isnetis : Apache License 2.0 (https://huggingface.co/skytnt/anime-seg)  ※ 설치판 AI 팩
+      바꾼 점: 가중치를 16비트로 줄여 저장
+  - Real-ESRGAN RealESRGAN_x4plus_anime_6B, 4B32F : BSD-3-Clause, Copyright (c) 2021 Xintao Wang (https://github.com/xinntao/Real-ESRGAN)
+      ONNX 변환: deepghs/imgutils-models, MIT License. 바꾼 점: 가중치를 16비트로 줄여 저장  ※ 설치판 AI 팩
   참고: 두 찾기 모델은 Ultralytics YOLO 계열 구조예요. Ultralytics는 자기 도구로 학습한 모델에 AGPL-3.0이 적용된다고 보고 있어서,
         이 프로그램을 팔거나 상업 제품에 넣으려면 따로 확인이 필요해요.
 
