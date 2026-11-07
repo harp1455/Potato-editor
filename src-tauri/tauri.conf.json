@@ -1,0 +1,56 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "감자 편집기",
+  "mainBinaryName": "potato-editor",
+  "version": "8.0.0",
+  "identifier": "com.harp1455.potatoeditor",
+  "build": {
+    "frontendDist": "../dist/app",
+    "beforeBuildCommand": "python tools/build.py app"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "감자 편집기",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 900,
+        "minHeight": 600,
+        "center": true,
+        "dragDropEnabled": false
+      }
+    ],
+    "security": {
+      "csp": null,
+      "headers": {
+        "Cross-Origin-Opener-Policy": "same-origin",
+        "Cross-Origin-Embedder-Policy": "require-corp"
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "createUpdaterArtifacts": true,
+    "publisher": "harp1455",
+    "shortDescription": "NAI 그림용 컷·이미지 편집기",
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
+    "windows": {
+      "webviewInstallMode": { "type": "downloadBootstrapper", "silent": true },
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["Korean"],
+        "displayLanguageSelector": false
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDcyMjM3NUVFRkVGOUNFOTYKUldTV3p2bis3blVqY3BHOWtRS3VEZkQxK3k3Szdwc0cwWFluOW4xTWYrRFB6bjcwR3l3WFZiNnAK",
+      "endpoints": ["https://github.com/harp1455/Potato-editor/releases/latest/download/latest.json"],
+      "windows": { "installMode": "passive" }
+    }
+  }
+}

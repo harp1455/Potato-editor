@@ -1,0 +1,27 @@
+# 자동 흰칠 팩 만들기: packs-N 태그를 올리면 원본 모델을 받아 변환하고 같은 이름의 릴리스에 올려요
+name: packs
+on:
+  push:
+    tags: ['packs-*']
+permissions:
+  contents: write
+jobs:
+  packs:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install onnx==1.23.2 numpy
+      - run: python tools/make_packs.py --out packs
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: 자동 흰칠 팩 (${{ github.ref_name }})
+          body: 감자 편집기가 자동 흰칠을 처음 쓸 때 받아 가는 모델 팩이에요. 직접 받을 필요는 없어요.
+          prerelease: true
+          make_latest: false
+          files: packs/*
