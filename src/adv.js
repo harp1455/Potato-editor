@@ -352,7 +352,7 @@ function advAct(act, v) {
     }
     case 'adv-apply': {
       const st = advState(A), fo = page().folder;
-      const idx = realIdx().filter(i => v === 'all' || doc.pages[i].folder === fo);
+      const idx = realIdx().filter(i => v === 'all' || inFolder(doc.pages[i].folder, fo));
       let n = 0;
       for (const i of idx) { const P = doc.pages[i], B = P.els.find(e => e.type === 'panel' && e.lock); if (B && B !== el) { advSetState(B, st); n++; } }
       commit(); renderLib(); toast(`${n}장에 같은 보정을 넣었어요`); requestRender(); return;

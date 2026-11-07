@@ -198,9 +198,31 @@ const selEls = () => sel.map(findEl).filter(Boolean);
 const isImg = () => doc.mode === 'image';
 const realIdx = () => doc.pages.map((p, i) => p.ph ? -1 : i).filter(i => i >= 0);
 const folderById = id => (doc.folders || []).find(f => f.id === id) || null;
-function ensureFolder(name) {
-  name = String(name || '').trim() || '새 폴더'; doc.folders = doc.folders || [];
-  let f = doc.folders.find(x => x.name === name); if (!f) { f = { id: 'f_' + uid(), name }; doc.folders.push(f); } return f;
+// 폴더는 나무 모양이에요: { id, name(그 칸 이름), parent(위 폴더 id 또는 null) }
+const folderKids = pid => (doc.folders || []).filter(f => (f.parent || null) === (pid || null));
+function folderPath(id, sep = '/') { const out = []; let f = folderById(id), n = 0; while (f && n++ < 64) { out.unshift(f.name); f = f.parent ? folderById(f.parent) : null; } return out.join(sep); }
+function folderDesc(id) { const out = new Set([id]); let grow = true; while (grow) { grow = false; for (const f of doc.folders || []) if (f.parent && out.has(f.parent) && !out.has(f.id)) { out.add(f.id); grow = true; } } return out; }
+const inFolder = (fid, root) => !!fid && !!root && folderDesc(root).has(fid); // 그 폴더나 그 아래 폴더에 있나
+const folderDepth = id => { let d = 0, f = folderById(id); while (f && f.parent && d < 64) { d++; f = folderById(f.parent); } return d; };
+// 'A/B/C' 같은 경로를 base 아래에 차례로 만들고 맨 끝 폴더를 돌려줘요
+function ensureFolder(name, base) {
+  doc.folders = doc.folders || [];
+  const segs = String(name || '').split('/').map(x => x.trim()).filter(Boolean); if (!segs.length) segs.push('새 폴더');
+  let pid = base || null, f = null;
+  for (const nm of segs) { f = doc.folders.find(x => (x.parent || null) === pid && x.name === nm); if (!f) { f = { id: 'f_' + uid(), name: nm, parent: pid }; doc.folders.push(f); } pid = f.id; }
+  return f;
+}
+// 예전 작업(이름에 '/'가 든 폴더)을 나무 모양으로
+function migrateFolders(d) {
+  const F = d.folders || []; if (!F.some(f => f.name && f.name.includes('/') && !f.parent)) return;
+  const byPath = new Map();
+  const get = (path) => { if (byPath.has(path)) return byPath.get(path); const i = path.lastIndexOf('/'), pid = i < 0 ? null : get(path.slice(0, i)), nm = path.slice(i + 1);
+    let f = F.find(x => !x.name.includes('/') && (x.parent || null) === pid && x.name === nm); if (!f) { f = { id: 'f_' + uid(), name: nm, parent: pid }; F.push(f); } byPath.set(path, f.id); return f.id; };
+  for (const f of F.slice()) if (f.name.includes('/') && !f.parent) { const i = f.name.lastIndexOf('/'); f.parent = get(f.name.slice(0, i)); f.name = f.name.slice(i + 1); }
+}
+function folderOptions(cur) { // 나무 순서대로, 들여쓰기
+  const out = []; const walk = (pid, d) => { for (const f of folderKids(pid)) { out.push(`<option value="${f.id}" ${f.id === cur ? 'selected' : ''}>${'\u3000'.repeat(d)}${d ? '└ ' : ''}${esc(f.name)}</option>`); walk(f.id, d + 1); } };
+  walk(null, 0); return out.join('');
 }
 function phPage() { const p = newPage(800, 600, '그림 없음'); p.ph = true; return p; }
 function makeImagePage(id, folder) {
@@ -212,6 +234,7 @@ function normalizeDoc(d) {
   const D = DEFAULTS();
   const out = { name: d.name || '새 작품', mode: d.mode === 'image' ? 'image' : 'cut', folders: Array.isArray(d.folders) ? d.folders : [], pages: d.pages && d.pages.length ? d.pages : [newPage(800, 4000, '페이지 1')], cur: clamp(d.cur | 0, 0, (d.pages || [1]).length - 1), defaults: D };
   if (d.defaults) for (const k of Object.keys(D)) Object.assign(D[k], d.defaults[k] || {});
+  migrateFolders(out);
   return out;
 }
 
@@ -341,17 +364,22 @@ async function importFiles(files) {
 const dirOf = path => { const i = String(path || '').lastIndexOf('/'); return i > 0 ? String(path).slice(0, i) : null; };
 async function importItems(items, intoFolder) { // [{file, dir}] → [{id, folder}] (폴더 이름 그대로 묶어요)
   items = items.filter(it => it.file && isImageFile(it.file));
-  // 폴더 하나를 골랐는데 안에 하위 폴더가 있으면, 하위 폴더 이름만 써요 (예: 작업/캐릭터A → 캐릭터A)
-  const tops = new Set(items.filter(it => it.dir).map(it => it.dir.split('/')[0]));
-  if (tops.size === 1) { const T = [...tops][0]; if (items.some(it => it.dir && it.dir.startsWith(T + '/'))) for (const it of items) if (it.dir && it.dir.startsWith(T + '/')) it.dir = it.dir.slice(T.length + 1); }
-  items.sort((a, b) => ((a.dir || '') + '/' + (a.file.name || '')).localeCompare((b.dir || '') + '/' + (b.file.name || ''), 'ko', { numeric: true }));
+  // 폴더 구조는 디스크 그대로 나무 모양으로 만들어요 (작업/캐릭터A/표정 → 작업 › 캐릭터A › 표정)
+  // 목록에 보이는 순서대로 (폴더마다 그 폴더 그림 먼저, 그다음 하위 폴더)
+  const cmpS = (x, y) => x.localeCompare(y, 'ko', { numeric: true });
+  items.sort((a, b) => {
+    const A = a.dir ? a.dir.split('/') : [], B = b.dir ? b.dir.split('/') : [];
+    for (let i = 0; i < Math.min(A.length, B.length); i++) { const c = cmpS(A[i], B[i]); if (c) return c; }
+    if (A.length !== B.length) return A.length - B.length;
+    return cmpS(a.file.name || '', b.file.name || '');
+  });
   const out = [], many = items.length > 6;
   for (let i = 0; i < items.length; i++) {
     const it = items[i];
     if (many && i % 4 === 0) toast(`그림 불러오는 중… ${i + 1} / ${items.length}`, 2000);
     try {
       const src = await readAsDataURL(it.file), im = await loadImg(src);
-      const fid = it.dir ? ensureFolder(it.dir).id : (intoFolder || null);
+      const fid = it.dir ? ensureFolder(it.dir, intoFolder || null).id : (intoFolder || null);
       const rec = { id: uid(), name: it.file.name || '붙여넣은 그림', src, w: im.naturalWidth, h: im.naturalHeight, folder: fid };
       addImageRecord(rec, true, im); out.push({ id: rec.id, folder: fid });
     } catch (e) { toast(`${it.file.name || '그림'}을 열지 못했어요`); }
@@ -2667,7 +2695,7 @@ function imgPageProps() {
   const changed = p.els.length > 1 || (rec && (p.w !== rec.w || p.h !== rec.h)) || (B && (B.rot || B.flip));
   return `<div class="sec"><h3>이 그림</h3>
     <div class="imginfo"><span>이름</span><span title="${esc(p.name)}">${esc(p.name)}</span><span>크기</span><span>${p.w} × ${p.h}${rec && (rec.w !== p.w || rec.h !== p.h) ? ` (원본 ${rec.w} × ${rec.h})` : ''}</span></div>
-    ${row('폴더', `<select data-act="pg-folder"><option value="">폴더 없음</option>${(doc.folders || []).map(f => `<option value="${f.id}" ${f.id === p.folder ? 'selected' : ''}>${esc(f.name)}</option>`).join('')}</select>`)}
+    ${row('폴더', `<select data-act="pg-folder"><option value="">폴더 없음</option>${folderOptions(p.folder)}</select>`)}
     <div class="btnrow"><button class="btn sm" data-act="crop">자르기</button><button class="btn sm" data-act="rot-l">왼쪽으로 돌리기</button><button class="btn sm" data-act="rot-r">오른쪽으로 돌리기</button>${B ? '<button class="btn sm" data-act="flip-img">좌우 뒤집기</button>' : ''}</div>
     <div class="btnrow"><button class="btn sm" data-act="img-reset" ${changed ? '' : 'disabled'}>처음 상태로</button><button class="btn sm danger" data-act="img-del">목록에서 빼기</button></div>
     ${row('바탕색', `<input type="color" data-k="bg" data-scope="page">`)}
@@ -2823,7 +2851,7 @@ function doAct(act, v) {
     }
     case 'img-del': deleteImagePage(doc.cur); return;
     case 'copy-all': copyToPages(realIdx()); return;
-    case 'copy-fold': copyToPages(realIdx().filter(i => doc.pages[i].folder === pg.folder)); return;
+    case 'copy-fold': copyToPages(realIdx().filter(i => inFolder(doc.pages[i].folder, pg.folder))); return;
     case 'rot0': if (el) el.rot = 0; break;
     case 'front': case 'back': case 'forward': case 'backward': layer(act); break;
     case 'dup': duplicateSel(); return;
@@ -2901,12 +2929,26 @@ function renderLibSoon() { if (isImg()) return; clearTimeout(libT); libT = setTi
 const closedFolders = new Set();
 function foldHead(f, n) {
   if (!f) return `<div class="fold none" data-fold="" title="그림을 여기로 끌어오면 폴더에서 빠져요">폴더 없음 <span class="n">${n}</span></div>`;
-  return `<div class="fold ${closedFolders.has(f.id) ? 'closed' : ''}" data-fold="${f.id}" title="눌러서 접고 펴기&#10;그림을 여기로 끌어오면 이 폴더로 옮겨요"><span class="nm">${esc(f.name)}</span><span class="n">${n}</span><button class="fb" data-fren="${f.id}" title="폴더 이름 바꾸기" aria-label="폴더 이름 바꾸기">✎</button><button class="fb" data-fdel="${f.id}" title="폴더 지우기 (안의 그림은 남아요)" aria-label="폴더 지우기">×</button></div>`;
+  return `<div class="fold ${closedFolders.has(f.id) ? 'closed' : ''}" data-fold="${f.id}" draggable="true" style="--d:${folderDepth(f.id)}" title="눌러서 접고 펴기&#10;그림이나 다른 폴더를 여기로 끌어오면 이 폴더 안으로 옮겨요&#10;폴더 이름을 끌어서 다른 폴더 안으로 옮길 수 있어요"><span class="nm">${esc(f.name)}</span><span class="n">${n}</span><button class="fb" data-fsub="${f.id}" title="이 안에 새 폴더" aria-label="이 안에 새 폴더">+</button><button class="fb" data-fren="${f.id}" title="폴더 이름 바꾸기" aria-label="폴더 이름 바꾸기">✎</button><button class="fb" data-fdel="${f.id}" title="폴더 지우기 (안의 그림은 남아요)" aria-label="폴더 지우기">×</button></div>`;
 }
 function grouped(keys, folderOf) {
   const none = [], by = new Map((doc.folders || []).map(f => [f.id, []]));
   for (const k of keys) { const fid = folderOf(k); (fid && by.has(fid) ? by.get(fid) : none).push(k); }
   return { none, by };
+}
+// 폴더 나무를 위에서부터: 머리줄(아래 폴더까지 센 수) → 그 폴더 그림 → 하위 폴더
+function folderTreeHtml(by, thumb, pid = null) {
+  let h = '';
+  for (const f of folderKids(pid)) {
+    const L = by.get(f.id) || [], kids = folderKids(f.id).length;
+    let tot = 0; for (const id of folderDesc(f.id)) tot += (by.get(id) || []).length;
+    h += foldHead(f, kids ? `${L.length}${tot !== L.length ? ` · 전체 ${tot}` : ''}` : L.length);
+    if (closedFolders.has(f.id)) continue;
+    h += L.map(thumb).join('');
+    if (!L.length && !kids) h += '<div class="foldempty">비어 있어요. 그림을 여기로 끌어오세요.</div>';
+    h += folderTreeHtml(by, thumb, f.id);
+  }
+  return h;
 }
 function cutThumb(id, used) {
   const r = images.get(id); if (!r) return ''; const mi = marks.indexOf(id);
@@ -2926,7 +2968,7 @@ function renderLib() {
     const { none, by } = grouped(idx, i => doc.pages[i].folder);
     let h = (doc.folders || []).length ? foldHead(null, none.length) : '';
     h += none.map(pageThumb).join('');
-    for (const f of doc.folders || []) { const L = by.get(f.id); h += foldHead(f, L.length); if (!closedFolders.has(f.id)) h += L.length ? L.map(pageThumb).join('') : '<div class="foldempty">비어 있어요. 그림을 여기로 끌어오세요.</div>'; }
+    h += folderTreeHtml(by, pageThumb);
     grid.innerHTML = h; observeThumbs(); return;
   }
   const used = usedSet();
@@ -2936,7 +2978,7 @@ function renderLib() {
   else {
     const { none, by } = grouped(imageOrder, id => (images.get(id) || {}).folder);
     let h = foldHead(null, none.length) + none.map(id => cutThumb(id, used)).join('');
-    for (const f of doc.folders) { const L = by.get(f.id); h += foldHead(f, L.length); if (!closedFolders.has(f.id)) h += L.length ? L.map(id => cutThumb(id, used)).join('') : '<div class="foldempty">비어 있어요. 그림을 여기로 끌어오세요.</div>'; }
+    h += folderTreeHtml(by, id => cutThumb(id, used));
     grid.innerHTML = h;
   }
   $('#markInfo').textContent = marks.length ? `동그라미로 고른 ${marks.length}장을 고른 순서대로 놓아요.` : imageOrder.length ? `동그라미를 눌러 순서를 고를 수 있어요. 안 고르면 ${imageOrder.length}장 전부를 위 순서대로 놓아요.` : '';
@@ -2981,17 +3023,32 @@ function navImg(d) { const idx = realIdx(); if (!idx.length) return; const k = i
 function moveToFolder(t, fid) {
   if (t.page != null) { const p = doc.pages[t.page]; if (!p || p.folder === fid) return; p.folder = fid; commit(); }
   else { const r = images.get(t.img); if (!r || (r.folder || null) === fid) return; r.folder = fid; idb.put('imgs', recData(r)); }
-  renderLib(); const f = folderById(fid); toast(f ? `'${f.name}' 폴더로 옮겼어요` : '폴더에서 뺐어요', 1600);
+  renderLib(); renderProps(); const f = folderById(fid); toast(f ? `'${folderPath(fid, ' › ')}' 폴더로 옮겼어요` : '폴더에서 뺐어요', 1600);
 }
-async function newFolder() { const n = await askText('새 폴더 이름', '새 폴더', '만들기'); if (!n) return; const f = ensureFolder(n); closedFolders.delete(f.id); commit(); switchTab('lib'); renderLib(); toast(`'${f.name}' 폴더를 만들었어요. 그림을 폴더 이름 위로 끌어다 놓으세요.`, 3200); }
-async function renameFolder(id) { const f = folderById(id); if (!f) return; const n = await askText('폴더 이름 바꾸기', f.name, '바꾸기'); if (!n) return; f.name = n; commit(); renderLib(); }
+async function newFolder(parent) {
+  const pf = parent ? folderById(parent) : null;
+  const n = await askText(pf ? `'${pf.name}' 안에 새 폴더` : '새 폴더 이름', '새 폴더', '만들기'); if (!n) return;
+  const f = ensureFolder(n.replace(/\//g, ' '), parent || null); closedFolders.delete(f.id); if (pf) closedFolders.delete(pf.id);
+  commit(); switchTab('lib'); renderLib(); renderProps(); toast(`'${folderPath(f.id, ' › ')}' 폴더를 만들었어요. 그림을 폴더 이름 위로 끌어다 놓으면 들어가요.`, 3600);
+}
+// 폴더를 다른 폴더 안(또는 맨 위, to = null)으로
+function moveFolder(id, to) {
+  const f = folderById(id); if (!f || (f.parent || null) === (to || null) || id === to) return;
+  if (to && folderDesc(id).has(to)) { toast('폴더를 자기 안쪽 폴더로는 옮길 수 없어요'); return; }
+  let nm = f.name, k = 2; while (folderKids(to).some(x => x !== f && x.name === nm)) nm = `${f.name} (${k++})`;
+  f.name = nm; f.parent = to || null; if (to) closedFolders.delete(to);
+  commit(); renderLib(); renderProps(); toast(to ? `'${f.name}' 폴더를 '${folderPath(to, ' › ')}' 안으로 옮겼어요` : `'${f.name}' 폴더를 맨 위로 옮겼어요`, 2000);
+}
+async function renameFolder(id) { const f = folderById(id); if (!f) return; const n = await askText('폴더 이름 바꾸기', f.name, '바꾸기'); if (!n) return; f.name = n.replace(/\//g, ' ').trim() || f.name; commit(); renderLib(); renderProps(); }
 function deleteFolder(id) {
   const f = folderById(id); if (!f) return;
-  if (!confirm(`'${f.name}' 폴더를 지울까요? 안에 있던 그림은 '폴더 없음'으로 옮겨져요.`)) return;
+  const up = f.parent || null, upName = up ? `'${folderById(up).name}' 폴더` : "'폴더 없음'";
+  if (!confirm(`'${f.name}' 폴더를 지울까요? 안에 있던 그림과 폴더는 ${upName}로 옮겨져요.`)) return;
   doc.folders = doc.folders.filter(x => x !== f);
-  for (const p of doc.pages) if (p.folder === id) p.folder = null;
-  for (const r of images.values()) if (r.folder === id) { r.folder = null; idb.put('imgs', recData(r)); }
-  commit(); renderLib();
+  for (const x of doc.folders) if (x.parent === id) x.parent = up;
+  for (const p of doc.pages) if (p.folder === id) p.folder = up;
+  for (const r of images.values()) if (r.folder === id) { r.folder = up; idb.put('imgs', recData(r)); }
+  commit(); renderLib(); renderProps();
 }
 function deleteImagePage(i) {
   const p = doc.pages[i]; if (!p || p.ph) return;
@@ -3001,6 +3058,7 @@ function deleteImagePage(i) {
   sel = []; imageEditId = null; commit(); fitView(); renderAll();
 }
 $('#lib').addEventListener('click', e => {
+  const fs = e.target.closest('[data-fsub]'); if (fs) { newFolder(fs.dataset.fsub); return; }
   const fr = e.target.closest('[data-fren]'); if (fr) { renameFolder(fr.dataset.fren); return; }
   const fd = e.target.closest('[data-fdel]'); if (fd) { deleteFolder(fd.dataset.fdel); return; }
   const fh = e.target.closest('.fold'); if (fh) { const id = fh.dataset.fold; if (id) { closedFolders.has(id) ? closedFolders.delete(id) : closedFolders.add(id); renderLib(); } return; }
@@ -3011,6 +3069,7 @@ $('#lib').addEventListener('click', e => {
   const t = e.target.closest('.thumb'); if (t) placeImage(t.dataset.id, e.shiftKey);
 });
 $('#lib').addEventListener('dragstart', e => {
+  const fh = e.target.closest('.fold[data-fold]'); if (fh && fh.dataset.fold) { e.dataTransfer.setData('text/x-potato-folder', fh.dataset.fold); e.dataTransfer.effectAllowed = 'move'; return; }
   const t = e.target.closest('.thumb'); if (!t) return;
   if (t.dataset.page !== undefined) { e.dataTransfer.setData('text/x-potato-page', t.dataset.page); e.dataTransfer.effectAllowed = 'move'; return; }
   e.dataTransfer.setData('text/x-cut-img', t.dataset.id); e.dataTransfer.effectAllowed = 'copy';
@@ -3020,13 +3079,14 @@ const libBox = $('#lib');
 libBox.addEventListener('dragover', e => {
   const types = [...e.dataTransfer.types], f = e.target.closest('.fold');
   $$('#lib .fold.drop').forEach(x => x !== f && x.classList.remove('drop'));
-  if (f && (types.includes('text/x-cut-img') || types.includes('text/x-potato-page'))) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; f.classList.add('drop'); return; }
+  if (f && (types.includes('text/x-cut-img') || types.includes('text/x-potato-page') || types.includes('text/x-potato-folder'))) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; f.classList.add('drop'); return; }
   if (types.includes('Files')) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; libBox.classList.add('dragover'); if (f) f.classList.add('drop'); }
 });
 libBox.addEventListener('dragleave', e => { if (!libBox.contains(e.relatedTarget)) { libBox.classList.remove('dragover'); $$('#lib .fold.drop').forEach(x => x.classList.remove('drop')); } });
 libBox.addEventListener('drop', async e => {
   e.preventDefault(); libBox.classList.remove('dragover');
   const f = e.target.closest('.fold'); $$('#lib .fold.drop').forEach(x => x.classList.remove('drop'));
+  const fdrag = e.dataTransfer.getData('text/x-potato-folder'); if (fdrag) { if (f) moveFolder(fdrag, f.dataset.fold || null); return; }
   const pi = e.dataTransfer.getData('text/x-potato-page'), iid = e.dataTransfer.getData('text/x-cut-img');
   if (pi !== '' || iid) { if (f) moveToFolder(pi !== '' ? { page: +pi } : { img: iid }, f.dataset.fold || null); return; }
   const items = await dtItems(e.dataTransfer); if (items.length) await addImages(items, f ? f.dataset.fold || null : null);
@@ -3784,7 +3844,7 @@ async function renderImageFile(p, o) {
 function openImgExport() {
   const p = page(), mp = metaPref();
   if (p.ph) { toast('먼저 고칠 그림을 불러와 주세요'); return; }
-  const fo = p.folder ? folderById(p.folder) : null, all = realIdx(), inFold = fo ? all.filter(i => doc.pages[i].folder === fo.id) : [];
+  const fo = p.folder ? folderById(p.folder) : null, all = realIdx(), inFold = fo ? all.filter(i => inFolder(doc.pages[i].folder, fo.id)) : [];
   const m = modal(`<h2>그림으로 저장하기</h2><p class="sub">고친 그림을 원래 파일 이름으로 저장해요. 여러 장이면 폴더 그대로 ZIP 하나로 묶어 드려요.</p>
     ${row('범위', `<div class="radios"><label class="chk"><input type="radio" name="eS" value="cur" checked> 지금 그림</label>${fo ? `<label class="chk"><input type="radio" name="eS" value="fold"> '${esc(fo.name)}' 폴더 (${inFold.length}장)</label>` : ''}<label class="chk"><input type="radio" name="eS" value="all" ${all.length < 2 ? 'disabled' : ''}> 모든 그림 (${all.length}장)</label></div>`)}
     ${row('파일 형식', `<div class="radios"><label class="chk"><input type="radio" name="eF" value="same" checked> 원래 형식</label><label class="chk"><input type="radio" name="eF" value="png"> PNG</label><label class="chk"><input type="radio" name="eF" value="jpg"> JPG (용량 작게)</label></div>`)}
@@ -3802,7 +3862,7 @@ function openImgExport() {
       const files = [], used = new Set();
       for (let k = 0; k < list.length; k++) {
         const pp = doc.pages[list[k]]; if (list.length > 3) b.textContent = `만드는 중… ${k + 1} / ${list.length}`;
-        const f = await renderImageFile(pp, o), dir = list.length > 1 && pp.folder && folderById(pp.folder) ? folderById(pp.folder).name.split('/').map(safeName).join('/') + '/' : '';
+        const f = await renderImageFile(pp, o), dir = list.length > 1 && pp.folder && folderById(pp.folder) ? folderPath(pp.folder).split('/').map(safeName).join('/') + '/' : '';
         let nm = dir + f.name, n = 2; while (used.has(nm.toLowerCase())) nm = dir + f.name.replace(/(\.[^.]+)$/, `(${n++})$1`); used.add(nm.toLowerCase());
         files.push({ name: nm, blob: f.blob });
       }
@@ -3923,11 +3983,11 @@ $('#menuCz').addEventListener('click', e => {
   const a = b.dataset.cz;
   if (a === 'page') czRunPage(false); else if (a === 'sel') czRunPage(true); else if (a === 'clear') czClearPage();
   else if (a === 'all') czRunPages(realIdx(), '모든 그림 자동 흰칠하는 중');
-  else if (a === 'fold') { const f = page().folder; czRunPages(realIdx().filter(i => doc.pages[i].folder === f), f ? `'${(folderById(f) || {}).name}' 폴더 자동 흰칠하는 중` : '폴더 없는 그림 자동 흰칠하는 중'); }
+  else if (a === 'fold') { const f = page().folder; czRunPages(realIdx().filter(i => inFolder(doc.pages[i].folder, f)), f ? `'${(folderById(f) || {}).name}' 폴더 자동 흰칠하는 중` : '폴더 없는 그림 자동 흰칠하는 중'); }
   else if (a === 'batch') openCzStudio(); else if (a === 'cfg') openCzCfg();
 });
 function openCzMenu() {
-  if (isImg()) { const f = page().folder, fo = f && folderById(f), n = realIdx().filter(i => doc.pages[i].folder === f).length; $('#menuCz [data-cz="page"] span').textContent = '이 그림 자동 흰칠'; $('#menuCz [data-cz="clear"] span').textContent = '이 그림 자동 흰칠 지우기'; $('#menuCz [data-cz="all"] span').textContent = `모든 그림 자동 흰칠 (${realIdx().length}장)`; $('#menuCz [data-cz="fold"] span').textContent = fo ? `'${fo.name}' 폴더 자동 흰칠 (${n}장)` : `폴더 없는 그림 자동 흰칠 (${n}장)`; }
+  if (isImg()) { const f = page().folder, fo = f && folderById(f), n = realIdx().filter(i => inFolder(doc.pages[i].folder, f)).length; $('#menuCz [data-cz="page"] span').textContent = '이 그림 자동 흰칠'; $('#menuCz [data-cz="clear"] span').textContent = '이 그림 자동 흰칠 지우기'; $('#menuCz [data-cz="all"] span').textContent = `모든 그림 자동 흰칠 (${realIdx().length}장)`; $('#menuCz [data-cz="fold"] span').textContent = fo ? `'${fo.name}' 폴더 자동 흰칠 (${n}장)` : `폴더 없는 그림 자동 흰칠 (${n}장)`; }
   else { $('#menuCz [data-cz="page"] span').textContent = '이 페이지 자동 흰칠'; $('#menuCz [data-cz="clear"] span').textContent = '이 페이지 자동 흰칠 지우기'; }
   const n = selEls().filter(e => e.type === 'panel' && layerCount(e) > 0).length, b = $('#menuCz [data-cz="sel"]');
   b.disabled = !n; b.lastChild.textContent = n ? `고른 컷 ${n}개만 자동 흰칠` : '고른 컷만 자동 흰칠 (컷을 먼저 고르세요)';
@@ -3966,7 +4026,7 @@ const CMDS = {
   'add-panel': addPanel, 'bubble-menu': () => openMenu('#menuBubble', '#bBubble'), 'split-menu': () => openMenu('#menuSplit', '#bSplit'), 'cz-menu': openCzMenu,
   'add-text': () => addText(), pen: () => setMode(mode === 'pen' ? null : 'pen'), brush: () => setMode(mode === 'brush' ? null : 'brush'),
   'zoom-in': () => zoomStep(1), 'zoom-out': () => zoomStep(-1), 'zoom-fit': fitView,
-  export: openExportModal, help: openHelp, theme: () => setTheme(isDark() ? 'light' : 'dark'), gif: openGifStudio, import: () => pickFiles(false), 'import-dir': () => pickFiles(true), 'new-folder': newFolder,
+  export: openExportModal, help: openHelp, theme: () => setTheme(isDark() ? 'light' : 'dark'), gif: openGifStudio, import: () => pickFiles(false), 'import-dir': () => pickFiles(true), 'new-folder': () => newFolder(null),
   'img-prev': () => navImg(-1), 'img-next': () => navImg(1), crop: () => setMode(mode === 'crop' ? null : 'crop'), select: () => setMode(mode === 'select' ? null : 'select'), autolayout: openAutoLayout,
   'import-stamp': () => $('#fileStamp').click(), 'import-pack': () => $('#filePack').click(),
   'page-add': () => pageCmd('page-add'), 'page-dup': () => pageCmd('page-dup'), 'page-up': () => pageCmd('page-up'), 'page-down': () => pageCmd('page-down'), 'page-del': () => pageCmd('page-del'),

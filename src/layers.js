@@ -172,7 +172,7 @@ function sizeSec() {
 function sizeTargets() {
   const v = ($('#szScope') || {}).value || 'one', fo = page().folder;
   if (v === 'one') return [page()];
-  return realIdx().map(i => doc.pages[i]).filter(p => v === 'all' || p.folder === fo);
+  return realIdx().map(i => doc.pages[i]).filter(p => v === 'all' || inFolder(p.folder, fo));
 }
 function sizeAct(act, v) {
   switch (act) {
