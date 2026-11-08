@@ -3227,6 +3227,7 @@ const gsFit = s => s.fit ?? gs.set.fit;
 const gsTr = s => s.tr ?? gs.set.trans;
 const gsTrAt = i => i > 0 && gsDur(gs.slides[i]) >= 0.3 ? gsTr(gs.slides[i]) : 'none'; // 아주 짧은 장면은 넘김 효과 없이
 const gsTotal = () => gs.slides.reduce((a, s) => a + gsDur(s), 0);
+const gsTrD = s => s.trd ?? gs.set.trDur; // 넘김 길이 (장면마다 따로 정할 수 있어요)
 function gsSize() {
   const v = gs.set.size, f = gs.slides[0];
   if (v === 'custom') return [clamp(gs.set.cw | 0, 16, 2400), clamp(gs.set.ch | 0, 16, 2400)];
@@ -3251,7 +3252,7 @@ function gsRenderAt(g, t, W, H) {
   g.fillStyle = gs.set.bg; g.fillRect(0, 0, W, H);
   const S = gs.slides; if (!S.length) return;
   let acc = 0, i = 0; for (; i < S.length - 1; i++) { if (t < acc + gsDur(S[i])) break; acc += gsDur(S[i]); }
-  const d = gsDur(S[i]), tau = clamp(t - acc, 0, d), p = d ? tau / d : 0, tr = gsTrAt(i), trd = Math.min(gs.set.trDur, d * 0.9);
+  const d = gsDur(S[i]), tau = clamp(t - acc, 0, d), p = d ? tau / d : 0, tr = gsTrAt(i), trd = Math.min(gsTrD(S[i]), d * 0.9);
   if (tr !== 'none' && tau < trd) {
     const k = ease(tau / trd), prev = S[i - 1], pd = gsDur(prev);
     if (tr === 'fade') { gsDrawSlide(g, prev, 1, W, H, pd * 1000); g.globalAlpha = k; gsDrawSlide(g, S[i], p, W, H, tau * 1000); g.globalAlpha = 1; }
@@ -3268,7 +3269,7 @@ function gsRenderAt(g, t, W, H) {
 function gsFramePlan(fps) {
   const iv = 1000 / fps, out = []; let acc = 0;
   gs.slides.forEach((s, i) => {
-    const d = gsDur(s) * 1000, tr = gsTrAt(i), trd = tr !== 'none' ? Math.min(gs.set.trDur * 1000, d * 0.9) : 0;
+    const d = gsDur(s) * 1000, tr = gsTrAt(i), trd = tr !== 'none' ? Math.min(gsTrD(s) * 1000, d * 0.9) : 0;
     if (gsMo(s) === 'none') {
       for (let t = 0; t < trd; t += iv) out.push({ t: acc + t, s: acc + t, dur: Math.min(iv, trd - t) });
       gsStaticRun(out, acc + trd, acc + d, iv); // 글자·효과가 움직이는 동안만 여러 장
@@ -3394,167 +3395,7 @@ async function encodeWebp(W, H, frames, renderFrame, progress, q) {
   return new Blob([hdr, vp8x, anim, ...parts], { type: 'image/webp' });
 }
 
-/* ---- 화면 ---- */
-function buildGifStudio() {
-  if (gs.built) return; gs.built = true;
-  const d = document.createElement('div'); d.id = 'gifStudio'; d.className = 'gs'; d.hidden = true;
-  d.innerHTML = `<div class="gs-top"><b>움짤 만들기</b><span class="muted small">사진·GIF·영상을 장면으로 이어 붙이고 글자·효과를 얹어 GIF, 움직이는 WebP, MP4로 저장해요</span><div class="flex1"></div><button class="btn" data-g="close">편집기로 돌아가기</button></div>
-    <div class="gs-body">
-      <aside class="gs-left">
-        <div class="gs-add"><button class="btn sm" data-g="add-file" title="사진, GIF, 움직이는 WebP, 영상(MP4·WebM)">+ 사진·GIF·영상</button><button class="btn sm" data-g="add-lib">+ 보관함에서</button><button class="btn sm" data-g="add-page" title="편집기의 지금 페이지(고른 것이 있으면 그 부분만)">+ 지금 페이지</button></div>
-        <div id="gsList" class="gs-list"></div>
-        <div id="gsSum" class="gs-sum muted small"></div>
-      </aside>
-      <main class="gs-main">
-        <div class="gs-stage" id="gsStage"><canvas id="gsCv"></canvas><div id="gsEmpty" class="gs-empty"><b>장면을 넣어 주세요</b>사진이나 GIF를 이 화면으로 끌어오거나, 왼쪽 버튼으로 넣으세요. GIF는 장면마다 나눠서 들어와요.</div></div>
-        <div class="gs-ctrl"><button class="btn" data-g="play" id="gsPlay">재생</button><input type="range" id="gsTime" min="0" max="1000" value="0" aria-label="재생 위치"><span id="gsTimeL" class="muted small"></span></div>
-        <div class="gs-track" id="gsTrack" hidden></div>
-      </main>
-      <aside class="gs-right" id="gsProps"></aside>
-    </div>
-    <input type="file" id="gsFile" accept="image/*,video/*" multiple hidden>`;
-  document.body.appendChild(d);
-  d.addEventListener('click', gsClick);
-  $('#gsProps').addEventListener('input', gsInput); $('#gsProps').addEventListener('change', gsInput);
-  $('#gsFile').addEventListener('change', async e => { const fs = [...e.target.files]; e.target.value = ''; await gsAddFiles(fs); });
-  $('#gsTime').addEventListener('input', e => { gsPause(); gs.t = +e.target.value / 1000 * gsTotal(); gsDraw(); });
-  const stage = $('#gsStage'), list = $('#gsList'); let dragI = -1;
-  d.addEventListener('dragover', e => { if (dragI >= 0) return; if ([...e.dataTransfer.types].includes('Files')) { e.preventDefault(); stage.classList.add('drop'); } });
-  d.addEventListener('dragleave', e => { if (!d.contains(e.relatedTarget)) stage.classList.remove('drop'); });
-  d.addEventListener('drop', async e => { if (dragI >= 0) return; e.preventDefault(); stage.classList.remove('drop'); await gsAddFiles([...e.dataTransfer.files]); });
-  list.addEventListener('dragstart', e => { const it = e.target.closest('[data-si]'); if (it) { dragI = +it.dataset.si; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', 'slide'); } });
-  list.addEventListener('dragover', e => { if (dragI >= 0) e.preventDefault(); });
-  list.addEventListener('drop', e => { const it = e.target.closest('[data-si]'); if (dragI < 0 || !it) return; e.preventDefault(); e.stopPropagation(); const to = +it.dataset.si; const [s] = gs.slides.splice(dragI, 1); gs.slides.splice(to, 0, s); gs.sel = to; dragI = -1; gsChanged(); });
-  list.addEventListener('dragend', () => { dragI = -1; });
-  new ResizeObserver(() => gsFitCanvas()).observe(stage);
-  ovBind();
-}
-async function openGifStudio() {
-  if (mode) setMode(null);
-  buildGifStudio(); $('#gifStudio').hidden = false;
-  if (!gs.loaded) { gs.loaded = true; await gsLoad(); }
-  gsRenderAll();
-}
-function closeGifStudio() { gsPause(); $('#gifStudio').hidden = true; gsSave(); }
-function gsFitCanvas() {
-  const [W, H] = gsSize(), cv = $('#gsCv'), st = $('#gsStage');
-  if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
-  const k = Math.min((st.clientWidth - 32) / W, (st.clientHeight - 32) / H, 1.5);
-  cv.style.width = Math.max(10, W * k) + 'px'; cv.style.height = Math.max(10, H * k) + 'px';
-  gsDraw();
-}
-function gsDraw() {
-  const cv = $('#gsCv'); if (!cv) return; const g = cv.getContext('2d');
-  gsRenderAt(g, gs.t, cv.width, cv.height); ovDrawSel(g, cv.width, cv.height);
-  const T = gsTotal(); gsTrackHead(); $('#gsTime').value = T ? Math.round(gs.t / T * 1000) : 0;
-  $('#gsTimeL').textContent = `${gs.t.toFixed(1)}초 / ${T.toFixed(1)}초`;
-  $('#gsEmpty').hidden = gs.slides.length > 0;
-}
-function gsPlay() {
-  if (!gs.slides.length) return; gs.playing = true; $('#gsPlay').textContent = '멈춤'; $('#gsPlay').classList.add('on');
-  const T = gsTotal(); if (gs.t >= T - 0.01) gs.t = 0;
-  gs.start = performance.now() - gs.t * 1000;
-  const step = now => { if (!gs.playing) return; const T = gsTotal(); gs.t = ((now - gs.start) / 1000); if (gs.t >= T) { if (gs.set.loop) { gs.start = now; gs.t = 0; } else { gs.t = T; gsPause(); gsDraw(); return; } } gsDraw(); gs.raf = requestAnimationFrame(step); };
-  gs.raf = requestAnimationFrame(step);
-}
-function gsPause() { gs.playing = false; cancelAnimationFrame(gs.raf); const b = $('#gsPlay'); if (b) { b.textContent = '재생'; b.classList.remove('on'); } }
-function gsRenderList() {
-  const S = gs.slides; let acc = 0;
-  $('#gsList').innerHTML = S.length ? S.map((s, i) => { const st = acc; acc += gsDur(s); return `<div class="gs-item ${i === gs.sel || gs.pick.has(s.id) ? 'on' : ''} ${gs.pick.has(s.id) ? 'pk' : ''}" data-si="${i}" draggable="true" title="끌어서 순서를 바꿔요">
-      <span class="no">${i + 1}</span><canvas data-th="${i}" width="64" height="64"></canvas>
-      <span class="meta"><b>${gsDur(s).toFixed(1)}초</b><span>움직임: ${esc(GS_MOTIONS.find(m => m[0] === gsMo(s))[1])}</span></span>
-      <span class="ops"><button class="ic" data-g="up" data-i="${i}" title="위로" aria-label="위로">▲</button><button class="ic" data-g="down" data-i="${i}" title="아래로" aria-label="아래로">▼</button><button class="ic" data-g="del" data-i="${i}" title="빼기" aria-label="빼기">×</button></span></div>`; }).join('') : '<div class="gs-none muted small">아직 장면이 없어요.</div>';
-  for (const c of $$('#gsList canvas')) { const s = S[+c.dataset.th], g = c.getContext('2d'), k = Math.min(64 / s.w, 64 / s.h); g.fillStyle = '#eef0f2'; g.fillRect(0, 0, 64, 64); g.drawImage(s.bmp, (64 - s.w * k) / 2, (64 - s.h * k) / 2, s.w * k, s.h * k); }
-  const [W, H] = gsSize(), n = gsFramePlan(gs.set.fps).length;
-  $('#gsSum').textContent = S.length ? `장면 ${S.length}개, 모두 ${gsTotal().toFixed(1)}초, ${W}×${H}, 저장하면 ${n}장` : '';
-}
-function gsRenderProps() {
-  const s = gs.slides[gs.sel], set = gs.set, opt = (arr, cur) => arr.map(([v, l]) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${l}</option>`).join('');
-  if (gs.tab !== 'scene') { $('#gsProps').innerHTML = gsTabsHtml() + (gs.tab === 'ov' ? ovPanelHtml() : fxPanelHtml()) + gsSaveHtml(); return; }
-  $('#gsProps').innerHTML = `${gsTabsHtml()}${gsBatchHtml()}${s && gs.pick.size < 2 ? `<div class="sec"><h3>${gs.sel + 1}번 장면</h3>
-      ${row('길이', `<input type="number" data-gk="s.dur" min="0.05" max="60" step="0.1" value="${s.dur ?? ''}" placeholder="${set.dur}"> 초`)}
-      ${row('움직임', `<select data-gk="s.motion"><option value="">전체 설정 따름</option>${opt(GS_MOTIONS, s.motion ?? '')}</select>`)}
-      ${row('맞추기', `<select data-gk="s.fit"><option value="">전체 설정 따름</option>${opt([['cover', '꽉 채우기'], ['contain', '전체 보이기']], s.fit ?? '')}</select>`)}
-      ${gs.sel > 0 ? row('넘어갈 때', gsTransSel('s.tr', s.tr ?? '', true)) : ''}
-      <div class="btnrow"><button class="btn sm" data-g="dup">이 장면 복제</button><button class="btn sm danger" data-g="del" data-i="${gs.sel}">빼기</button></div>
-      ${s.clip && gs.slides.filter(x => x.clip === s.clip).length > 1 ? `<div class="btnrow"><button class="btn sm" data-g="pick-clip" title="같은 GIF·영상에서 나온 장면을 모두 골라 속도·거꾸로·부메랑을 한꺼번에">이 GIF·영상 장면 모두 고르기 (${gs.slides.filter(x => x.clip === s.clip).length}장)</button></div>` : ''}</div>` : ''}
-    <div class="sec"><h3>전체 설정</h3>
-      ${row('크기', `<select data-gk="size">${opt(GS_SIZES, set.size)}</select>`)}
-      ${set.size === 'custom' ? `<div class="grid2"><span>폭</span><input type="number" data-gk="cw" value="${set.cw}" min="16" max="2400"><span>높이</span><input type="number" data-gk="ch" value="${set.ch}" min="16" max="2400"></div>` : ''}
-      ${row('바탕색', `<input type="color" data-gk="bg" value="${set.bg}">`)}
-      ${row('맞추기', `<select data-gk="fit">${opt([['cover', '꽉 채우기'], ['contain', '전체 보이기']], set.fit)}</select>`)}
-      ${row('장면 길이', `<input type="number" data-gk="dur" min="0.05" max="60" step="0.1" value="${set.dur}"> 초`)}
-      ${row('움직임', `<select data-gk="motion">${opt(GS_MOTIONS, set.motion)}</select>`)}
-      ${row('넘어갈 때', gsTransSel('trans', set.trans, false))}
-      ${set.trans !== 'none' ? row('효과 길이', `<input type="number" data-gk="trDur" min="0.05" max="3" step="0.05" value="${set.trDur}"> 초`) : ''}
-      <div class="btnrow"><button class="btn sm" data-g="all-follow" title="장면마다 따로 정한 길이, 움직임 등을 지우고 전체 설정으로 맞춰요">모든 장면을 전체 설정으로</button></div></div>
-    ${gsSaveHtml()}`;
-}
-function gsSaveHtml() {
-  const set = gs.set, opt = (arr, cur) => arr.map(([v, l]) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${l}</option>`).join('');
-  return `<div class="sec"><h3>저장</h3>
-      ${row('형식', `<div class="seg"><button class="btn sm ${set.fmt === 'gif' ? 'on' : ''}" data-g="fmt" data-v="gif">GIF</button><button class="btn sm ${set.fmt === 'webp' ? 'on' : ''}" data-g="fmt" data-v="webp">움직이는 WebP</button><button class="btn sm ${set.fmt === 'mp4' ? 'on' : ''}" data-g="fmt" data-v="mp4">MP4 영상</button></div>`)}
-      ${row('부드러움', `<select data-gk="fps">${opt([['8', '초당 8장 (가볍게)'], ['10', '초당 10장'], ['12', '초당 12장'], ['15', '초당 15장'], ['20', '초당 20장'], ['24', '초당 24장 (매끄럽게)']], String(set.fps))}</select>`)}
-      ${row('반복', `<label class="chk"><input type="checkbox" data-gk="loop" ${set.loop ? 'checked' : ''}> 계속 반복</label>`)}
-      ${set.fmt === 'gif' ? row('', `<label class="chk"><input type="checkbox" data-gk="dither" ${set.dither ? 'checked' : ''}> 색 경계 부드럽게</label>`) + row('색 수', `<select data-gk="colors">${opt([['256', '256색 (선명)'], ['128', '128색'], ['64', '64색 (가볍게)'], ['32', '32색']], String(set.colors))}</select>`)
-        : set.fmt === 'mp4' ? row('화질', `<input type="range" data-gk="mq" min="40" max="100" value="${set.mq}"> <span class="muted small">${set.mq}</span>`) : row('화질', `<input type="range" data-gk="q" min="40" max="100" value="${set.q}"> <span class="muted small">${set.q}</span>`)}
-      ${row('용량 맞추기', `<input type="number" data-gk="target" min="0" max="500" step="0.5" value="${set.target || 0}" style="width:64px" title="0이면 안 맞춰요"> MB 이하`)}
-      <div class="btnrow"><button class="btn sm" data-g="est">예상 용량 보기</button><span class="muted small" id="gsEst"></span></div>
-      <div class="btnrow"><button class="btn primary" data-g="export" id="gsExport" ${gs.slides.length ? '' : 'disabled'}>${set.fmt === 'gif' ? 'GIF로 저장' : set.fmt === 'mp4' ? 'MP4로 저장' : 'WebP로 저장'}</button></div>
-      <p class="muted small">GIF는 256색이라 사진은 조금 거칠어질 수 있어요. 움직이는 WebP가 더 선명하고 가벼워요. MP4는 가장 가볍지만 소리 없는 영상이에요. 용량을 정하면 넘을 때 화질·색 수·크기를 줄여 다시 만들어요.</p></div>`;
-}
-function gsRenderAll() { gsRenderList(); gsRenderProps(); gsFitCanvas(); }
-let gsSaveT = 0;
-function gsChanged(keepProps) { gsRenderList(); if (!keepProps) gsRenderProps(); gsFitCanvas(); gsTrackRender(); clearTimeout(gsSaveT); gsSaveT = setTimeout(gsSave, 800); }
-function gsInput(e) {
-  const t = e.target, k = t.dataset.gk; if (!k) return;
-  if (e.type === 'input' && (t.tagName === 'SELECT' || t.type === 'checkbox')) return;
-  if (k.startsWith('o.') || k.startsWith('f.')) { const r = ovSetKey(k, t); if (r) gsChanged(r !== 'props' && (e.type === 'input' || !/\.(t0|t1|text)$/.test(k))); return; } // 글자·스티커, 효과
-  let v = t.type === 'checkbox' ? t.checked : t.value;
-  if (k.startsWith('s.')) {
-    const s = gs.slides[gs.sel]; if (!s) return; const f = k.slice(2);
-    if (f === 'dur') s.dur = v === '' ? null : clamp(+v || 0.05, 0.05, 60); else s[f] = v === '' ? null : v;
-  } else {
-    if (['dur', 'trDur', 'cw', 'ch', 'q', 'fps', 'mq', 'colors'].includes(k)) v = +v || gs.set[k];
-    if (k === 'target') v = Math.max(0, +v || 0);
-    gs.set[k] = v;
-  }
-  gsChanged(e.type === 'input');
-}
-async function gsClick(e) {
-  const b = e.target.closest('[data-g]'), it = e.target.closest('[data-si]');
-  if (!b) { if (it) { gsPickClick(+it.dataset.si, e); gsPause(); let acc = 0; for (let i = 0; i < gs.sel; i++) acc += gsDur(gs.slides[i]); gs.t = acc + 0.001; gsRenderList(); gsRenderProps(); gsDraw(); } return; }
-  const a = b.dataset.g, i = +b.dataset.i;
-  if (a === 'tab' || a === 'tr-gal' || a.startsWith('ov-') || a.startsWith('fx-')) { ovClick(a, b); return; }
-  if (a === 'close') closeGifStudio();
-  else if (a === 'add-file') $('#gsFile').click();
-  else if (a === 'add-lib') gsPickLibrary();
-  else if (a === 'add-page') gsAddPage();
-  else if (a === 'play') gs.playing ? gsPause() : gsPlay();
-  else if (a === 'up' && i > 0) { [gs.slides[i - 1], gs.slides[i]] = [gs.slides[i], gs.slides[i - 1]]; gs.sel = i - 1; gsChanged(); }
-  else if (a === 'down' && i < gs.slides.length - 1) { [gs.slides[i + 1], gs.slides[i]] = [gs.slides[i], gs.slides[i + 1]]; gs.sel = i + 1; gsChanged(); }
-  else if (a === 'del') { gs.slides.splice(i, 1); gs.sel = Math.min(gs.sel, gs.slides.length - 1); gsChanged(); }
-  else if (a === 'dup') { const s = gs.slides[gs.sel]; if (s) { gs.slides.splice(gs.sel + 1, 0, { ...s, id: uid() }); gs.sel++; gsChanged(); } }
-  else if (a === 'fmt') { gs.set.fmt = b.dataset.v; gsChanged(); }
-  else if (a === 'all-follow') { for (const s of gs.slides) { s.dur = s.motion = s.fit = s.tr = null; } gsChanged(); }
-  else if (a === 'export') gsExport();
-  else if (a === 'est') gsEstimate();
-  else if (a === 'pick-clip') { const s = gs.slides[gs.sel]; if (s && s.clip) { gs.pick = new Set(gs.slides.filter(x => x.clip === s.clip).map(x => x.id)); gsRenderList(); gsRenderProps(); } }
-  else if (a === 'b-clear') { gs.pick.clear(); gsRenderList(); gsRenderProps(); }
-  else if (a === 'b-dur') gsBatch(a, ($('#gsBDur') || {}).value);
-  else if (a.startsWith('b-')) gsBatch(a, b.dataset.v);
-}
-function gsKey(e) {
-  if (e.key === 'Escape') { if (modalOpen()) closeModal(); else closeGifStudio(); e.preventDefault(); return; }
-  if (isTyping(e.target) || modalOpen()) return;
-  if (e.key === ' ') { e.preventDefault(); gs.playing ? gsPause() : gsPlay(); }
-  else if ((e.key === 'Delete' || e.key === 'Backspace') && gs.tab === 'ov' && gs.osel) { e.preventDefault(); ovClick('ov-del', { dataset: {} }); }
-  else if ((e.key === 'Delete' || e.key === 'Backspace') && gs.tab === 'fx' && gs.fsel) { e.preventDefault(); ovClick('fx-del', { dataset: {} }); }
-  else if (e.key.startsWith('Arrow') && gs.tab === 'ov' && gs.osel) { const o = gs.ovs.find(x => x.id === gs.osel); if (o) { e.preventDefault(); const st = e.shiftKey ? 0.05 : 0.005; if (e.key === 'ArrowLeft') o.x -= st; else if (e.key === 'ArrowRight') o.x += st; else if (e.key === 'ArrowUp') o.y -= st; else o.y += st; gsDraw(); clearTimeout(gsSaveT); gsSaveT = setTimeout(gsSave, 800); } }
-  else if ((e.key === 'Delete' || e.key === 'Backspace') && gs.pick.size > 1) { e.preventDefault(); gsBatch('b-del'); }
-  else if ((e.key === 'Delete' || e.key === 'Backspace') && gs.sel >= 0) { e.preventDefault(); gs.slides.splice(gs.sel, 1); gs.sel = Math.min(gs.sel, gs.slides.length - 1); gsChanged(); }
-  else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); gs.sel = clamp(gs.sel + (e.key === 'ArrowUp' ? -1 : 1), 0, gs.slides.length - 1); gsRenderList(); gsRenderProps(); }
-}
+/* ---- 화면: gsui.js ---- */
 const GS_MAXSIDE = 1600, GS_BUDGET = 160e6; // 장면 한 장 긴 쪽 최대, 전체 픽셀 한도(약 640MB)
 const gsPixels = () => gs.slides.reduce((a, s) => a + s.w * s.h, 0);
 function gsAddBitmap(src, name, extra, maxSide = GS_MAXSIDE) {
@@ -3635,14 +3476,14 @@ async function gsExport() {
     const m = e && e.message;
     toast(m === 'nowebp' ? '이 브라우저는 WebP 저장을 못 해요. 크롬이나 엣지에서 해 보세요.' : m === 'nomp4' ? '이 컴퓨터에서는 MP4로 저장할 수 없어요. GIF나 WebP로 저장해 주세요.' : '저장하지 못했어요. 크기를 줄여 다시 해 보세요.', 4500);
   }
-  gs.busy = false; btn.disabled = false; gsRenderProps();
+  gs.busy = false; btn.disabled = false; gsExpRender();
 }
 async function gsSave() {
   if (!gs.loaded) return;
   const slides = [];
   for (const s of gs.slides) {
     if (!s.blob || s.blobOf !== s.bmp) { s.blob = await new Promise(r => s.bmp.toBlob ? s.bmp.toBlob(r, 'image/webp', 0.95) : r(null)); s.blobOf = s.bmp; }
-    slides.push({ id: s.id, name: s.name, blob: s.blob, w: s.w, h: s.h, dur: s.dur, motion: s.motion, fit: s.fit, tr: s.tr, clip: s.clip });
+    slides.push({ id: s.id, name: s.name, blob: s.blob, w: s.w, h: s.h, dur: s.dur, motion: s.motion, fit: s.fit, tr: s.tr, trd: s.trd, clip: s.clip });
   }
   idb.set('gif', { slides, set: gs.set, ovs: gs.ovs.map(ovPlain), fx: clone(gs.fx) });
 }
@@ -3653,12 +3494,14 @@ async function gsLoad() {
     try { const bm = await createImageBitmap(s.blob), c = newCanvas(bm.width, bm.height); c.getContext('2d').drawImage(bm, 0, 0); gs.slides.push({ ...s, bmp: c, blobOf: c }); } catch (e) { }
   }
   gs.ovs = await ovRestore(d.ovs); gs.fx = Array.isArray(d.fx) ? d.fx : [];
+  laneFix(gs.ovs); laneFix(gs.fx);
   gs.sel = gs.slides.length ? 0 : -1;
 }
 
 /*@@GIF2@@*/
 /*@@PRESETS@@*/
 /*@@ANIM@@*/
+/*@@GSUI@@*/
 /*@@CZ@@*/
 /* ================= 모달 ================= */
 function modal(html, opts = {}) {
@@ -4051,7 +3894,7 @@ function openHelp() {
       <li><b>고치기 붓</b>: '가리기'에서 지우기(투명), 도장(<kbd>Alt</kbd>+클릭으로 복사할 곳), 잡티 지우기를 골라 칠해요.</li>
       <li><b>AI 도구</b> (설치판): 그림을 고르면 오른쪽 'AI 도구'에서 배경 지우기·인물만 새 레이어로·배경만 흐리게, 화질 키우기(2배·4배)를 써요. 처음 쓸 때 팩을 받아요.</li>
       <li><b>레이어</b>: 왼쪽 '레이어' 탭에서 숨기기·잠그기·끌어서 순서 바꾸기·불투명도·섞는 법을 바꿔요. 두 번 누르면 이름을 바꿔요.</li>
-      <li><b>움짤</b>: 위쪽 '움짤'에서 사진·GIF·영상을 장면으로 넣고 GIF·움직이는 WebP·MP4로 저장해요. 오른쪽 '글자·스티커' 탭에서 글자·이모지·그림 스티커를 넣고 화면에서 끌어 옮겨요(모서리를 끌면 크기). 나타날 때·도는 동안·사라질 때 움직임은 Animate.css 97가지와 타자기·물결·무지개·글리치 같은 글자 효과에서 골라요. '효과' 탭에는 눈·벚꽃·하트·색종이 같은 떠다니는 것과 흔들림·줌 펀치·번쩍·VHS 같은 화면 효과가 있어요. 아래 시간 막대를 끌어 나오는 때를 바꿔요. 장면이 넘어갈 때는 '보며 고르기'로 특수 넘김 196가지 중에서 골라요.</li>
+      <li><b>움짤</b>: 위쪽 '움짤'을 누르면 프리미어 프로처럼 왼쪽 재료(장면·글자·효과·넘김), 가운데 미리보기, 오른쪽 속성, 아래 시간 막대로 나뉜 화면이 열려요. 시간 막대에서 장면 오른쪽 끝을 끌면 길이, 가운데를 끌면 순서가 바뀌어요. 글자·효과 막대는 끌어서 시간과 줄을 옮기고 양끝으로 늘여요. 장면 사이 ◇를 누르면 넘김을 골라요. 단축키: <kbd>Space</kbd> 재생, <kbd>←</kbd><kbd>→</kbd> 한 장씩, <kbd>↑</kbd><kbd>↓</kbd> 장면 경계로, <kbd>C</kbd> 자르기 도구, <kbd>V</kbd> 고르기 도구, <kbd>Ctrl</kbd>+<kbd>K</kbd> 재생 위치에서 나누기, <kbd>T</kbd> 글자 넣기, <kbd>Ctrl</kbd>+휠 확대, <kbd>Ctrl</kbd>+<kbd>M</kbd> 내보내기.</li>
       <li><b>크기</b>: 이미지 편집에서 아무것도 안 고르면 오른쪽 '크기 바꾸기'로 그림 크기, 캔버스 크기, 정사각형·4:5 여백을 바꿔요.</li>
     </ol>
     <p class="muted small" style="margin-top:12px">되돌리기 <kbd>Ctrl+Z</kbd>, 다시 하기 <kbd>Ctrl+Y</kbd>, 복제 <kbd>Ctrl+D</kbd>, 복사와 붙여넣기 <kbd>Ctrl+C</kbd>/<kbd>V</kbd>, 삭제 <kbd>Delete</kbd>, 조금씩 옮기기 방향키(<kbd>Shift</kbd>와 함께 10칸), 화면 끌기 <kbd>Space</kbd>+드래그, 확대 <kbd>Ctrl</kbd>+휠, 비율 유지 <kbd>Shift</kbd>+모서리, 자석 잠시 끄기 <kbd>Alt</kbd></p>

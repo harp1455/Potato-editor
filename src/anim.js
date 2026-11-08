@@ -90,7 +90,7 @@ const TX_LOOP_K = new Set(TX_LOOP.map(x => x[0]));
 const hash1 = (a, b) => { const x = Math.sin(a * 127.1 + b * 311.7) * 43758.5453; return x - Math.floor(x); };
 
 /* ---- 글자·스티커 (gs.ovs) ---- */
-gs.ovs = []; gs.fx = []; gs.osel = null; gs.fsel = null; gs.tab = 'scene';
+gs.ovs = []; gs.fx = []; gs.osel = null; gs.fsel = null; gs.focus = 'set'; // 오른쪽 속성 칸에 보일 것: set(전체) scene ov fx tr
 const OV_DEF = () => ({ id: uid(), kind: 'text', text: '글자를 입력하세요', st: { font: doc.defaults.text.font, fs: 80, color: '#ffffff', bold: true, sc: '#111111', sw: 8, glow: 0, glowColor: '#ffe25c' }, x: 0.5, y: 0.82, sc: 1, rot: 0, t0: 0, t1: null, ain: { n: 'bounceIn', d: 0.7 }, aout: { n: '', d: 0.5 }, aloop: { n: '', d: 1.2 }, per: false, gap: 0.06 });
 const ovT1 = o => o.t1 == null ? gsTotal() : o.t1;
 const fmtT = v => (+v || 0).toFixed(1);
@@ -338,14 +338,14 @@ function fxScreen(g, f, t, W, H) {
 // 장면 위에 효과와 글자·스티커 (gsRenderAt 끝에서 불러요)
 function gsRenderExtras(g, t, W, H) {
   if (!gs.ovs.length && !gs.fx.length) return;
-  const live = gs.fx.filter(f => FXK[f.kind] && t >= (f.t0 || 0) && t <= fxT1(f) + 1e-6);
+  const live = gs.fx.filter(f => FXK[f.kind] && !f.hidden && t >= (f.t0 || 0) && t <= fxT1(f) + 1e-6);
   for (const f of live) if (FXK[f.kind][2] === 'p') fxParticles(g, f, t, W, H);
-  for (const o of gs.ovs) if (!o.hidden) ovDraw(g, o, t, W, H);
+  for (const o of ovOrdered()) if (!o.hidden) ovDraw(g, o, t, W, H);
   for (const f of live) if (FXK[f.kind][2] === 's') fxScreen(g, f, t, W, H);
 }
 // 저장 장면 계획용: 이 시점에 움직이는 게 있으면 null, 없으면 보이는 것들의 이름
 function gsDynSig(t) {
-  for (const f of gs.fx) if (t >= (f.t0 || 0) && t <= fxT1(f)) return null;
+  for (const f of gs.fx) if (!f.hidden && t >= (f.t0 || 0) && t <= fxT1(f)) return null;
   let sig = '';
   for (const o of gs.ovs) {
     if (o.hidden) continue;
@@ -486,41 +486,46 @@ function gltGallery(key) {
   m.addEventListener('click', e => {
     const b = e.target.closest('[data-gv]'); if (!b) return;
     alive = false; hov = null; const v = b.dataset.gv;
-    if (key === 'trans') gs.set.trans = v; else { const s = gs.slides[gs.sel]; if (s) s.tr = v; }
-    if (gs.set.trDur < 0.6) { gs.set.trDur = 0.8; toast('특수 넘김이 잘 보이도록 효과 길이를 0.8초로 늘렸어요'); }
+    gsApplyTrans(key === 'trans' ? -1 : gs.sel, v);
     closeModal(); gsChanged();
   });
 }
 
-/* ---- 오른쪽 칸: 탭, 글자·스티커, 효과 ---- */
-function gsTabsHtml() {
-  const n1 = gs.ovs.length, n2 = gs.fx.length;
-  return `<div class="gs-tabs">${[['scene', '장면'], ['ov', `글자·스티커${n1 ? ` <i>${n1}</i>` : ''}`], ['fx', `효과${n2 ? ` <i>${n2}</i>` : ''}`]].map(([v, l]) => `<button class="${gs.tab === v ? 'on' : ''}" data-g="tab" data-v="${v}">${l}</button>`).join('')}</div>`;
+/* ---- 줄: 글자·효과가 놓이는 시간 막대 줄. 위 줄일수록 화면에서도 위에 그려요 ---- */
+const laneOver = (a, b) => (a.t0 || 0) < (b.t1 == null ? gsTotal() : b.t1) - 1e-6 && (b.t0 || 0) < (a.t1 == null ? gsTotal() : a.t1) - 1e-6;
+const laneFree = (list, x, L) => !list.some(y => y !== x && (y.lane ?? 0) === L && laneOver(x, y));
+function laneFor(list, x) { let L = -1; for (const y of list) if (y !== x && laneOver(x, y)) L = Math.max(L, y.lane ?? 0); return L + 1; }
+function laneFix(list) { // 줄 번호가 없으면 겹치는 것 위로, 그다음 빈 줄을 당겨 0, 1, 2…
+  const done = [];
+  for (const x of list) { if (x.lane == null || !isFinite(x.lane)) { let L = -1; for (const y of done) if (laneOver(x, y)) L = Math.max(L, y.lane); x.lane = L + 1; } done.push(x); }
+  const used = [...new Set(list.map(x => x.lane))].sort((a, b) => a - b), m = new Map(used.map((v, i) => [v, i]));
+  for (const x of list) x.lane = m.get(x.lane);
 }
-const gsOpt = (arr, cur) => arr.map(([v, l]) => `<option value="${esc(v)}" ${v === cur ? 'selected' : ''}>${esc(l)}</option>`).join('');
+const ovOrdered = () => gs.ovs.map((o, i) => [o, i]).sort((a, b) => (a[0].lane || 0) - (b[0].lane || 0) || a[1] - b[1]).map(x => x[0]);
+const gpT0 = () => gs.t >= gsTotal() - 0.05 ? 0 : Math.round(gs.t * 100) / 100;
+function gpPlace(list, x, t0, lane) { // 시작 시간과 줄 정하기
+  x.t0 = clamp(t0 ?? gpT0(), 0, Math.max(0, gsTotal() - 0.1));
+  if (x.t1 != null && x.t1 <= x.t0 + 0.05) x.t1 = null;
+  x.lane = lane != null && lane >= 0 && laneFree(list, x, lane) ? lane : laneFor(list, x);
+  list.push(x); laneFix(list);
+}
+
+/* ---- 속성 칸: 고른 글자·스티커, 효과 ---- */
 const rng = (k, v, mn, mx, st, unit = '') => `<input type="range" data-gk="${k}" min="${mn}" max="${mx}" step="${st}" value="${v}"><span class="muted small rv">${v}${unit}</span>`;
 function ovTimeHtml(x, pre) {
-  return `${row('시작', `<input type="number" data-gk="${pre}.t0" min="0" step="0.1" value="${fmtT(x.t0)}" style="width:64px"> 초 <button class="btn sm" data-g="${pre === 'o' ? 'ov' : 'fx'}-now0" title="지금 재생 위치를 시작으로">지금</button>`)}
-    ${row('끝', `<input type="number" data-gk="${pre}.t1" min="0" step="0.1" value="${x.t1 == null ? '' : fmtT(x.t1)}" placeholder="끝까지" style="width:64px"> 초 <button class="btn sm" data-g="${pre === 'o' ? 'ov' : 'fx'}-now1" title="지금 재생 위치를 끝으로">지금</button><button class="btn sm" data-g="${pre === 'o' ? 'ov' : 'fx'}-end" title="움짤 끝까지">끝까지</button>`)}`;
+  const k = pre === 'o' ? 'ov' : 'fx';
+  return `${row('시작', `<input type="number" data-gk="${pre}.t0" min="0" step="0.05" value="${fmtT(x.t0)}" style="width:64px"> 초 <button class="btn sm" data-g="${k}-now0" title="지금 재생 위치를 시작으로">지금</button>`)}
+    ${row('끝', `<input type="number" data-gk="${pre}.t1" min="0" step="0.05" value="${x.t1 == null ? '' : fmtT(x.t1)}" placeholder="끝까지" style="width:64px"> 초 <button class="btn sm" data-g="${k}-now1" title="지금 재생 위치를 끝으로">지금</button><button class="btn sm" data-g="${k}-end" title="움짤 끝까지">끝까지</button>`)}`;
 }
-function ovPanelHtml() {
-  const o = gs.ovs.find(x => x.id === gs.osel);
-  const list = gs.ovs.length ? gs.ovs.map(x => `<div class="ov-it ${x.id === gs.osel ? 'on' : ''}" data-g="ov-sel" data-id="${x.id}">
-      <span class="ov-k">${x.kind === 'image' ? '그림' : '글자'}</span><span class="ov-t">${esc(x.kind === 'image' ? (x.name || '스티커') : (x.text || '').split('\n')[0].slice(0, 16) || '(빈 글자)')}</span>
-      <span class="muted small">${fmtT(x.t0)}~${x.t1 == null ? '끝' : fmtT(x.t1)}</span><button class="ic" data-g="ov-hide" data-id="${x.id}" title="${x.hidden ? '보이기' : '숨기기'}">${x.hidden ? '◌' : '●'}</button><button class="ic" data-g="ov-del" data-id="${x.id}" title="지우기">×</button></div>`).join('') : '<p class="muted small" style="margin:4px 0">아직 없어요. 위 단추로 넣고, 화면에서 끌어 옮겨요.</p>';
-  let h = `<div class="sec"><h3>글자·스티커 넣기</h3>
-    <div class="btnrow"><button class="btn sm primary" data-g="ov-add">+ 글자</button><button class="btn sm" data-g="ov-img">+ 그림 스티커</button><button class="btn sm" data-g="ov-lib">+ 보관함 그림</button></div>
-    <details class="subsec"><summary>이모지 스티커</summary><div class="emo">${EMOJIS.map(e => `<button data-g="ov-emoji" data-v="${e}">${e}</button>`).join('')}</div></details>
-    <div class="btnrow"><button class="btn sm" data-g="ov-perslide" title="장면마다 그 장면 길이에 맞춘 자막을 하나씩 만들어요">장면마다 자막 만들기</button></div>
-    <div class="ov-list">${list}</div></div>`;
-  if (!o) return h + '<p class="muted small" style="padding:0 14px">목록이나 화면에서 글자를 누르면 여기서 고쳐요.</p>';
+function ovPropsHtml(o) {
   const isT = o.kind !== 'image', st = o.st || {};
   const fontsL = [...SYS_FONTS.map(f => f[0]), ...fonts.map(f => f.name)]; if (st.font && !fontsL.includes(st.font)) fontsL.push(st.font);
   const anSel = (k, cur, groups) => `<select data-gk="${k}"><option value="">없음</option>${groups.map(([lab, items]) => `<optgroup label="${lab}">${items.map(([v, l]) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${esc(l)}</option>`).join('')}</optgroup>`).join('')}</select>`;
   const toL = a => a.map(n => [n, anName(n)]);
-  if (isT) h += `<div class="sec"><h3>글자 고치기</h3>
+  let h = '';
+  if (isT) h += `<div class="sec"><h3>글자</h3>
       <textarea data-gk="o.text" rows="2" style="width:100%;resize:vertical">${esc(o.text)}</textarea>
-      <div class="ov-pre">${OV_PRESETS.map((p, i) => `<button class="btn sm" data-g="ov-pre" data-v="${i}" title="모양과 움직임을 한 번에">${esc(p.n)}</button>`).join('')}</div>
+      <details class="subsec" ${gs.preOpen ? 'open' : ''} data-k="pre"><summary>빠른 꾸미기 ${OV_PRESETS.length}가지</summary><div class="ov-pre">${OV_PRESETS.map((p, i) => `<button class="btn sm" data-g="ov-pre" data-v="${i}" title="모양과 움직임을 한 번에">${esc(p.n)}</button>`).join('')}</div></details>
       ${row('글꼴', `<select data-gk="o.st.font">${fontsL.map(n => `<option value="${esc(n)}" ${n === st.font ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>`)}
       ${row('크기', rng('o.st.fs', st.fs ?? 80, 16, 320, 1))}
       ${row('글자색', `<input type="color" data-gk="o.st.color" value="${st.color || '#ffffff'}"><label class="chk"><input type="checkbox" data-gk="o.st.bold" ${st.bold ? 'checked' : ''}> 굵게</label>`)}
@@ -528,36 +533,32 @@ function ovPanelHtml() {
       ${row('후광', `<input type="color" data-gk="o.st.glowColor" value="${st.glowColor || '#ffe25c'}">${rng('o.st.glow', st.glow ?? 0, 0, 80, 1)}`)}
       ${row('꾸밈', `<select data-gk="o.style"><option value="">편집기 글자 꾸밈…</option>${TEXT_STYLES.map((s, i) => `<option value="${i}">${esc(s.n)}</option>`).join('')}</select>`)}</div>`;
   else h += `<div class="sec"><h3>그림 스티커</h3>${row('크기', rng('o.size', o.size || 300, 30, 1200, 5))}</div>`;
-  h += `<div class="sec"><h3>자리와 시간</h3>
+  h += `<div class="sec"><h3>자리</h3>
       ${row('자리', `<div class="seg"><button class="btn sm" data-g="ov-pos" data-v="top">위</button><button class="btn sm" data-g="ov-pos" data-v="mid">가운데</button><button class="btn sm" data-g="ov-pos" data-v="bot">아래</button></div>`)}
       ${row('배율', rng('o.sc', o.sc ?? 1, 0.2, 4, 0.05))}
       ${row('기울기', rng('o.rot', o.rot || 0, -180, 180, 1, '°'))}
-      ${ovTimeHtml(o, 'o')}</div>
+      <p class="muted small" style="margin:2px 0 0">미리보기 화면에서 끌어 옮기고, 모서리를 끌거나 휠로 크기를 바꿔요.</p></div>
+    <div class="sec"><h3>시간</h3>${ovTimeHtml(o, 'o')}</div>
     <div class="sec"><h3>움직임 <span class="muted small">Animate.css ${AN_ALL.length}가지 + 글자 효과</span></h3>
       ${row('나타날 때', anSel('o.ain.n', o.ain.n, [...(isT ? [['글자 전용', TX_IN]] : []), ['등장', toL(AN_IN)]]) + ` <input type="number" data-gk="o.ain.d" min="0.05" max="10" step="0.05" value="${o.ain.d}" style="width:56px" title="걸리는 시간(초)">`)}
       ${row('도는 동안', anSel('o.aloop.n', o.aloop.n, [['글자 효과', TX_LOOP], ['강조 반복', toL(AN_LOOP)]]) + ` <input type="number" data-gk="o.aloop.d" min="0.1" max="10" step="0.1" value="${o.aloop.d}" style="width:56px" title="한 번 도는 시간(초)">`)}
       ${row('사라질 때', anSel('o.aout.n', o.aout.n, [['퇴장', toL(AN_OUT)]]) + ` <input type="number" data-gk="o.aout.d" min="0.05" max="10" step="0.05" value="${o.aout.d}" style="width:56px" title="걸리는 시간(초)">`)}
       ${isT ? row('한 글자씩', `<label class="chk"><input type="checkbox" data-gk="o.per" ${o.per ? 'checked' : ''}> 글자마다 차례로</label> <input type="number" data-gk="o.gap" min="0" max="1" step="0.01" value="${o.gap ?? 0.06}" style="width:56px" title="글자 사이 시간(초)">`) : ''}
-      <div class="btnrow"><button class="btn sm" data-g="ov-play">이 부분 재생</button><button class="btn sm" data-g="ov-dup">복제</button><button class="btn sm" data-g="ov-front" title="맨 위에 그려요">맨 앞으로</button><button class="btn sm" data-g="ov-back">맨 뒤로</button><button class="btn sm danger" data-g="ov-del" data-id="${o.id}">지우기</button></div></div>`;
+      <div class="btnrow"><button class="btn sm" data-g="ov-play">이 부분 재생</button></div></div>
+    <div class="sec"><div class="btnrow"><button class="btn sm" data-g="ov-dup">복제</button><button class="btn sm" data-g="ov-front" title="맨 위 줄로 (화면에서도 맨 위)">맨 위로</button><button class="btn sm" data-g="ov-back">맨 아래로</button><button class="btn sm" data-g="ov-hide">${o.hidden ? '보이기' : '숨기기'}</button><button class="btn sm danger" data-g="ov-del">지우기</button></div></div>`;
   return h;
 }
-function fxPanelHtml() {
-  const f = gs.fx.find(x => x.id === gs.fsel);
-  const btns = t => FX_KINDS.filter(x => x[2] === t).map(([k, l]) => `<button class="btn sm" data-g="fx-add" data-v="${k}">${l}</button>`).join('');
-  const list = gs.fx.length ? gs.fx.map(x => `<div class="ov-it ${x.id === gs.fsel ? 'on' : ''}" data-g="fx-sel" data-id="${x.id}"><span class="ov-k">${FXK[x.kind][2] === 'p' ? '입자' : '화면'}</span><span class="ov-t">${esc(FXK[x.kind][1])}</span><span class="muted small">${fmtT(x.t0)}~${x.t1 == null ? '끝' : fmtT(x.t1)}</span><button class="ic" data-g="fx-del" data-id="${x.id}" title="지우기">×</button></div>`).join('') : '<p class="muted small" style="margin:4px 0">아직 없어요. 넣은 효과는 지금 재생 위치부터 시작해요.</p>';
-  let h = `<div class="sec"><h3>빠른 묶음</h3><div class="ov-pre">${FX_PRESETS.map(([n], i) => `<button class="btn sm" data-g="fx-pre" data-v="${i}">${esc(n)}</button>`).join('')}</div></div>
-    <div class="sec"><h3>효과 넣기</h3><p class="muted small" style="margin:0 0 4px">떠다니는 것</p><div class="ov-pre">${btns('p')}</div><p class="muted small" style="margin:6px 0 4px">화면 효과</p><div class="ov-pre">${btns('s')}</div>
-    <div class="ov-list">${list}</div></div>`;
-  if (!f) return h;
+function fxPropsHtml(f) {
   const isP = FXK[f.kind][2] === 'p', hasN = isP || f.kind === 'focus' || f.kind === 'speed', hasC = FX_COLORS[f.kind] !== undefined, rep = ['flash', 'invert', 'zoom'].includes(f.kind);
-  h += `<div class="sec"><h3>${esc(FXK[f.kind][1])}</h3>${ovTimeHtml(f, 'f')}
+  return `<div class="sec"><h3>시간</h3>${ovTimeHtml(f, 'f')}</div>
+    <div class="sec"><h3>모양</h3>
     ${hasN ? row('양', rng('f.n', f.n, 5, f.kind === 'rain' ? 400 : 250, 1)) : ''}
     ${row('속도', rng('f.speed', f.speed ?? 1, 0.1, 4, 0.1))}
     ${isP ? row('크기', rng('f.size', f.size ?? 1, 0.3, 4, 0.1)) : row('세기', rng('f.amt', f.amt ?? 1, 0.1, 2, 0.05))}
     ${hasC ? row('색', `<input type="color" data-gk="f.color" value="${f.color || '#ffffff'}">${f.kind === 'confetti' ? `<button class="btn sm" data-g="fx-mix">여러 색</button>` : ''}`) : ''}
     ${rep ? row('되풀이', `<input type="number" data-gk="f.every" min="0" max="10" step="0.1" value="${f.every || 0}" style="width:60px"> 초마다 <span class="muted small">(0 = 한 번)</span>`) : ''}
-    <div class="btnrow"><button class="btn sm" data-g="fx-play">이 부분 재생</button><button class="btn sm" data-g="fx-dup">복제</button><button class="btn sm danger" data-g="fx-del" data-id="${f.id}">지우기</button></div></div>`;
-  return h;
+    <div class="btnrow"><button class="btn sm" data-g="fx-play">이 부분 재생</button></div></div>
+    <div class="sec"><div class="btnrow"><button class="btn sm" data-g="fx-dup">복제</button><button class="btn sm" data-g="fx-hide">${f.hidden ? '보이기' : '숨기기'}</button><button class="btn sm danger" data-g="fx-del">지우기</button></div></div>`;
 }
 // 값 바꾸기 ('o.st.fs' 같은 이름)
 function ovSetKey(k, t) {
@@ -571,114 +572,78 @@ function ovSetKey(k, t) {
   let o = tgt; for (let i = 0; i < path.length - 1; i++) { o[path[i]] = o[path[i]] || {}; o = o[path[i]]; }
   o[path[path.length - 1]] = v;
   if (tgt.t1 != null && tgt.t1 < (tgt.t0 || 0) + 0.05) tgt.t1 = Math.min(gsTotal(), (tgt.t0 || 0) + 0.05);
+  if (path[0] === 't0' || path[0] === 't1') { const L = k[0] === 'o' ? gs.ovs : gs.fx; if (!laneFree(L, tgt, tgt.lane)) tgt.lane = laneFor(L, tgt); laneFix(L); }
   const rv = t.nextElementSibling; if (t.type === 'range' && rv && rv.classList.contains('rv')) rv.textContent = t.value + (k === 'o.rot' ? '°' : '');
   return true;
 }
-function ovAddText(text, extra) {
-  const T = gsTotal(), o = OV_DEF(); o.text = text; o.t0 = gs.t >= T - 0.05 ? 0 : Math.round(gs.t * 10) / 10;
-  if (extra) Object.assign(o, extra);
-  gs.ovs.push(o); gs.osel = o.id; gs.tab = 'ov'; gsChanged(); return o;
+function ovApplyPreset(o, P) { Object.assign(o.st, clone(P.st)); o.ain = { n: P.ain[0], d: P.ain[1] }; o.aloop = { n: P.aloop[0], d: P.aloop[1] }; o.aout = { n: P.aout[0], d: P.aout[1] }; o.per = P.per; if (P.gap) o.gap = P.gap; }
+function ovNewText(text) { const o = OV_DEF(); o.text = text; const T = gsTotal(), t0 = gpT0(); if (T - t0 > 3.5) o.t1 = Math.round((t0 + 3) * 100) / 100; return o; }
+function ovAddText(text, extra, t0, lane) {
+  const o = ovNewText(text); if (extra) Object.assign(o, clone(extra));
+  if (t0 != null && o.t1 != null) o.t1 = Math.min(gsTotal(), t0 + 3) >= gsTotal() - 0.5 ? null : Math.round((t0 + 3) * 100) / 100;
+  gpPlace(gs.ovs, o, t0, lane); gs.osel = o.id; gs.focus = 'ov'; gsChanged(); return o;
 }
-async function ovAddImageSrc(src, name) {
+const EMOJI_ST = () => ({ st: { font: doc.defaults.text.font, fs: 150, color: '#ffffff', bold: false, sc: '#ffffff', sw: 0, glow: 0, glowColor: '#ffe25c' }, y: 0.5, ain: { n: 'bounceIn', d: 0.6 }, aloop: { n: 'pulse', d: 1 } });
+async function ovAddImageSrc(src, name, t0, lane) {
   const im = await loadImg(src), k = Math.min(1, 1024 / Math.max(im.naturalWidth, im.naturalHeight)), c = newCanvas(Math.max(1, im.naturalWidth * k), Math.max(1, im.naturalHeight * k));
   c.getContext('2d').drawImage(im, 0, 0, c.width, c.height);
-  const o = OV_DEF(); Object.assign(o, { kind: 'image', text: '', name, src: c.toDataURL('image/png'), size: 320, y: 0.5, ain: { n: 'zoomIn', d: 0.5 }, t0: gs.t >= gsTotal() - 0.05 ? 0 : Math.round(gs.t * 10) / 10 });
-  await ovImgLoad(o); gs.ovs.push(o); gs.osel = o.id; gs.tab = 'ov'; gsChanged();
+  const o = ovNewText(''); Object.assign(o, { kind: 'image', name, src: c.toDataURL('image/png'), size: 320, y: 0.5, ain: { n: 'zoomIn', d: 0.5 } });
+  await ovImgLoad(o); gpPlace(gs.ovs, o, t0, lane); gs.osel = o.id; gs.focus = 'ov'; gsChanged();
 }
-function ovPickLibrary() {
+function ovPickLibrary(t0, lane) {
   if (!imageOrder.length) { toast('그림 보관함이 비어 있어요'); return; }
   const m = modal(`<h2>스티커로 쓸 그림 고르기</h2><p class="sub">배경을 지운 그림(투명)이면 스티커처럼 보여요.</p><div class="lib" style="grid-template-columns:repeat(5,1fr);max-height:52vh;padding:0">${imageOrder.map(id => { const r = images.get(id); return `<div class="thumb ${r.alpha ? 'alpha' : ''}" data-pid="${id}"><img src="${r.thumb || ''}" alt=""></div>`; }).join('')}</div><div class="foot"><button class="btn" data-close>취소</button></div>`, { wide: true });
   m.addEventListener('click', async e => { const t = e.target.closest('[data-pid]'); if (!t) return; const im = imgCache.get(t.dataset.pid), r = images.get(t.dataset.pid); closeModal(); if (!im || !im.naturalWidth) return;
-    const c = newCanvas(im.naturalWidth, im.naturalHeight); c.getContext('2d').drawImage(im, 0, 0); await ovAddImageSrc(c.toDataURL('image/png'), r.name); });
+    const c = newCanvas(im.naturalWidth, im.naturalHeight); c.getContext('2d').drawImage(im, 0, 0); await ovAddImageSrc(c.toDataURL('image/png'), r.name, t0, lane); });
 }
-function ovClick(a, b) {
-  const o = gs.ovs.find(x => x.id === gs.osel), f = gs.fx.find(x => x.id === gs.fsel), id = b.dataset.id, now = Math.round(gs.t * 10) / 10;
-  const keepT = () => { gsChanged(); };
-  if (a === 'tab') { gs.tab = b.dataset.v; gsRenderProps(); gsDraw(); return; }
+function fxAdd(kind, t0, lane) { const x = FX_DEF(kind, 0); x.t0 = 0; const t = t0 ?? gpT0(); if (x.t1 != null) x.t1 = Math.round(Math.min(gsTotal(), t + x.t1) * 100) / 100; gpPlace(gs.fx, x, t, lane); gs.fsel = x.id; gs.focus = 'fx'; return x; }
+function fxAddPreset(i, t0) { const [, L] = FX_PRESETS[i]; let last; const t = t0 ?? gpT0(); for (const [k, ex] of L) { last = fxAdd(k, t); const e = { ...ex }; if ('t1' in e) { last.t1 = e.t1; delete e.t1; } Object.assign(last, e); } laneFix(gs.fx); return last; }
+// 글자·효과 단추 (속성 칸, 재료 칸, 시간 막대에 놓기). at = {t, lane}
+function ovClick(a, b, at) {
+  const o = gs.ovs.find(x => x.id === gs.osel), f = gs.fx.find(x => x.id === gs.fsel), now = Math.round(gs.t * 100) / 100, t0 = at ? at.t : undefined, ln = at ? at.lane : undefined;
+  const done = () => gsChanged();
   if (a === 'tr-gal') { gltGallery(b.dataset.v); return; }
-  if (a === 'ov-add') ovAddText('글자를 입력하세요');
-  else if (a === 'ov-emoji') ovAddText(b.dataset.v, { st: { font: doc.defaults.text.font, fs: 150, color: '#ffffff', bold: false, sc: '#ffffff', sw: 0, glow: 0, glowColor: '#ffe25c' }, y: 0.5, ain: { n: 'bounceIn', d: 0.6 }, aloop: { n: 'pulse', d: 1 } });
-  else if (a === 'ov-img') { const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'image/*'; inp.onchange = async () => { const fl = inp.files[0]; if (fl) try { await ovAddImageSrc(await readAsDataURL(fl), fl.name); } catch (e) { toast('그림을 열지 못했어요'); } }; inp.click(); }
-  else if (a === 'ov-lib') ovPickLibrary();
+  if (a === 'ov-add') ovAddText('글자를 입력하세요', null, t0, ln);
+  else if (a === 'ov-preadd') { const P = OV_PRESETS[+b.dataset.v], x = ovNewText(P.n); ovApplyPreset(x, P); gpPlace(gs.ovs, x, t0, ln); gs.osel = x.id; gs.focus = 'ov'; done(); gsPlayFrom(x.t0); }
+  else if (a === 'ov-emoji') ovAddText(b.dataset.v, EMOJI_ST(), t0, ln);
+  else if (a === 'ov-img') { const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'image/*'; inp.onchange = async () => { const fl = inp.files[0]; if (fl) try { await ovAddImageSrc(await readAsDataURL(fl), fl.name, t0, ln); } catch (e) { toast('그림을 열지 못했어요'); } }; inp.click(); }
+  else if (a === 'ov-lib') ovPickLibrary(t0, ln);
   else if (a === 'ov-perslide') {
     if (!gs.slides.length) { toast('장면을 먼저 넣어 주세요'); return; }
-    let acc = 0; const base = o && o.kind !== 'image' ? o : null;
-    gs.slides.forEach((s, i) => { const d = gsDur(s), x = base ? { ...clone({ ...base, bmp: null }), id: uid() } : OV_DEF(); x.text = `자막 ${i + 1}`; x.t0 = Math.round(acc * 100) / 100; x.t1 = Math.round((acc + d) * 100) / 100; if (!base) { x.ain = { n: 'fadeIn', d: Math.min(0.3, d / 3) }; x.aout = { n: 'fadeOut', d: Math.min(0.2, d / 4) }; Object.assign(x.st, { boxOn: true, boxColor: '#000000', boxA: 55, boxPad: 24, boxR: 12, sw: 0, bold: false, fs: 60 }); } gs.ovs.push(x); acc += d; });
-    gs.osel = gs.ovs[gs.ovs.length - gs.slides.length].id; gs.tab = 'ov'; keepT(); toast(`장면 ${gs.slides.length}개에 자막을 만들었어요. 목록에서 하나씩 눌러 글자를 바꿔요.`, 4000);
+    let acc = 0; const base = o && o.kind !== 'image' ? o : null, made = [], L = gs.ovs.reduce((m, x) => Math.max(m, x.lane ?? 0), -1) + 1;
+    gs.slides.forEach((s, i) => { const d = gsDur(s), x = base ? { ...clone({ ...base, bmp: null }), id: uid() } : OV_DEF(); x.text = `자막 ${i + 1}`; x.t0 = Math.round(acc * 100) / 100; x.t1 = Math.round((acc + d) * 100) / 100; x.lane = L; if (!base) { x.ain = { n: 'fadeIn', d: Math.min(0.3, d / 3) }; x.aout = { n: 'fadeOut', d: Math.min(0.2, d / 4) }; Object.assign(x.st, { boxOn: true, boxColor: '#000000', boxA: 55, boxPad: 24, boxR: 12, sw: 0, bold: false, fs: 60 }); } gs.ovs.push(x); made.push(x); acc += d; });
+    laneFix(gs.ovs); gs.osel = made[0].id; gs.focus = 'ov'; done(); toast(`장면 ${gs.slides.length}개에 자막을 한 줄로 만들었어요. 아래 줄에서 하나씩 눌러 글자를 바꿔요.`, 4000);
   }
-  else if (a === 'ov-sel') { gs.osel = id; gs.tab = 'ov'; gsRenderProps(); gsDraw(); gsTrackRender(); return; }
-  else if (a === 'ov-del') { const i = gs.ovs.findIndex(x => x.id === (id || gs.osel)); if (i >= 0) { gs.ovs.splice(i, 1); if (gs.osel === (id || gs.osel)) gs.osel = (gs.ovs[i] || gs.ovs[i - 1] || {}).id || null; } keepT(); }
-  else if (a === 'ov-hide') { const x = gs.ovs.find(x => x.id === id); if (x) x.hidden = !x.hidden; keepT(); }
+  else if (a === 'fx-add') { const x = fxAdd(b.dataset.v, t0, ln); done(); gsPlayFrom(x.t0); }
+  else if (a === 'fx-pre') { const x = fxAddPreset(+b.dataset.v, t0); done(); gsPlayFrom(x.t0); }
+  else if (a === 'ov-del') { const i = gs.ovs.indexOf(o); if (i >= 0) { gs.ovs.splice(i, 1); laneFix(gs.ovs); gs.osel = null; gs.focus = 'set'; } done(); }
   else if (!o && a.startsWith('ov-')) return;
-  else if (a === 'ov-dup') { const x = { ...clone({ ...o, bmp: null }), id: uid(), bmp: o.bmp, x: Math.min(0.95, o.x + 0.03), y: Math.min(0.95, o.y + 0.03) }; gs.ovs.push(x); gs.osel = x.id; keepT(); }
-  else if (a === 'ov-front' || a === 'ov-back') { const i = gs.ovs.indexOf(o); gs.ovs.splice(i, 1); a === 'ov-front' ? gs.ovs.push(o) : gs.ovs.unshift(o); keepT(); }
-  else if (a === 'ov-pre') { const P = OV_PRESETS[+b.dataset.v]; Object.assign(o.st, clone(P.st)); o.ain = { n: P.ain[0], d: P.ain[1] }; o.aloop = { n: P.aloop[0], d: P.aloop[1] }; o.aout = { n: P.aout[0], d: P.aout[1] }; o.per = P.per; if (P.gap) o.gap = P.gap; keepT(); gsPlayFrom(o.t0 || 0); }
-  else if (a === 'ov-pos') { o.y = { top: 0.15, mid: 0.5, bot: 0.84 }[b.dataset.v]; o.x = 0.5; keepT(); }
-  else if (a === 'ov-now0') { o.t0 = now; if (o.t1 != null && o.t1 <= now) o.t1 = null; keepT(); }
-  else if (a === 'ov-now1') { o.t1 = Math.max((o.t0 || 0) + 0.1, now); keepT(); }
-  else if (a === 'ov-end') { o.t1 = null; keepT(); }
+  else if (a === 'ov-hide') { o.hidden = !o.hidden; done(); }
+  else if (a === 'ov-dup') { const x = { ...clone({ ...o, bmp: null }), id: uid(), bmp: o.bmp, x: Math.min(0.95, o.x + 0.03), y: Math.min(0.95, o.y + 0.03), lane: null }; x.lane = laneFor(gs.ovs, x); gs.ovs.push(x); laneFix(gs.ovs); gs.osel = x.id; done(); }
+  else if (a === 'ov-front' || a === 'ov-back') { o.lane = a === 'ov-front' ? gs.ovs.reduce((m, x) => Math.max(m, x.lane ?? 0), 0) + 1 : -1; laneFix(gs.ovs); done(); }
+  else if (a === 'ov-pre') { ovApplyPreset(o, OV_PRESETS[+b.dataset.v]); done(); gsPlayFrom(o.t0 || 0); }
+  else if (a === 'ov-pos') { o.y = { top: 0.15, mid: 0.5, bot: 0.84 }[b.dataset.v]; o.x = 0.5; done(); }
+  else if (a === 'ov-now0') { o.t0 = now; if (o.t1 != null && o.t1 <= now) o.t1 = null; if (!laneFree(gs.ovs, o, o.lane)) o.lane = laneFor(gs.ovs, o); laneFix(gs.ovs); done(); }
+  else if (a === 'ov-now1') { o.t1 = Math.max((o.t0 || 0) + 0.1, now); done(); }
+  else if (a === 'ov-end') { o.t1 = null; if (!laneFree(gs.ovs, o, o.lane)) o.lane = laneFor(gs.ovs, o); laneFix(gs.ovs); done(); }
   else if (a === 'ov-play') gsPlayFrom(o.t0 || 0);
-  else if (a === 'fx-add') { const x = FX_DEF(b.dataset.v, gs.t >= gsTotal() - 0.05 ? 0 : now); gs.fx.push(x); gs.fsel = x.id; gs.tab = 'fx'; keepT(); gsPlayFrom(x.t0); }
-  else if (a === 'fx-pre') { const [, L] = FX_PRESETS[+b.dataset.v], t0 = gs.t >= gsTotal() - 0.05 ? 0 : now; let last; for (const [k, ex] of L) { last = Object.assign(FX_DEF(k, t0), ex); gs.fx.push(last); } gs.fsel = last.id; gs.tab = 'fx'; keepT(); gsPlayFrom(t0); }
-  else if (a === 'fx-sel') { gs.fsel = id; gs.tab = 'fx'; gsRenderProps(); gsTrackRender(); return; }
-  else if (a === 'fx-del') { const i = gs.fx.findIndex(x => x.id === (id || gs.fsel)); if (i >= 0) { gs.fx.splice(i, 1); gs.fsel = (gs.fx[i] || gs.fx[i - 1] || {}).id || null; } keepT(); }
+  else if (a === 'fx-del') { const i = gs.fx.indexOf(f); if (i >= 0) { gs.fx.splice(i, 1); laneFix(gs.fx); gs.fsel = null; gs.focus = 'set'; } done(); }
   else if (!f) return;
-  else if (a === 'fx-dup') { const x = { ...clone(f), id: uid() }; gs.fx.push(x); gs.fsel = x.id; keepT(); }
-  else if (a === 'fx-mix') { f.color = ''; keepT(); }
-  else if (a === 'fx-now0') { f.t0 = now; if (f.t1 != null && f.t1 <= now) f.t1 = null; keepT(); }
-  else if (a === 'fx-now1') { f.t1 = Math.max((f.t0 || 0) + 0.1, now); keepT(); }
-  else if (a === 'fx-end') { f.t1 = null; keepT(); }
+  else if (a === 'fx-hide') { f.hidden = !f.hidden; done(); }
+  else if (a === 'fx-dup') { const x = { ...clone(f), id: uid(), lane: null }; x.lane = laneFor(gs.fx, x); gs.fx.push(x); laneFix(gs.fx); gs.fsel = x.id; done(); }
+  else if (a === 'fx-mix') { f.color = ''; done(); }
+  else if (a === 'fx-now0') { f.t0 = now; if (f.t1 != null && f.t1 <= now) f.t1 = null; if (!laneFree(gs.fx, f, f.lane)) f.lane = laneFor(gs.fx, f); laneFix(gs.fx); done(); }
+  else if (a === 'fx-now1') { f.t1 = Math.max((f.t0 || 0) + 0.1, now); done(); }
+  else if (a === 'fx-end') { f.t1 = null; if (!laneFree(gs.fx, f, f.lane)) f.lane = laneFor(gs.fx, f); laneFix(gs.fx); done(); }
   else if (a === 'fx-play') gsPlayFrom(f.t0 || 0);
 }
 function gsPlayFrom(t) { if (!gs.slides.length) return; gsPause(); gs.t = clamp(t, 0, Math.max(0, gsTotal() - 0.01)); gsPlay(); }
 
-/* ---- 아래쪽 시간 막대 ---- */
-function gsTrackRender() {
-  const el = $('#gsTrack'); if (!el) return;
-  const T = gsTotal(), rows = [...gs.ovs.map(o => ['o', o]), ...gs.fx.map(f => ['f', f])];
-  if (!rows.length || !T) { el.hidden = true; return; } el.hidden = false;
-  let acc = 0; const ticks = gs.slides.slice(0, -1).map(s => { acc += gsDur(s); return `<i style="left:${acc / T * 100}%"></i>`; }).join('');
-  el.innerHTML = rows.map(([k, x]) => { const a = (x.t0 || 0) / T, b = (k === 'o' ? ovT1(x) : fxT1(x)) / T, on = k === 'o' ? x.id === gs.osel : x.id === gs.fsel;
-    return `<div class="tr-row"><span class="tr-l" data-g="${k === 'o' ? 'ov' : 'fx'}-sel" data-id="${x.id}" title="누르면 골라요">${esc(k === 'o' ? (x.kind === 'image' ? '그림' : (x.text || '').split('\n')[0].slice(0, 10)) : FXK[x.kind][1])}</span><span class="tr-lane">${ticks}<b class="tr-bar ${k} ${on ? 'on' : ''}" data-tk="${k}" data-id="${x.id}" style="left:${a * 100}%;width:${Math.max(0.5, (b - a) * 100)}%"></b></span></div>`; }).join('') + '<div class="tr-head" id="gsHead"></div>';
-  gsTrackHead();
-}
-function gsTrackHead() {
-  const h = $('#gsHead'), el = $('#gsTrack'); if (!h || el.hidden) return;
-  const lane = el.querySelector('.tr-lane'); if (!lane) return;
-  const T = gsTotal(), r = lane.getBoundingClientRect(), r0 = el.getBoundingClientRect();
-  h.style.left = (r.left - r0.left + el.scrollLeft + (T ? gs.t / T : 0) * r.width) + 'px';
-}
-function gsTrackBind() {
-  const el = $('#gsTrack'); let D = null;
-  el.addEventListener('click', e => { const b = e.target.closest('[data-g]'); if (b) ovClick(b.dataset.g, b); });
-  el.addEventListener('pointerdown', e => {
-    const bar = e.target.closest('.tr-bar'), lane = e.target.closest('.tr-lane'); if (!lane) return;
-    const r = lane.getBoundingClientRect(), T = gsTotal(); if (!T) return;
-    if (!bar) { gsPause(); gs.t = clamp((e.clientX - r.left) / r.width * T, 0, T); gsDraw(); return; }
-    const x = (bar.dataset.tk === 'o' ? gs.ovs : gs.fx).find(z => z.id === bar.dataset.id); if (!x) return;
-    const br = bar.getBoundingClientRect(), edge = Math.min(8, br.width / 3);
-    D = { x, bar, r, T, sx: e.clientX, t0: x.t0 || 0, t1: bar.dataset.tk === 'o' ? ovT1(x) : fxT1(x), mode: e.clientX - br.left < edge ? 'l' : br.right - e.clientX < edge ? 'r' : 'm', moved: false };
-    if (bar.dataset.tk === 'o') { gs.osel = x.id; gs.tab = 'ov'; } else { gs.fsel = x.id; gs.tab = 'fx'; }
-    bar.setPointerCapture(e.pointerId); e.preventDefault();
-  });
-  el.addEventListener('pointermove', e => {
-    if (!D) { const bar = e.target.closest('.tr-bar'); if (bar) { const br = bar.getBoundingClientRect(), edge = Math.min(8, br.width / 3); bar.style.cursor = e.clientX - br.left < edge || br.right - e.clientX < edge ? 'ew-resize' : 'grab'; } return; }
-    const dt = (e.clientX - D.sx) / D.r.width * D.T, snap = v => Math.round(v * 20) / 20; D.moved = true;
-    let a = D.t0, b = D.t1;
-    if (D.mode === 'm') { const len = b - a; a = clamp(snap(a + dt), 0, D.T - len); b = a + len; }
-    else if (D.mode === 'l') a = clamp(snap(a + dt), 0, b - 0.1); else b = clamp(snap(b + dt), a + 0.1, D.T);
-    D.x.t0 = a; D.x.t1 = b >= D.T - 0.001 ? null : b;
-    D.bar.style.left = a / D.T * 100 + '%'; D.bar.style.width = (b - a) / D.T * 100 + '%';
-    gsPause(); gs.t = D.mode === 'r' ? b - 0.001 : a; gsDraw();
-  });
-  const end = () => { if (!D) return; const m = D.moved; D = null; if (m) gsChanged(); else { gsRenderProps(); gsTrackRender(); gsDraw(); } };
-  el.addEventListener('pointerup', end); el.addEventListener('pointercancel', end);
-}
-
-/* ---- 화면에서 끌어 옮기기 ---- */
+/* ---- 미리보기 화면에서 끌어 옮기기 ---- */
 function ovHit(px, py, W, H) { // 맨 위부터
-  for (let i = gs.ovs.length - 1; i >= 0; i--) {
-    const o = gs.ovs[i]; if (o.hidden || gs.t < (o.t0 || 0) - 1e-6 || gs.t > ovT1(o) + 1e-6) continue;
+  const L = ovOrdered();
+  for (let i = L.length - 1; i >= 0; i--) {
+    const o = L[i]; if (o.hidden || gs.t < (o.t0 || 0) - 1e-6 || gs.t > ovT1(o) + 1e-6) continue;
     const { hw, hh } = ovBox(o, W, H), dx = px - o.x * W, dy = py - o.y * H, a = -(o.rot || 0) * DEG;
     const lx = dx * Math.cos(a) - dy * Math.sin(a), ly = dx * Math.sin(a) + dy * Math.cos(a);
     if (Math.abs(lx) <= hw + 6 && Math.abs(ly) <= hh + 6) return o;
@@ -686,7 +651,7 @@ function ovHit(px, py, W, H) { // 맨 위부터
   return null;
 }
 function ovDrawSel(g, W, H) {
-  if (gs.tab !== 'ov') return;
+  if (gs.focus !== 'ov' || gs.playing) return;
   const o = gs.ovs.find(x => x.id === gs.osel); if (!o || o.hidden) return;
   const live = gs.t >= (o.t0 || 0) - 1e-6 && gs.t <= ovT1(o) + 1e-6, { hw, hh } = ovBox(o, W, H), k = W / Math.max(1, $('#gsCv').clientWidth);
   g.save(); g.translate(o.x * W, o.y * H); if (o.rot) g.rotate(o.rot * DEG);
@@ -699,18 +664,19 @@ function ovDrawSel(g, W, H) {
 function ovBind() {
   const cv = $('#gsCv'); let D = null;
   const pt = e => { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) * cv.width / r.width, (e.clientY - r.top) * cv.height / r.height]; };
+  const local = (o, px, py, W, H) => { const dx = px - o.x * W, dy = py - o.y * H, a = -(o.rot || 0) * DEG; return [dx * Math.cos(a) - dy * Math.sin(a), dx * Math.sin(a) + dy * Math.cos(a), dx, dy]; };
   cv.addEventListener('pointerdown', e => {
     if (!gs.slides.length) return;
     const [px, py] = pt(e), W = cv.width, H = cv.height;
     let o = ovHit(px, py, W, H);
     const sel = gs.ovs.find(x => x.id === gs.osel);
-    if (!o && sel && gs.tab === 'ov') { const { hw, hh } = ovBox(sel, W, H); const dx = px - sel.x * W, dy = py - sel.y * H, a = -(sel.rot || 0) * DEG, lx = dx * Math.cos(a) - dy * Math.sin(a), ly = dx * Math.sin(a) + dy * Math.cos(a); if (Math.abs(lx) <= hw + 12 && Math.abs(ly) <= hh + 12) o = sel; }
-    if (!o) { if (gs.tab === 'ov' && gs.osel) { gs.osel = null; gsRenderProps(); gsDraw(); gsTrackRender(); } return; }
+    if (!o && sel && gs.focus === 'ov') { const { hw, hh } = ovBox(sel, W, H), [lx, ly] = local(sel, px, py, W, H); if (Math.abs(lx) <= hw + 12 && Math.abs(ly) <= hh + 12) o = sel; }
+    if (!o) { if (gs.focus === 'ov') { gs.focus = 'set'; gsRenderProps(); gsDraw(); gsRenderList(); } return; }
     gsPause();
-    const { hw, hh } = ovBox(o, W, H), dx = px - o.x * W, dy = py - o.y * H, a = -(o.rot || 0) * DEG, lx = dx * Math.cos(a) - dy * Math.sin(a), ly = dx * Math.sin(a) + dy * Math.cos(a);
-    const corner = Math.abs(Math.abs(lx) - hw) < 14 * W / cv.clientWidth && Math.abs(Math.abs(ly) - hh) < 14 * W / cv.clientWidth;
+    const { hw, hh } = ovBox(o, W, H), [lx, ly, dx, dy] = local(o, px, py, W, H), tol = 14 * W / cv.clientWidth;
+    const corner = Math.abs(Math.abs(lx) - hw) < tol && Math.abs(Math.abs(ly) - hh) < tol;
     D = { o, sx: px, sy: py, ox: o.x, oy: o.y, sc: o.sc || 1, d0: Math.hypot(dx, dy), corner, moved: false };
-    const changed = gs.osel !== o.id || gs.tab !== 'ov'; gs.osel = o.id; gs.tab = 'ov'; if (changed) { gsRenderProps(); gsTrackRender(); }
+    const changed = gs.osel !== o.id || gs.focus !== 'ov'; gs.osel = o.id; gs.focus = 'ov'; if (changed) { gsRenderProps(); gsRenderList(); }
     cv.setPointerCapture(e.pointerId); gsDraw(); e.preventDefault();
   });
   cv.addEventListener('pointermove', e => {
@@ -724,12 +690,11 @@ function ovBind() {
   const end = () => { if (!D) return; const m = D.moved; D = null; if (m) gsChanged(); };
   cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end);
   cv.addEventListener('wheel', e => {
-    const o = gs.ovs.find(x => x.id === gs.osel); if (!o || gs.tab !== 'ov') return;
+    const o = gs.ovs.find(x => x.id === gs.osel); if (!o || gs.focus !== 'ov') return;
     const [px, py] = pt(e); if (ovHit(px, py, cv.width, cv.height) !== o) return;
     e.preventDefault(); o.sc = clamp((o.sc || 1) * Math.pow(1.1, -e.deltaY / 100), 0.1, 8); gsDraw(); clearTimeout(gsSaveT); gsSaveT = setTimeout(() => gsChanged(), 400);
   }, { passive: false });
   cv.addEventListener('dblclick', () => { const ta = $('#gsProps textarea[data-gk="o.text"]'); if (ta) { ta.focus(); ta.select(); } });
-  gsTrackBind();
 }
 // 저장·불러오기
 const ovPlain = o => { const { bmp, ...r } = o; return clone(r); };
