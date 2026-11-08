@@ -218,11 +218,13 @@ const EMOJIS = ['❤️', '💖', '💕', '✨', '⭐', '🌟', '🔥', '💥', 
 const FX_KINDS = [
   ['snow', '눈', 'p'], ['rain', '비', 'p'], ['sakura', '벚꽃잎', 'p'], ['hearts', '하트', 'p'], ['sparkle', '반짝이', 'p'], ['stars', '별빛', 'p'], ['confetti', '색종이', 'p'], ['bubbles', '비눗방울', 'p'], ['embers', '불티', 'p'], ['bokeh', '빛망울', 'p'],
   ['focus', '집중선', 's'], ['speed', '속도선', 's'], ['shake', '화면 흔들림', 's'], ['zoom', '줌 펀치', 's'], ['flash', '번쩍', 's'], ['invert', '색 반전 번쩍', 's'], ['glitch', '글리치', 's'], ['vhs', 'VHS 노이즈', 's'], ['grain', '필름 질감', 's'], ['leak', '빛 번짐', 's'], ['vignette', '비네팅 맥박', 's'], ['bw', '흑백', 's'],
+  ['cam-rec', '캠코더 녹화', 'c'], ['cam-phone', '폰 촬영', 'c'], ['cam-vf', '뷰파인더', 'c'], ['cam-vhs', 'VHS 화면', 'c'], ['cam-cctv', 'CCTV', 'c'], ['cam-film', '필름 프레임', 'c'], ['cam-letterbox', '레터박스', 'c'],
 ];
 const FXK = Object.fromEntries(FX_KINDS.map(x => [x[0], x]));
 const FX_COLORS = { snow: '#ffffff', rain: '#a8c8ff', sakura: '#ffb7d2', hearts: '#ff4f7b', sparkle: '#fff6c8', stars: '#ffffff', confetti: '', bubbles: '#bfe8ff', embers: '#ff9a3c', bokeh: '#ffe2a8', focus: '#000000', speed: '#ffffff', flash: '#ffffff', leak: '#ff9a5a', vignette: '#000000' };
 const FX_ONCE = { flash: 0.6, invert: 0.5, zoom: 0.6, shake: 0.8 }; // 한 번만 하는 효과의 기본 길이
 function FX_DEF(k, t0 = 0) {
+  if (k.startsWith('cam-')) { const D = TMPL_DEF(k.slice(4)); return { id: uid(), kind: k, t0, t1: null, color: '#ffffff', txt: D.txt, time: '00:00:00', date: D.date, lb: D.lb, grid: D.grid, speed: 1, amt: 1 }; }
   return { id: uid(), kind: k, t0, t1: FX_ONCE[k] ? Math.min(gsTotal(), t0 + FX_ONCE[k]) : null, n: { rain: 160, snow: 90, confetti: 110, focus: 90, speed: 50, bokeh: 22, stars: 70, sparkle: 36 }[k] || 50, speed: 1, size: 1, color: FX_COLORS[k] ?? '#ffffff', amt: 1, every: 0 };
 }
 const fxT1 = f => f.t1 == null ? gsTotal() : f.t1;
@@ -318,6 +320,8 @@ function fxScreen(g, f, t, W, H) {
   } else if (k === 'vignette') {
     const r0 = Math.min(W, H) * (0.28 + 0.08 * Math.sin(lt * 4 * sp)), gr = g.createRadialGradient(W / 2, H / 2, r0, W / 2, H / 2, Math.hypot(W, H) / 2);
     gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(1, f.color || '#000000'); g.globalAlpha = 0.9 * A; g.fillStyle = gr; g.fillRect(0, 0, W, H);
+  } else if (k.startsWith('cam-')) { // 카메라 화면: 녹화 점이 깜빡이고 시간이 흘러요
+    const D = TMPL_DEF(k.slice(4)); tmplDraw(g, { ...D, color: f.color || '#ffffff', txt: f.txt ?? D.txt, time: f.time || '00:00:00', date: f.date ?? D.date, lb: f.lb ?? D.lb, grid: f.grid ?? D.grid }, W, H, lt * (f.speed || 1));
   } else if (k === 'bw') { const c = fxCopy(g, W, H); g.filter = `grayscale(${clamp(A, 0, 1)}) contrast(1.08)`; g.drawImage(c, 0, 0); }
   else if (k === 'focus' || k === 'speed') {
     const fr = Math.floor(lt * 12 * sp), n = Math.round(clamp(f.n || 60, 10, 300));
@@ -342,6 +346,7 @@ function gsRenderExtras(g, t, W, H) {
   for (const f of live) if (FXK[f.kind][2] === 'p') fxParticles(g, f, t, W, H);
   for (const o of ovOrdered()) if (!o.hidden) ovDraw(g, o, t, W, H);
   for (const f of live) if (FXK[f.kind][2] === 's') fxScreen(g, f, t, W, H);
+  for (const f of live) if (FXK[f.kind][2] === 'c') fxScreen(g, f, t, W, H); // 카메라 화면은 맨 위에
 }
 // 저장 장면 계획용: 이 시점에 움직이는 게 있으면 null, 없으면 보이는 것들의 이름
 function gsDynSig(t) {
@@ -550,6 +555,20 @@ function ovPropsHtml(o) {
 }
 function fxPropsHtml(f) {
   const isP = FXK[f.kind][2] === 'p', hasN = isP || f.kind === 'focus' || f.kind === 'speed', hasC = FX_COLORS[f.kind] !== undefined, rep = ['flash', 'invert', 'zoom'].includes(f.kind);
+  if (FXK[f.kind][2] === 'c') {
+    const tk = f.kind.slice(4), inp = (k, ph) => `<input type="text" data-gk="f.${k}" value="${esc(f[k] ?? '')}" placeholder="${ph}" spellcheck="false" style="flex:1;min-width:0">`;
+    return `<div class="sec"><h3>시간</h3>${ovTimeHtml(f, 'f')}</div>
+    <div class="sec"><h3>모양</h3>
+    ${tk !== 'letterbox' && tk !== 'film' ? row('글자색', `<input type="color" data-gk="f.color" value="${f.color || '#ffffff'}">`) : ''}
+    ${['rec', 'cctv', 'vhs', 'film'].includes(tk) ? row('이름', inp('txt', 'REC')) : ''}
+    ${['vf', 'rec', 'cctv', 'vhs', 'phone'].includes(tk) ? row('시작 시간', inp('time', '00:00:00')) : ''}
+    ${['rec', 'cctv', 'vhs'].includes(tk) ? row('날짜', inp('date', '2026.11.08')) : ''}
+    ${tk === 'vf' ? row('', `<label class="chk"><input type="checkbox" data-gk="f.grid" ${f.grid ? 'checked' : ''}> 3분할 격자</label>`) : ''}
+    ${row('레터박스', `<select data-gk="f.lb">${LB_RATIOS.map(([v, l]) => `<option value="${v}" ${String(f.lb ?? '0') === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`)}
+    ${tk !== 'letterbox' ? row('시간 빠르기', rng('f.speed', f.speed ?? 1, 0.1, 10, 0.1)) : ''}
+    <p class="muted small">녹화 점이 깜빡이고 시간이 흘러가요. 이미지 편집의 '레이어' 메뉴에도 같은 템플릿이 있어요.</p></div>
+    <div class="sec"><div class="btnrow"><button class="btn sm" data-g="fx-dup">복제</button><button class="btn sm" data-g="fx-hide">${f.hidden ? '보이기' : '숨기기'}</button><button class="btn sm danger" data-g="fx-del">지우기</button></div></div>`;
+  }
   return `<div class="sec"><h3>시간</h3>${ovTimeHtml(f, 'f')}</div>
     <div class="sec"><h3>모양</h3>
     ${hasN ? row('양', rng('f.n', f.n, 5, f.kind === 'rain' ? 400 : 250, 1)) : ''}

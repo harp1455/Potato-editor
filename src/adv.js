@@ -4,8 +4,8 @@ const ADV = {
   exposure: 0, hl: 0, sh: 0, whites: 0, blacks: 0, // 빛
   temp: 0, tint: 0, vib: 0, // 색
   lvIn0: 0, lvGam: 1, lvIn1: 255, lvOut0: 0, lvOut1: 255, // 레벨
-  sharp: 0, sharpR: 1, clarity: 0, // 디테일
-  grain: 0, grainSize: 1.5, fade: 0, stOn: false, stSh: '#1f5f8b', stHi: '#ffb05c', stBal: 0, stA: 35, // 효과
+  sharp: 0, sharpR: 1, clarity: 0, dn: 0, // 디테일 (dn = 잡음 줄이기)
+  grain: 0, grainSize: 1.5, fade: 0, cube: '', cubeA: 100, stOn: false, stSh: '#1f5f8b', stHi: '#ffb05c', stBal: 0, stA: 35, // 효과
 };
 const ADV_KEYS = Object.keys(ADV);
 const ADV_BANDS = [['빨강', '#e5484d', 0, 25], ['주황', '#f08c2e', 30, 25], ['노랑', '#e7c32b', 60, 35], ['초록', '#46a758', 120, 55], ['하늘', '#2bb7c9', 180, 50], ['파랑', '#3e63dd', 235, 40], ['보라', '#8e4ec6', 275, 30], ['자홍', '#d6409f', 315, 30]];
@@ -61,13 +61,71 @@ function curveTable(pts) {
   return out;
 }
 
+/* ---- 필터 파일 (.cube 3D LUT): 이 컴퓨터에 저장해 두고 이름으로 써요 ---- */
+const lutData = new Map();
+const lutList = () => { try { return JSON.parse(localStorage.getItem('potatoLuts') || '[]'); } catch (e) { return []; } };
+function lutGet(name) {
+  if (lutData.has(name)) return lutData.get(name);
+  const e = lutList().find(x => x.name === name); if (!e) { lutData.set(name, null); return null; }
+  const b = atob(e.b64), u8 = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u8[i] = b.charCodeAt(i);
+  const r = { n: e.n, u8 }; lutData.set(name, r); return r;
+}
+function lutParse(text) { // .cube 글 → { n, u8 (RGB, r가 가장 빨리 바뀜) } (33보다 크면 33으로 줄여요)
+  let n = 0, lo = [0, 0, 0], hi = [1, 1, 1]; const v = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const ln = raw.trim(); if (!ln || ln[0] === '#') continue;
+    const m = ln.split(/\s+/);
+    if (m[0] === 'LUT_3D_SIZE') n = +m[1]; else if (m[0] === 'LUT_1D_SIZE') throw new Error('1d');
+    else if (m[0] === 'DOMAIN_MIN') lo = m.slice(1, 4).map(Number); else if (m[0] === 'DOMAIN_MAX') hi = m.slice(1, 4).map(Number);
+    else if (/^[-+0-9.eE]/.test(m[0]) && m.length >= 3) v.push(+m[0], +m[1], +m[2]);
+  }
+  if (!(n >= 2 && n <= 129) || v.length < n * n * n * 3) throw new Error('bad');
+  const f = (c, x) => clamp((x - lo[c]) / ((hi[c] - lo[c]) || 1), 0, 1);
+  const M = Math.min(n, 33), u8 = new Uint8Array(M * M * M * 3);
+  const at = (r, g, b, c) => v[((b * n + g) * n + r) * 3 + c];
+  for (let b = 0; b < M; b++) for (let g = 0; g < M; g++) for (let r = 0; r < M; r++) {
+    const fr = r * (n - 1) / (M - 1), fg = g * (n - 1) / (M - 1), fb = b * (n - 1) / (M - 1), r0 = Math.floor(fr), g0 = Math.floor(fg), b0 = Math.floor(fb);
+    const r1 = Math.min(n - 1, r0 + 1), g1 = Math.min(n - 1, g0 + 1), b1 = Math.min(n - 1, b0 + 1), tr = fr - r0, tg = fg - g0, tb = fb - b0;
+    for (let c = 0; c < 3; c++) {
+      const L = (rr, gg, bb) => at(rr, gg, bb, c), x00 = L(r0, g0, b0) * (1 - tr) + L(r1, g0, b0) * tr, x10 = L(r0, g1, b0) * (1 - tr) + L(r1, g1, b0) * tr;
+      const x01 = L(r0, g0, b1) * (1 - tr) + L(r1, g0, b1) * tr, x11 = L(r0, g1, b1) * (1 - tr) + L(r1, g1, b1) * tr;
+      u8[((b * M + g) * M + r) * 3 + c] = Math.round(f(c, (x00 * (1 - tg) + x10 * tg) * (1 - tb) + (x01 * (1 - tg) + x11 * tg) * tb) * 255);
+    }
+  }
+  return { n: M, u8 };
+}
+function lutSave(name, L) {
+  let b = ''; for (let i = 0; i < L.u8.length; i += 8192) b += String.fromCharCode.apply(null, L.u8.subarray(i, i + 8192));
+  const list = lutList().filter(x => x.name !== name); list.push({ name, n: L.n, b64: btoa(b) });
+  try { localStorage.setItem('potatoLuts', JSON.stringify(list)); } catch (e) { toast('필터 파일을 더 저장할 자리가 없어요. 안 쓰는 필터를 지워 주세요.'); return false; }
+  lutData.set(name, L); return true;
+}
+function lutDel(name) { localStorage.setItem('potatoLuts', JSON.stringify(lutList().filter(x => x.name !== name))); lutData.delete(name); }
+const lutTexC = new Map();
+function lutTex(gl, name, L) {
+  let t = lutTexC.get(name); if (t && t.gl === gl) return t.tex;
+  const tex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_3D, tex);
+  for (const [p, q] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE]]) gl.texParameteri(gl.TEXTURE_3D, p, q);
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1); gl.texImage3D(gl.TEXTURE_3D, 0, gl.RGB8, L.n, L.n, L.n, 0, gl.RGB, gl.UNSIGNED_BYTE, L.u8); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+  lutTexC.set(name, { gl, tex }); return tex;
+}
+function lutPick(A) {
+  const inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.cube';
+  inp.onchange = async () => {
+    const f = inp.files[0]; if (!f) return;
+    try { const L = lutParse(await f.text()), name = f.name.replace(/\.cube$/i, '').slice(0, 30); if (!lutSave(name, L)) return; A.cube = name; if (A.cubeA === undefined) A.cubeA = 100; commit(); renderProps(); requestRender(); toast(`'${name}' 필터를 넣었어요. 다음부터는 목록에서 고르면 돼요`, 3600); }
+    catch (e) { toast(e.message === '1d' ? '1D 필터는 못 써요. 3D .cube 파일을 넣어 주세요' : '.cube 파일을 읽지 못했어요', 4000); }
+  };
+  inp.click();
+}
+
 /* ---- WebGL 계산기 ---- */
 const ADV_VS = `#version 300 es
 in vec2 p; out vec2 uv; void main(){ uv = p * 0.5 + 0.5; gl_Position = vec4(p, 0.0, 1.0); }`;
 const ADV_FS1 = `#version 300 es
-precision highp float;
+precision highp float; precision highp sampler3D;
 in vec2 uv; out vec4 o;
-uniform sampler2D tex; uniform sampler2D lut; uniform int uCurve;
+uniform sampler2D tex; uniform sampler2D lut; uniform int uCurve; uniform sampler3D lut3; uniform float uCubeA, uCubeN;
 uniform float uExp, uHl, uSh, uWh, uBl, uTemp, uTint, uVib, uFade;
 uniform float uIn0, uIn1, uGam, uOut0, uOut1;
 uniform int uHslOn; uniform vec3 uHsl[8]; uniform vec2 uBand[8];
@@ -114,6 +172,8 @@ void main(){
     }
     c = hsl2rgb(h);
   }
+  // 필터 파일 (.cube 3D LUT)
+  if (uCubeA > 0.0) { vec3 k = clamp(c, 0.0, 1.0) * ((uCubeN - 1.0) / uCubeN) + 0.5 / uCubeN; c = mix(c, texture(lut3, k).rgb, uCubeA); }
   // 분할 톤
   if (uSt == 1) {
     float Y3 = luma(c), mid = 0.5 + uStBal * 0.35;
@@ -126,13 +186,21 @@ void main(){
 const ADV_FS2 = `#version 300 es
 precision highp float;
 in vec2 uv; out vec4 o;
-uniform sampler2D tex; uniform vec2 px; uniform float uSharp, uSharpR, uClar, uClarLod, uGrain, uGrainSize, uSeed;
+uniform sampler2D tex; uniform vec2 px; uniform float uSharp, uSharpR, uClar, uClarLod, uGrain, uGrainSize, uSeed, uDn, uDnR;
 float luma(vec3 c){ return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
 float hash(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32 + uSeed); return fract(p.x * p.y); }
 float vnoise(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0 - 2.0*f);
   return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y); }
 void main(){
   vec4 s = texture(tex, uv); vec3 c = s.rgb;
+  if (uDn > 0.0) { // 잡음 줄이기: 색이 비슷한 이웃끼리만 섞어요 (경계는 그대로)
+    vec3 acc = vec3(0.0); float ws = 0.0, sr = 0.025 + uDn * 0.16;
+    for (int y = -3; y <= 3; y++) for (int x = -3; x <= 3; x++) {
+      vec3 q = texture(tex, uv + vec2(float(x), float(y)) * px * uDnR).rgb, dq = q - c;
+      float w = exp(-float(x*x + y*y) / 8.0) * exp(-dot(dq, dq) / (2.0 * sr * sr)); acc += q * w; ws += w;
+    }
+    c = mix(c, acc / ws, min(1.0, uDn * 1.6));
+  }
   if (uSharp > 0.0) {
     vec3 b = vec3(0.0); float ws = 0.0;
     for (int y = -2; y <= 2; y++) for (int x = -2; x <= 2; x++) { float w = exp(-float(x*x + y*y) / 2.5); b += texture(tex, uv + vec2(float(x), float(y)) * px * uSharpR * 0.55).rgb * w; ws += w; }
@@ -228,6 +296,9 @@ function advProcess(id, im, W, H, L, lv) {
     ADV_BANDS.forEach((B, i) => { const h = (L.hsl[i] || [0, 0, 0]); a[i * 3] = h[0] / 100; a[i * 3 + 1] = h[1] / 100; a[i * 3 + 2] = h[2] / 100; bd[i * 2] = B[2] / 360; bd[i * 2 + 1] = B[3]; });
     gl.uniform3fv(u.uHsl, a); gl.uniform2fv(u.uBand, bd);
   }
+  const cube = L.cube ? lutGet(L.cube) : null;
+  gl.uniform1f(u.uCubeA, cube ? clamp(v('cubeA') / 100, 0, 1) : 0); gl.uniform1f(u.uCubeN, cube ? cube.n : 2);
+  gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_3D, cube ? lutTex(gl, L.cube, cube) : null); gl.uniform1i(u.lut3, 2); gl.activeTexture(gl.TEXTURE0);
   gl.uniform1i(u.uSt, v('stOn') ? 1 : 0);
   if (v('stOn')) { gl.uniform3fv(u.uStSh, hexRgb(v('stSh'))); gl.uniform3fv(u.uStHi, hexRgb(v('stHi'))); gl.uniform1f(u.uStBal, v('stBal') / 100); gl.uniform1f(u.uStA, v('stA') / 100); }
   gl.bindFramebuffer(gl.FRAMEBUFFER, advG.fb); gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, advG.t1, 0);
@@ -239,6 +310,7 @@ function advProcess(id, im, W, H, L, lv) {
   gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, advG.t1); gl.uniform1i(u2.tex, 0);
   gl.uniform2f(u2.px, 1 / W, 1 / H);
   gl.uniform1f(u2.uSharp, v('sharp') / 100); gl.uniform1f(u2.uSharpR, Math.max(0.35, v('sharpR') / lv));
+  gl.uniform1f(u2.uDn, v('dn') / 100); gl.uniform1f(u2.uDnR, Math.max(0.4, 1.2 / lv));
   gl.uniform1f(u2.uClar, clar); gl.uniform1f(u2.uClarLod, Math.max(0, Math.log2(Math.max(2, Math.min(W, H) * 0.018))));
   gl.uniform1f(u2.uGrain, v('grain') / 100); gl.uniform1f(u2.uGrainSize, Math.max(0.5, v('grainSize') / lv)); gl.uniform1f(u2.uSeed, (String(id).length * 7.13) % 13);
   gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.viewport(0, 0, W, H); gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -308,10 +380,14 @@ function advSec(el, A) {
     ${ssec('adv-hsl', '색상별 (HSL)', `<div class="advbands">${ADV_BANDS.map(([n, c], i) => `<button class="advband ${advBand === i ? 'on' : ''}" data-act="adv-band" data-v="${i}" title="${n}" style="background:${c}"></button>`).join('')}<span class="muted small">${ADV_BANDS[advBand][0]}</span></div>
     ${['색조', '채도', '밝기'].map((l, k) => row(l, `<input type="range" data-hslk="${k}" min="-100" max="100" step="1" aria-label="${l}"><input type="number" data-hslk="${k}" min="-100" max="100" step="1">`)).join('')}
     <div class="btnrow"><button class="btn sm" data-act="adv-hsl-reset">색상별 처음대로</button></div>`)}
-    ${ssec('adv-detail', '디테일·효과', `${LS(row('선명하게', range('sharp', 0, 200, 1)) + row('선명 반경', range('sharpR', 0.5, 4, 0.1)) + row('또렷함', range('clarity', -100, 100, 1))
+    ${ssec('adv-detail', '디테일·효과', `${LS(row('잡음 줄이기', range('dn', 0, 100, 1)) + row('선명하게', range('sharp', 0, 200, 1)) + row('선명 반경', range('sharpR', 0.5, 4, 0.1)) + row('또렷함', range('clarity', -100, 100, 1))
       + row('필름 질감', range('grain', 0, 100, 1)) + row('입자 크기', range('grainSize', 0.5, 5, 0.1)) + row('색 바램', range('fade', 0, 100, 1)))}
     <div class="btnrow">${LS(check('stOn', '분할 톤 (어두운 곳·밝은 곳에 다른 색)'))}</div>
     ${A.stOn ? LS(row('어두운 곳', color('stSh')) + row('밝은 곳', color('stHi')) + row('균형', range('stBal', -100, 100, 1)) + row('세기', range('stA', 0, 100, 1))) : ''}`)}
+    ${ssec('adv-lut', '필터 파일 (LUT)', `<p class="muted small" style="margin:0 0 6px">사진 앱·영상 편집에서 쓰는 .cube 필터를 그대로 써요.</p>
+    ${row('필터', `<select data-advlut="1"><option value="">없음</option>${lutList().map(x => `<option value="${esc(x.name)}" ${A.cube === x.name ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>`)}
+    ${A.cube ? LS(row('세기', range('cubeA', 0, 100, 1))) : ''}
+    <div class="btnrow"><button class="btn sm" data-act="adv-lut-load">.cube 파일 불러오기</button>${A.cube ? '<button class="btn sm danger" data-act="adv-lut-del" title="이 필터를 목록에서 지워요">목록에서 지우기</button>' : ''}</div>`)}
     <h4 class="advh">보정 프리셋</h4>
     <div class="advlooks">${ADV_LOOKS.map(([n], i) => `<button class="btn sm" data-act="adv-look" data-v="b${i}">${n}</button>`).join('')}${mine.map((x, i) => `<span class="advmine"><button class="btn sm" data-act="adv-look" data-v="u${i}">${esc(x.name)}</button><button class="btn sm" data-act="adv-look-del" data-v="${i}" title="이 프리셋 지우기">×</button></span>`).join('')}</div>
     <div class="btnrow"><button class="btn sm" data-act="adv-save">지금 보정을 프리셋으로 저장</button></div>
@@ -340,6 +416,8 @@ function advAct(act, v) {
     case 'adv-curve-s': keepCurve(); A.curves[advCh] = [[0, 0], [64, 48], [192, 208], [255, 255]]; break;
     case 'adv-curve-fade': keepCurve(); A.curves[advCh] = [[0, 26], [128, 128], [255, 236]]; break;
     case 'adv-hsl-reset': delete A.hsl; break;
+    case 'adv-lut-load': lutPick(A); return;
+    case 'adv-lut-del': if (A.cube) { lutDel(A.cube); delete A.cube; } break;
     case 'adv-look': {
       const L = v[0] === 'b' ? ADV_LOOKS[+v.slice(1)] : advLooksUser()[+v.slice(1)];
       if (!L) return; advSetState(A, v[0] === 'b' ? L[1] : L.v); toast(`'${v[0] === 'b' ? L[0] : L.name}' 보정을 넣었어요`); break;
@@ -424,6 +502,7 @@ function advDrawCurve(cv, A) {
     requestRender();
   });
   propsEl.addEventListener('change', e => { if (e.target.dataset && e.target.dataset.hslk !== undefined) commit(); });
+  propsEl.addEventListener('change', e => { if (!e.target.dataset || !e.target.dataset.advlut) return; const A = advLayer(); if (!A) return; if (e.target.value) { A.cube = e.target.value; if (A.cubeA === undefined) A.cubeA = 100; } else delete A.cube; e2SetHint('필터 파일'); commit(); renderProps(); requestRender(); });
   // 레벨 값이 바뀌면 히스토그램 위 그늘도 다시
   propsEl.addEventListener('input', e => { const k = e.target.dataset && e.target.dataset.k; if (k === 'lvIn0' || k === 'lvIn1') advMount(); });
   new MutationObserver(() => advMount()).observe(propsEl, { childList: true });

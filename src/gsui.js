@@ -12,7 +12,7 @@ const GP_IC = {
 };
 const gpI = (k, cls = '') => `<svg class="gpi ${cls}" viewBox="0 0 16 16" aria-hidden="true">${GP_IC[k]}</svg>`;
 const fmtTC = t => { t = Math.max(0, t || 0); const m = Math.floor(t / 60), s = t - m * 60; return `${m}:${s.toFixed(2).padStart(5, '0')}`; };
-const FX_ICON = { snow: '❄️', rain: '🌧️', sakura: '🌸', hearts: '💗', sparkle: '✨', stars: '⭐', confetti: '🎊', bubbles: '🫧', embers: '🔥', bokeh: '🟡', focus: '✳️', speed: '💨', shake: '〰️', zoom: '🔍', flash: '⚡', invert: '◐', glitch: '📺', vhs: '📼', grain: '🎞️', leak: '☀️', vignette: '⭕', bw: '◑' };
+const FX_ICON = { snow: '❄️', rain: '🌧️', sakura: '🌸', hearts: '💗', sparkle: '✨', stars: '⭐', confetti: '🎊', bubbles: '🫧', embers: '🔥', bokeh: '🟡', focus: '✳️', speed: '💨', shake: '〰️', zoom: '🔍', flash: '⚡', invert: '◐', glitch: '📺', vhs: '📼', grain: '🎞️', leak: '☀️', vignette: '⭕', bw: '◑', 'cam-rec': '🔴', 'cam-phone': '📱', 'cam-vf': '🎯', 'cam-vhs': '📼', 'cam-cctv': '📹', 'cam-film': '🎞️', 'cam-letterbox': '🎬' };
 Object.assign(gs, { lib: 'media', tool: 'sel', snap: true, pps: 80, zoomFit: true, trSel: -1, preOpen: false });
 
 /* ---- 화면 만들기 ---- */
@@ -133,7 +133,8 @@ function gpLibRender() {
     const btn = ([k, l]) => `<button class="gp-fxb" data-g="fx-add" data-v="${k}" data-lib="fx-add" draggable="true"><span>${FX_ICON[k] || '·'}</span>${l}</button>`;
     h += `<h4>빠른 묶음</h4><div class="gp-fxg">${FX_PRESETS.map(([n], i) => `<button class="gp-fxb" data-g="fx-pre" data-v="${i}" data-lib="fx-pre" draggable="true">${esc(n)}</button>`).join('')}</div>
       <h4>떠다니는 것</h4><div class="gp-fxg">${FX_KINDS.filter(x => x[2] === 'p').map(btn).join('')}</div>
-      <h4>화면 효과</h4><div class="gp-fxg">${FX_KINDS.filter(x => x[2] === 's').map(btn).join('')}</div>${dragTip}`;
+      <h4>화면 효과</h4><div class="gp-fxg">${FX_KINDS.filter(x => x[2] === 's').map(btn).join('')}</div>
+      <h4>카메라 화면 <span class="muted small">녹화 점·시간이 움직여요</span></h4><div class="gp-fxg">${FX_KINDS.filter(x => x[2] === 'c').map(btn).join('')}</div>${dragTip}`;
   } else {
     h += `<input type="search" id="gpTrQ" placeholder="찾기 (예: 하트, 큐브, glitch)" class="gp-wide">
       <p class="gp-tip">아래 '장면' 줄에서 장면 사이(◇)를 고르고 누르면 그 자리에, 고른 자리가 없으면 모든 장면 사이에 들어가요. 장면 사이로 끌어다 놓아도 돼요.</p>

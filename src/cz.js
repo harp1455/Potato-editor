@@ -89,7 +89,7 @@ const czTimed = (p, ms) => !czIsApp() || cz.firstOk ? p : Promise.race([p, new P
 function czReset(err) {
   if (cz.w) { try { cz.w.terminate(); } catch (_) { } }
   for (const p of cz.wait.values()) p.rej(err || new Error('reset'));
-  cz.w = null; cz.ready = null; cz.loaded = {}; cz.wait.clear(); cz.ep = ''; cz.q = Promise.resolve(); cz.samQ = Promise.resolve();
+  cz.w = null; cz.ready = null; cz.loaded = {}; cz.wait.clear(); cz.ep = ''; cz.q = Promise.resolve(); cz.samQ = Promise.resolve(); cz.samEnc = '';
 }
 async function czBytes(id) { // 파일 안에 넣어 둔 압축 데이터를 원래대로
   let gz = cz.gz[id];
@@ -466,7 +466,7 @@ async function czSamUnionRun(cv, boxes, tk) {
     gc.imageSmoothingQuality = 'high'; gc.drawImage(cv, rx, ry, rw, rh, 0, 0, tw, th);
     const px = gc.getImageData(0, 0, tw, th).data, x = new Float32Array(tw * th * 3);
     for (let i = 0, j = 0, n = tw * th; i < n; i++, j += 4) { x[i * 3] = px[j]; x[i * 3 + 1] = px[j + 1]; x[i * 3 + 2] = px[j + 2]; }
-    await czCall({ t: 'run2', key: 'samE', feeds: { input_image: { data: x, dims: [th, tw, 3] } }, keep: ['image_embeddings'], outs: [] }, [x.buffer]);
+    cz.samEnc = ''; await czCall({ t: 'run2', key: 'samE', feeds: { input_image: { data: x, dims: [th, tw, 3] } }, keep: ['image_embeddings'], outs: [] }, [x.buffer]);
     for (const i of gr.ids) {
       if (tk && tk.stop) throw new Error('stop');
       const b = boxes[i], bx = b.x - rx, by = b.y - ry;
@@ -687,7 +687,7 @@ async function czOccRun(cv, st, tk) { // → 뺄 물건 비트맵 목록
       gc.imageSmoothingQuality = 'high'; gc.drawImage(cv, rx, ry, rw, rh, 0, 0, tw, th);
       const px = gc.getImageData(0, 0, tw, th).data, x = new Float32Array(tw * th * 3);
       for (let i = 0, j = 0, n = tw * th; i < n; i++, j += 4) { x[i * 3] = px[j]; x[i * 3 + 1] = px[j + 1]; x[i * 3 + 2] = px[j + 2]; }
-      await czCall({ t: 'run2', key: 'samE', feeds: { input_image: { data: x, dims: [th, tw, 3] } }, keep: ['image_embeddings'], outs: [] }, [x.buffer]);
+      cz.samEnc = ''; await czCall({ t: 'run2', key: 'samE', feeds: { input_image: { data: x, dims: [th, tw, 3] } }, keep: ['image_embeddings'], outs: [] }, [x.buffer]);
       enc = key;
     }
     const pts = [jb.seed].concat(jb.neg), pc = new Float32Array(pts.length * 2);

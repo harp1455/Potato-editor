@@ -8,6 +8,9 @@ const LAYER_ICON = {
   stamp: '<svg viewBox="0 0 16 16"><path d="M8 1.8l1.8 3.9 4.2.5-3.1 2.9.8 4.2L8 11.2l-3.7 2.1.8-4.2L2 6.2l4.2-.5z" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>',
   draw: '<svg viewBox="0 0 16 16"><path d="M3 13l1-3.5L11 2.5l2.5 2.5L6.5 12z" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>',
   fx: '<svg viewBox="0 0 16 16"><rect x="2.5" y="2.5" width="11" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M5 11l6-6M5 7.5l2.5-2.5M8.5 11L11 8.5" stroke="currentColor" stroke-width="1.1"/></svg>',
+  shape: '<svg viewBox="0 0 16 16"><rect x="1.5" y="6.5" width="8" height="8" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="10.5" cy="5.5" r="4" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>',
+  tmpl: '<svg viewBox="0 0 16 16"><path d="M2 5V2h3M11 2h3v3M14 11v3h-3M5 14H2v-3" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="5" cy="5.5" r="1.2" fill="#ff3b30"/></svg>',
+  adj: '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M8 2.5a5.5 5.5 0 010 11z" fill="currentColor"/></svg>',
 };
 const LOCK_SVG = on => on ? '<svg width="14" height="14" viewBox="0 0 16 16"><rect x="3.5" y="7" width="9" height="7" rx="1.5" fill="currentColor"/><path d="M5.5 7V5a2.5 2.5 0 015 0v2" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>'
   : '<svg width="14" height="14" viewBox="0 0 16 16"><rect x="3.5" y="7" width="9" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M5.5 7V5a2.5 2.5 0 014.8-1" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>';
@@ -15,8 +18,12 @@ function layerLabel(el, p) {
   if (el.name) return el.name;
   const short = s => { s = String(s || '').replace(/\s+/g, ' ').trim(); return s.length > 14 ? s.slice(0, 14) + '…' : s; };
   switch (el.type) {
+    case 'shape': return '도형 · ' + ((SHAPE_KINDS.find(x => x[0] === el.kind) || [, ''])[1]);
+    case 'tmpl': return (TMPL_KINDS.find(x => x[0] === el.kind) || [, '템플릿'])[1];
     case 'panel': {
       if (el.lock) return '바탕 그림';
+      if (el.adjL) return '보정 레이어';
+      if (el.fill && el.pass && !layerCount(el)) return '색 화면';
       const n = p.els.filter(e => e.type === 'panel' && !e.lock).indexOf(el) + 1, r = el.img && images.get(el.img);
       return `컷 ${n}` + (r ? ` · ${short(r.name)}` : '');
     }
@@ -24,7 +31,7 @@ function layerLabel(el, p) {
     case 'bubble': return short(el.text) || '(빈 말풍선)';
     case 'stamp': return '효과음·스티커';
     case 'draw': return '손그림';
-    case 'fx': return el.auto ? '자동 흰칠' : ({ blur: '가리기 · 흐림', mosaic: '가리기 · 모자이크', paint: '가리기 · 칠하기' }[el.kind] || '가리기');
+    case 'fx': return el.auto ? '자동 흰칠' : ({ blur: '가리기 · 흐림', mosaic: '가리기 · 모자이크', paint: '가리기 · 칠하기', erase: '지우기', clone: '도장', heal: '잡티 지우기', dodge: '밝게 붓', burn: '어둡게 붓', smudge: '문지르기 붓' }[el.kind] || '가리기');
   }
   return el.type;
 }
@@ -36,12 +43,12 @@ function renderLayers() {
   if (!p || p.ph) { box.innerHTML = '<p class="muted small" style="padding:10px">그림을 먼저 불러오세요.</p>'; $('#layerFoot').innerHTML = ''; return; }
   const rows = p.els.slice().reverse().map(el => {
     const r = el.type === 'panel' && el.img ? images.get(el.img) : el.type === 'stamp' ? images.get(el.img) : null;
-    const thumb = r && r.thumb ? `<img src="${r.thumb}" alt="">` : LAYER_ICON[el.type] || '';
+    const thumb = r && r.thumb ? `<img src="${r.thumb}" alt="">` : el.adjL ? LAYER_ICON.adj : el.type === 'panel' && el.fill && el.pass ? `<span class="lyr-sw" style="background:${el.fill}"></span>` : LAYER_ICON[el.type] || '';
     return `<div class="lyr ${ids.has(el.id) ? 'on' : ''} ${el.hidden ? 'off' : ''}" data-lid="${el.id}" draggable="${el.lock ? 'false' : 'true'}">
       <button class="lyr-eye" data-lact="eye" title="${el.hidden ? '보이기' : '숨기기'}">${eyeSvg(!el.hidden)}</button>
       <span class="lyr-th">${thumb}</span>
       <span class="lyr-nm" title="두 번 누르면 이름 바꾸기">${esc(layerLabel(el, p))}</span>
-      ${(el.eop ?? 100) < 100 ? `<span class="lyr-badge">${Math.round(el.eop)}%</span>` : ''}${el.eblend && el.eblend !== 'source-over' ? '<span class="lyr-badge">섞기</span>' : ''}
+      ${(el.eop ?? 100) < 100 ? `<span class="lyr-badge">${Math.round(el.eop)}%</span>` : ''}${el.lmask ? '<span class="lyr-badge" title="레이어 마스크">마스크</span>' : ''}${el.eblend && el.eblend !== 'source-over' ? '<span class="lyr-badge">섞기</span>' : ''}
       ${el.lock ? '<span class="lyr-lock" title="바탕 그림은 늘 고정돼 있어요">' + LOCK_SVG(true) + '</span>' : `<button class="lyr-lock ${el.ulock ? 'on' : ''}" data-lact="lock" title="${el.ulock ? '잠금 풀기' : '잠그기 (화면에서 안 골라져요)'}">${LOCK_SVG(!!el.ulock)}</button>`}
     </div>`;
   }).join('');
