@@ -4,7 +4,7 @@ name: packs
 on:
   push:
     branches: [main]
-    paths: ['tools/make_packs.py', 'tools/fp16*.py', 'src/cz.js', '.github/workflows/packs.yml']
+    paths: ['tools/make_packs.py', 'tools/fp16*.py', 'tools/lama_anime.py', 'src/cz.js', '.github/workflows/packs.yml']
   workflow_dispatch:
 permissions:
   contents: write

@@ -392,6 +392,7 @@ function selModebar() {
     <button class="btn sm" data-mb="sf-blur">흐리게</button><button class="btn sm" data-mb="sf-mosaic">모자이크</button><button class="btn sm" data-mb="sf-paint">칠하기</button><input type="color" id="mbSelC" value="${selColor}" title="칠할 색"><button class="btn sm" data-mb="sf-erase" title="그 자리를 투명하게 (PNG로 저장하면 투명)">지우기</button>
     <button class="btn sm primary" data-mb="sf-adj" title="고른 곳에만 들어가는 보정 레이어를 만들어요 (경계 흐림이 그대로 들어가요)">이 부분만 보정</button>
     <button class="btn sm" data-mb="sf-layer" title="선택한 곳을 새 레이어로 복사해서 그 부분만 따로 옮기거나 고쳐요">새 레이어로 복사</button>
+    ${czIsApp() ? '<button class="btn sm" data-mb="sf-aierase" title="고른 곳을 지우고 둘레에 맞게 메워요 (AI 지우개 팩)">AI로 지우기</button>' : ''}
     <button class="btn sm" data-mb="done">끝내기</button>`;
 }
 function selModebarAct(a) {
@@ -404,6 +405,7 @@ function selModebarAct(a) {
     case 'sel-shrink': selGrow(-6 / Math.max(0.2, zoom)); return true;
     case 'sf-blur': case 'sf-mosaic': case 'sf-paint': case 'sf-erase': selToFx(a.slice(3)); return true;
     case 'sf-layer': selToLayer(); return true;
+    case 'sf-aierase': { if (!selSt || !selSt.any) { toast('먼저 지울 곳을 선택하세요'); return true; } const m = selSt.mask, s = selSt.s; aiErase(m, s).then(ok => { if (ok && mode === 'select') { selApply('new', () => { }); } }); return true; }
     case 'sel-ai': selAI('fg', 'new'); return true;
     case 'sel-aibg': selAI('bg', 'new'); return true;
     case 'sf-adj': { if (!selSt || !selSt.any) { toast('먼저 보정할 곳을 선택하세요'); return true; } e2SelKeep(); const m = selLast; setMode(null); e2AddAdj(m); return true; }

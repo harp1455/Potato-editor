@@ -26,6 +26,16 @@ SRC = {  # 원본: 주소 + sha256 (주소 내용이 바뀌면 멈춰요)
             'sha256': '2648cab4c4343541c1aa291c6754e9e8edbe7a813fffc2a677423dd12cb6b7f7'},
     'sam_d': {'url': HF.format(repo='Acly/MobileSAM', rev='0d3b403339b4674a82493d5e97964dd78089ddc8', path='sam_mask_decoder_multi.onnx'),
               'sha256': '8976b90a87ba50a6a72217a5ff994f7d25ce16f2229fcc1ed259e1294c622ffe'},
+    # AI 지우개: LaMa ONNX 그래프(Apache-2.0) + 애니·만화용 가중치(MIT)
+    'lama_onnx': {'url': HF.format(repo='Carve/LaMa-ONNX', rev='c3c0c9e468934d62e79c329e35d82dd09ff8c444', path='lama_fp32.onnx'),
+                  'sha256': '1faef5301d78db7dda502fe59966957ec4b79dd64e16f03ed96913c7a4eb68d6'},
+    'lama_anime': {'url': HF.format(repo='dreMaz/AnimeMangaInpainting', rev='2953a4e935bf01ad1471f6cbfd26ab81abeeb92d', path='lama_large_512px.ckpt'),
+                   'sha256': '11d30fbb3000fb2eceae318b75d9ced9229d99ae990a7f8b3ac35c8d31f2c935'},
+    # 선화 추출: informative-drawings(MIT) — ControlNet 'lineart' 주석기, deepghs ONNX 변환(MIT)
+    'line_fine': {'url': HF.format(repo='deepghs/imgutils-models', rev='35e0ed8f35ce0dbea674568161a48b31ba7d2a99', path='lineart/lineart.onnx'),
+                  'sha256': '14570bc70981c7cab28dbd06938b7b25f4b3e969476e816f99cc39ecd8a1c820'},
+    'line_coarse': {'url': HF.format(repo='deepghs/imgutils-models', rev='35e0ed8f35ce0dbea674568161a48b31ba7d2a99', path='lineart/lineart_coarse.onnx'),
+                    'sha256': 'e32fc7b9ffd219ac38f6bd770c5d537c92f1038f81a6a258db03f4d0d501a64c'},
 }
 # 편집기 안 이름(id) ← 원본, 변환, 팩 파일 이름, 어느 팩
 FILES = [
@@ -39,11 +49,16 @@ FILES = [
     ('czM_isnet', 'isnet', 'fp16w', 'anime-seg-isnetis.onnx.gz', 'bg'),
     ('czM_sr4', 'sr4', 'fp16w', 'realesrgan-anime-4b32f.onnx.gz', 'sr'),
     ('czM_sr6', 'sr6', 'fp16w', 'realesrgan-anime-6b.onnx.gz', 'sr'),
+    ('czM_lama', 'lama_onnx+lama_anime', 'lama_anime', 'lama-anime.onnx.gz', 'erase'),
+    ('czM_lineF', 'line_fine', 'fp16w', 'lineart-fine.onnx.gz', 'line'),
+    ('czM_lineC', 'line_coarse', 'fp16w', 'lineart-coarse.onnx.gz', 'line'),
 ]
 PACKS = {'base': {'label': '기본 팩', 'desc': "AI 실행 도구, 찾기 모델, '빠르게' 모양 모델, 윤곽 따기"},
          'precise': {'label': '정밀 팩', 'desc': "'정밀하게' 모양 모델"},
          'bg': {'label': 'AI 배경 지우기 팩', 'desc': '애니 캐릭터만 따내는 모델 (skytnt/anime-seg)'},
-         'sr': {'label': 'AI 화질 키우기 팩', 'desc': 'Real-ESRGAN 애니 업스케일 모델 (빠르게·고화질)'}}
+         'sr': {'label': 'AI 화질 키우기 팩', 'desc': 'Real-ESRGAN 애니 업스케일 모델 (빠르게·고화질)'},
+         'erase': {'label': 'AI 지우개 팩', 'desc': '칠한 곳을 둘레에 맞게 메우는 LaMa 모델 (애니·만화용)'},
+         'line': {'label': 'AI 선화 추출 팩', 'desc': '그림에서 선만 뽑는 모델 (가는 선·굵은 선)'}}
 sha = lambda b: hashlib.sha256(b).hexdigest()
 
 
@@ -64,10 +79,10 @@ def main():
     a = ap.parse_args(); os.makedirs(a.cache, exist_ok=True); shutil.rmtree(a.out, ignore_errors=True); os.makedirs(a.out)
     files = []
     for id_, key, conv, name, pack in FILES:
-        src = fetch(key, a.cache)
+        srcs = [fetch(k, a.cache) for k in key.split('+')]; src = srcs[0]  # 원본이 둘이면 변환기에 둘 다 넘겨요
         if conv:
-            dst = os.path.join(a.cache, key + '.' + conv + '.onnx')
-            subprocess.run([sys.executable, os.path.join(T, conv + '.py'), src, dst], check=True, stdout=subprocess.DEVNULL); src = dst
+            dst = os.path.join(a.cache, key.replace('+', '_') + '.' + conv + '.onnx')
+            subprocess.run([sys.executable, os.path.join(T, conv + '.py'), *srcs, dst], check=True, stdout=subprocess.DEVNULL); src = dst
         raw = open(src, 'rb').read(); gz = gzip.compress(raw, 9, mtime=0)
         open(os.path.join(a.out, name), 'wb').write(gz)
         files.append({'id': id_, 'file': name, 'pack': pack, 'size': len(gz), 'raw': len(raw), 'sha256': sha(gz)})

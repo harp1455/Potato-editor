@@ -12,6 +12,12 @@
       바꾼 점: 가중치를 16비트로 줄여 저장
   - Real-ESRGAN RealESRGAN_x4plus_anime_6B, 4B32F : BSD-3-Clause, Copyright (c) 2021 Xintao Wang (https://github.com/xinntao/Real-ESRGAN)
       ONNX 변환: deepghs/imgutils-models, MIT License. 바꾼 점: 가중치를 16비트로 줄여 저장  ※ 설치판 AI 팩
+  - LaMa (big-lama) : Apache License 2.0 (https://github.com/advimman/lama)  ※ 설치판 AI 지우개 팩
+      ONNX 변환: Carve/LaMa-ONNX, Apache License 2.0 (https://huggingface.co/Carve/LaMa-ONNX)
+      가중치: dreMaz/AnimeMangaInpainting (애니·만화용으로 다시 학습한 LaMa), MIT License (https://huggingface.co/dreMaz/AnimeMangaInpainting)
+      바꾼 점: ONNX 그래프에 애니·만화용 가중치를 넣고(정규화 층은 합성곱에 합쳐서) 가중치를 16비트로 줄여 저장
+  - informative-drawings (선화 모델, ControlNet 'lineart' 주석기) : MIT License, Copyright (c) 2022 Caroline Chan (https://github.com/carolineec/informative-drawings)
+      ONNX 변환: deepghs/imgutils-models, MIT License. 바꾼 점: 가중치를 16비트로 줄여 저장  ※ 설치판 AI 선화 추출 팩
   - mp4-muxer 5.2.2 : Copyright (c) 2023 Vanilagy, MIT License (https://github.com/Vanilagy/mp4-muxer)  ※ 움짤 MP4 저장
   - Animate.css 4.1.1 : Copyright (c) 2020 Daniel Eden, MIT License (https://github.com/animate-css/animate.css)  ※ 움짤 글자 움직임
       바꾼 점: @keyframes를 숫자 데이터로 옮겨 캔버스에서 계산

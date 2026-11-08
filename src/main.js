@@ -1268,6 +1268,7 @@ function drawSoftPaint(ctx, el, k) {
 }
 function drawFxEl(ctx, el, opt) {
   const k = Math.sqrt(el.w * el.h) / (el.s0 || 1);
+  if (el.kind === 'aierase') { if (opt && opt.screen) { ctx.save(); ctx.globalAlpha = 0.45; fxShapes(ctx, el, k, '#ff3b5c'); ctx.restore(); } return; } // AI 지우개: 칠한 자국은 화면에만 (손을 떼면 지워요)
   if (el.kind === 'erase' || el.kind === 'clone' || el.kind === 'heal' || el.kind === 'dodge' || el.kind === 'burn' || el.kind === 'smudge') { drawFixEl(ctx, el, k, opt); return; }
   if (el.kind === 'paint') { if (el.soft > 0 || hasErase(el)) drawSoftPaint(ctx, el, k); else fxShapes(ctx, el, k, el.color || '#ffffff'); return; }
   const m = ctx.getTransform(), cw = ctx.canvas.width, ch = ctx.canvas.height;
@@ -1844,10 +1845,10 @@ function renderModebar() {
     const D = doc.defaults.fx, el = brushSt && brushSt.el, kind = el ? el.kind : D.kind;
     mb.innerHTML = `<b>가리기</b>
       <div class="seg" title="칠하기(B) / 지우개(E): 지우개는 이미 가린 곳(자동 흰칠 포함)을 지워요"><button class="btn sm ${brushErase ? '' : 'on'}" data-mb="tool-paint">칠하기</button><button class="btn sm ${brushErase ? 'on' : ''}" data-mb="tool-erase">지우개</button></div>
-      ${brushErase ? '' : `<div class="seg">${[['blur', '블러'], ['mosaic', '모자이크'], ['paint', '흰칠'], ['erase', '지우기'], ['clone', '도장'], ['heal', '잡티 지우기'], ['dodge', '밝게'], ['burn', '어둡게'], ['smudge', '문지르기']].map(([v, l]) => `<button class="btn sm ${kind === v ? 'on' : ''}" data-mb="k-${v}">${l}</button>`).join('')}</div>`}
+      ${brushErase ? '' : `<div class="seg">${[['blur', '블러'], ['mosaic', '모자이크'], ['paint', '흰칠'], ['erase', '지우기'], ['clone', '도장'], ['heal', '잡티 지우기'], ['dodge', '밝게'], ['burn', '어둡게'], ['smudge', '문지르기']].concat(czIsApp() ? [['aierase', 'AI 지우개']] : []).map(([v, l]) => `<button class="btn sm ${kind === v ? 'on' : ''}" data-mb="k-${v}">${l}</button>`).join('')}</div>`}
       <label>굵기 <input type="range" id="mbBw" min="6" max="260" step="1" value="${D.bw}"></label>
-      ${brushErase ? '' : (kind === 'dodge' || kind === 'burn' || kind === 'smudge') ? `<label>세기 <input type="range" id="mbStr" min="2" max="40" step="1" value="${el ? el.str : D.str}"></label><label title="가장자리를 부드럽게">부드럽게 <input type="range" id="mbSoft" min="0" max="24" step="1" value="${el ? (el.soft ?? 0) : (D.soft ?? 4)}"></label><span class="mtxt">${kind === 'smudge' ? '칠한 방향으로 그림을 문질러 끌어요' : kind === 'dodge' ? '칠한 곳을 밝게 해요' : '칠한 곳을 어둡게 해요'}</span>` : (kind === 'erase' || kind === 'clone' || kind === 'heal') ? `<label title="가장자리를 부드럽게">부드럽게 <input type="range" id="mbSoft" min="0" max="24" step="1" value="${el ? (el.soft ?? 0) : (D.soft ?? 4)}"></label>${kind === 'clone' ? `<span class="mtxt">${cloneSrc ? 'Alt+클릭으로 복사할 곳을 바꿔요' : '먼저 Alt를 누른 채 복사할 곳을 클릭하세요'}</span>` : kind === 'heal' ? '<span class="mtxt">잡티 위를 칠하면 둘레 색으로 메워요</span>' : '<span class="mtxt">칠한 곳이 투명해져요 (PNG로 저장)</span>'}` : kind === 'paint' ? `<label>색 <input type="color" id="mbFc" value="${el ? el.color : D.color}"></label><label title="가장자리를 에어브러쉬처럼 흐리게 해요. 0이면 또렷하게">부드럽게 <input type="range" id="mbSoft" min="0" max="24" step="1" value="${el ? (el.soft ?? 0) : (D.soft ?? 4)}"></label>` : `<label>세기 <input type="range" id="mbStr" min="2" max="${kind === 'mosaic' ? 60 : 40}" step="1" value="${el ? el.str : D.str}"></label>`}
-      <button class="btn sm" data-mb="undo">한 획 되돌리기</button>
+      ${brushErase ? '' : kind === 'aierase' ? '<span class="mtxt">지울 물건 위를 칠하고 손을 떼면 둘레에 맞게 메워요 (처음엔 팩을 받아요)</span>' : (kind === 'dodge' || kind === 'burn' || kind === 'smudge') ? `<label>세기 <input type="range" id="mbStr" min="2" max="40" step="1" value="${el ? el.str : D.str}"></label><label title="가장자리를 부드럽게">부드럽게 <input type="range" id="mbSoft" min="0" max="24" step="1" value="${el ? (el.soft ?? 0) : (D.soft ?? 4)}"></label><span class="mtxt">${kind === 'smudge' ? '칠한 방향으로 그림을 문질러 끌어요' : kind === 'dodge' ? '칠한 곳을 밝게 해요' : '칠한 곳을 어둡게 해요'}</span>` : (kind === 'erase' || kind === 'clone' || kind === 'heal') ? `<label title="가장자리를 부드럽게">부드럽게 <input type="range" id="mbSoft" min="0" max="24" step="1" value="${el ? (el.soft ?? 0) : (D.soft ?? 4)}"></label>${kind === 'clone' ? `<span class="mtxt">${cloneSrc ? 'Alt+클릭으로 복사할 곳을 바꿔요' : '먼저 Alt를 누른 채 복사할 곳을 클릭하세요'}</span>` : kind === 'heal' ? '<span class="mtxt">잡티 위를 칠하면 둘레 색으로 메워요</span>' : '<span class="mtxt">칠한 곳이 투명해져요 (PNG로 저장)</span>'}` : kind === 'paint' ? `<label>색 <input type="color" id="mbFc" value="${el ? el.color : D.color}"></label><label title="가장자리를 에어브러쉬처럼 흐리게 해요. 0이면 또렷하게">부드럽게 <input type="range" id="mbSoft" min="0" max="24" step="1" value="${el ? (el.soft ?? 0) : (D.soft ?? 4)}"></label>` : `<label>세기 <input type="range" id="mbStr" min="2" max="${kind === 'mosaic' ? 60 : 40}" step="1" value="${el ? el.str : D.str}"></label>`}
+      <button class="btn sm" data-mb="undo">${kind === 'aierase' ? '한 번 되돌리기' : '한 획 되돌리기'}</button>
       <button class="btn sm" data-mb="auto" title="이 페이지에서 성기를 자동으로 찾아 흰칠해요">자동 흰칠</button>
       <button class="btn sm primary" data-mb="done">다 칠했어요</button>`;
   } else if (mode === 'select') {
@@ -1885,7 +1886,7 @@ $('#modebar').addEventListener('click', e => {
   else if (a === 'crop-cancel') setMode(null);
   else if (a === 'auto') { setMode(null); czRunPage(false); }
   else if (a === 'undo' && penSt) { penSt.strokes.pop(); requestRender(); }
-  else if (a === 'undo' && brushSt) brushUndo();
+  else if (a === 'undo' && brushSt) { if (brushSt.el.kind === 'aierase') { if (!aiEraseBusy) { undo(); startBrush(); brushSt.el.kind = 'aierase'; } } else brushUndo(); }
   else if (a === 'tool-paint' || a === 'tool-erase') { brushErase = a === 'tool-erase'; if (brushSt) brushSt.erase = brushErase; renderModebar(); requestRender(); }
   else if (a.startsWith('k-') && brushSt) { const k = a.slice(2); brushSt.el.kind = k; doc.defaults.fx.kind = k; if (k === 'mosaic' && brushSt.el.str < 6) brushSt.el.str = 10; renderModebar(); requestRender(); }
 });
@@ -1907,6 +1908,7 @@ function startBrush(targetId) {
     for (const pl of el.polys || []) polys.push(pl.map(([u, v]) => [el.x + u * el.w, el.y + v * el.h]));
     brushSt = { el, world, shapes, polys, cur: null, isNew: false, ops: [], erase: !!brushErase };
   } else {
+    if (D.kind === 'aierase' && !czIsApp()) D.kind = 'blur';
     el = { id: uid(), type: 'fx', kind: D.kind, str: D.str, color: D.color, soft: D.soft ?? 4, x: 0, y: 0, w: 1, h: 1, rot: 0, s0: 1, strokes: [], shapes: [] };
     brushSt = { el, world, shapes, polys, cur: null, isNew: true, ops: [], erase: !!brushErase };
   }
@@ -1953,6 +1955,7 @@ function rebuildFx(bs) {
 function r4(v) { return Math.round(v * 10000) / 10000; }
 function brushDown(p, e) {
   let bs = brushSt; if (!bs) return;
+  if (bs.el.kind === 'aierase' && aiEraseBusy) { toast('지우는 중이에요. 잠깐만요', 1500); return; }
   if (!brushErase && bs.el.kind === 'clone') { // 도장: Alt+클릭 = 복사할 곳, 칠하기 시작할 때 거리를 정해요
     if (e.altKey) { if (bs.world.length) { finishBrush(); startBrush(); brushSt.el.kind = 'clone'; } cloneSrc = { x: p.x, y: p.y }; renderModebar(); requestRender(); return; }
     if (!cloneSrc) { toast('먼저 Alt를 누른 채 복사해 올 곳을 클릭하세요'); return; }
@@ -1975,9 +1978,11 @@ function brushUp() {
   drag = null; const bs = brushSt; if (!bs || !bs.cur) return;
   bs.world.push(bs.cur); bs.ops.push({ ext: bs.erase ? [...bs.ext.entries()].map(([el, st]) => ({ el, st })) : [] });
   bs.cur = null; bs.ext = null; rebuildFx(bs); requestRender();
+  if (bs.el.kind === 'aierase' && !bs.erase) aiEraseBrush();
 }
 function finishBrush() {
   const bs = brushSt; if (!bs) return; brushSt = null;
+  if (bs.el.kind === 'aierase') { page().els = page().els.filter(e => e !== bs.el); requestRender(); return; } // AI 지우개 자국은 남기지 않아요
   const pg = page(), has = bs.world.some(st => !isErase(st)) || bs.shapes.length || (bs.polys || []).length;
   const touched = bs.ops.some(o => o.ext && o.ext.length);
   if (!has) { pg.els = pg.els.filter(e => e !== bs.el); if (!bs.isNew || touched) commit(); return; }
@@ -3935,7 +3940,7 @@ function openHelp() {
       <li><b>레이어 추가</b>: 위쪽 '레이어 ▾'에서 검은·흰·색·그라디언트 화면, 보정 레이어(아래 전체를 보정), 카메라 템플릿(뷰파인더·녹화·폰 촬영·VHS·CCTV·필름·폴라로이드·레터박스)을 넣어요. 화면 크기 레이어는 클릭이 통과하니 왼쪽 '레이어' 탭에서 골라요.</li>
       <li><b>마스크</b>: 레이어를 고르고 오른쪽 '마스크'에서 붓으로 숨기기·보이기(<kbd>X</kbd>로 바꾸기), 선택한 곳으로 만들기, 반전을 해요. 검은 화면에 마스크를 칠하면 원하는 곳만 드러나요.</li>
       <li><b>수평·기록·LUT</b>: 그림 속성의 '수평'으로 기울기를 바로잡거나 '선을 그어 수평 맞추기'를 써요. 왼쪽 '기록' 탭에서 지난 단계로 바로 돌아가요. 고급 보정의 'LUT'에서 .cube 파일을 불러와 색감을 입혀요. 글자는 '한 글자씩 나누기'로 따로 움직일 수 있어요.</li>
-      <li><b>AI 도구</b> (설치판): 그림을 고르면 오른쪽 'AI 도구'에서 배경 지우기·인물만 새 레이어로·배경만 흐리게, 화질 키우기(2배·4배)를 써요. 처음 쓸 때 팩을 받아요.</li>
+      <li><b>AI 도구</b> (설치판): 그림을 고르면 오른쪽 'AI 도구'에서 배경 지우기·인물만 새 레이어로·배경만 흐리게, 화질 키우기(2배·4배), 선화 추출(가는 선·굵은 선)을 써요. <b>AI 지우개</b>는 '가리기' 붓의 'AI 지우개'로 지울 물건을 칠하거나, '선택'으로 고른 뒤 'AI로 지우기'를 누르면 둘레에 맞게 메워요. 처음 쓸 때 팩을 받아요.</li>
       <li><b>레이어</b>: 왼쪽 '레이어' 탭에서 숨기기·잠그기·끌어서 순서 바꾸기·불투명도·섞는 법을 바꿔요. 두 번 누르면 이름을 바꿔요.</li>
       <li><b>움짤</b>: 위쪽 '움짤'을 누르면 프리미어 프로처럼 왼쪽 재료(장면·글자·효과·넘김), 가운데 미리보기, 오른쪽 속성, 아래 시간 막대로 나뉜 화면이 열려요. 시간 막대에서 장면 오른쪽 끝을 끌면 길이, 가운데를 끌면 순서가 바뀌어요. 글자·효과 막대는 끌어서 시간과 줄을 옮기고 양끝으로 늘여요. 장면 사이 ◇를 누르면 넘김을 골라요. 단축키: <kbd>Space</kbd> 재생, <kbd>←</kbd><kbd>→</kbd> 한 장씩, <kbd>↑</kbd><kbd>↓</kbd> 장면 경계로, <kbd>C</kbd> 자르기 도구, <kbd>V</kbd> 고르기 도구, <kbd>Ctrl</kbd>+<kbd>K</kbd> 재생 위치에서 나누기, <kbd>T</kbd> 글자 넣기, <kbd>Ctrl</kbd>+휠 확대, <kbd>Ctrl</kbd>+<kbd>M</kbd> 내보내기.</li>
       <li><b>크기</b>: 이미지 편집에서 아무것도 안 고르면 오른쪽 '크기 바꾸기'로 그림 크기, 캔버스 크기, 정사각형·4:5 여백을 바꿔요.</li>
@@ -3999,7 +4004,7 @@ document.addEventListener('keydown', e => {
   if (isImg() && !mode && (e.key === 'PageDown' || e.key === 'PageUp')) { e.preventDefault(); navImg(e.key === 'PageDown' ? 1 : -1); return; }
   if (e.key === ' ' && !spaceDown) { spaceDown = true; scroller.style.cursor = 'grab'; e.preventDefault(); return; }
   if (mode === 'pen' && mod && k === 'z') { e.preventDefault(); if (penSt) { penSt.strokes.pop(); requestRender(); } return; }
-  if (mode === 'brush' && mod && k === 'z') { e.preventDefault(); brushUndo(); return; }
+  if (mode === 'brush' && mod && k === 'z') { e.preventDefault(); if (brushSt && brushSt.el.kind === 'aierase') { if (!aiEraseBusy) { e.shiftKey ? redo() : undo(); startBrush(); brushSt.el.kind = 'aierase'; } } else brushUndo(); return; }
   if (mode === 'brush' && !mod && (k === 'e' || k === 'b')) { e.preventDefault(); brushErase = k === 'e'; if (brushSt) brushSt.erase = brushErase; renderModebar(); requestRender(); return; }
   if (mode === 'crop' && e.key === 'Enter') { e.preventDefault(); applyCrop(); return; }
   if (mode === 'select' && mod && k === 'z' && !e.shiftKey) { e.preventDefault(); selUndo(); return; }
