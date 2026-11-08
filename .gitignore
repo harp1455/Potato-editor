@@ -5,3 +5,4 @@ src-tauri/gen/
 packs/
 .cache/
 *.key
+__pycache__/
