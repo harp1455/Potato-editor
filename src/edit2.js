@@ -367,6 +367,9 @@ eyeAugment(document);
 /* ---- 단추 ---- */
 function e2Act(act, v) {
   const el = selEls()[0];
+  if (act.startsWith('e2-xf')) { e2XfAct(act); return; }
+  if (act === 'e2-flatten') { lyFlatten(); return; }
+  if (act === 'e2-merge') { lyMergeSel(); return; }
   switch (act) {
     case 'e2-tsplit': if (el && el.type === 'text') e2SplitText(el); return;
     case 'e2-fillc': if (el) { el.fill = v; commit(); renderProps(); requestRender(); } return;
@@ -388,6 +391,7 @@ function e2Layer(a) {
   else if (a === 'adj') e2AddAdj(null);
   else if (a === 'grad') e2AddGrad();
   else if (a.startsWith('t-')) e2AddTmpl(a.slice(2));
+  else if (a === 'img') e2PickImgLayer();
 }
 // 모드 막대 입력 (도형·마스크)
 $('#modebar').addEventListener('input', e => {
@@ -426,7 +430,7 @@ function renderHist() {
   const tm = t => t ? new Date(t).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '';
   box.innerHTML = hist.map((h, i) => `<div class="hist ${i === hi ? 'on' : ''} ${i > hi ? 'fut' : ''}" data-hi="${i}"><span>${esc(h.l || (i ? '편집' : '처음 상태'))}</span><i>${tm(h.t)}</i></div>`).reverse().join('');
 }
-$('#histList').addEventListener('click', e => { const r = e.target.closest('[data-hi]'); if (!r) return; const i = +r.dataset.hi; if (i === hi || !hist[i]) return; hi = i; restoreHist(hist[i]); renderHist(); });
+$('#histList').addEventListener('click', e => { const r = e.target.closest('[data-hi]'); if (!r) return; const i = +r.dataset.hi; if (i === hi || !hist[i]) return; hi = i; imgRedo = []; restoreHist(hist[i]); renderHist(); });
 
 /* ---- 수평 맞추기 (바탕 그림을 조금 돌리고, 빈 곳이 안 생기게 키워요) ---- */
 let lvSt = null;
@@ -461,4 +465,77 @@ function e2AddGrad() {
   const p = page(), el = { id: uid(), type: 'shape', kind: 'rect', x: 0, y: 0, w: p.w, h: p.h, rot: 0, pass: true, name: '그라디언트 화면', fillOn: true, fill: '#000000', fillA: 0, fill2: '#000000', fill2A: 85, gradOn: true, gradDir: 'v', stroke: '#000000', sw: 0, op: 100 };
   p.els.push(el); sel = [el.id]; if (mode) setMode(null); e2SetHint('그라디언트 화면'); commit(); renderProps(); requestRender();
   toast('아래로 갈수록 어두워지는 그라디언트를 깔았어요. 오른쪽에서 색·방향·불투명도를 바꿔요', 4000);
+}
+
+/* ---- 그림 자유 변형 (이미지 편집): 바탕 그림·그림 레이어 옮기기·크기·회전 ---- */
+let xfBase = null; // 자유 변형 중인 바탕 그림 id (Ctrl+T, Enter·Esc로 끝)
+function xfScaleInner(el, o, f) { // 틀이 f배가 될 때 안의 그림도 같이 (위치값도 f배)
+  el.ox = (o.ox || 0) * f; el.oy = (o.oy || 0) * f;
+  (el.layers || []).forEach((L, i) => { const Lo = (o.layers || [])[i] || L; L.ox = (Lo.ox || 0) * f; L.oy = (Lo.oy || 0) * f; });
+}
+function xfSetSize(el, w) { // 가운데 그대로 폭 w로 (비율 그대로)
+  const o = clone(el), f = Math.max(4, w) / el.w, cx = el.x + el.w / 2, cy = el.y + el.h / 2;
+  el.w *= f; el.h *= f; el.x = cx - el.w / 2; el.y = cy - el.h / 2; xfScaleInner(el, o, f);
+}
+const xfNat = el => { const r = el.img && images.get(el.img); return r ? r.w : el.w; }; // 그림 원래 폭 (100%)
+function xfSec(el) {
+  const on = el.lock ? xfBase === el.id : true, pct = Math.round(el.w / xfNat(el) * 1000) / 10;
+  return `<div class="sec"><h3>위치·크기·회전</h3>
+    ${el.lock ? `<div class="btnrow"><button class="btn sm ${on ? 'on' : ''}" data-act="e2-xf" title="Ctrl+T · 끝내려면 Enter">${on ? '변형 끝내기 (Enter)' : '자유 변형 (Ctrl+T)'}</button></div>` : ''}
+    ${on ? `<div class="grid2"><span>크기</span><span><input type="number" data-e2x="sc" min="1" max="2000" step="1" value="${pct}"> %</span><span>회전</span><span><input type="number" data-e2x="rot" min="-180" max="180" step="1" value="${Math.round((el.rot || 0) * 10) / 10}"> °</span></div>
+    <div class="btnrow"><button class="btn sm" data-act="e2-xf-center">가운데로</button><button class="btn sm" data-act="e2-xf-fit" title="캔버스 안에 다 보이게">캔버스에 맞추기</button><button class="btn sm" data-act="e2-xf-fill" title="빈 곳 없이 꽉 채우기">꽉 채우기</button><button class="btn sm" data-act="e2-xf-reset" title="원래 크기, 각도 0, 가운데">원래대로</button></div>
+    <p class="muted small">그림을 끌면 옮겨지고, 모서리를 끌면 비율 그대로 크기, 위쪽 동그라미로 돌려요(<kbd>Shift</kbd> = 15°씩). 방향키로 조금씩 옮겨요.</p>` : ''}</div>`;
+}
+function e2XfToggle() { // Ctrl+T: 그림 레이어를 골랐으면 그대로(손잡이 있음), 아니면 바탕 그림
+  const ss = selEls(), pg = page(); if (!pg || pg.ph) return;
+  if (ss.length === 1 && !ss[0].lock && imgLayerEl(ss[0])) { toast('모서리를 끌어 크기, 위쪽 동그라미로 돌려요', 1800); return; }
+  const B = baseEl(pg); if (!B) return;
+  if (xfBase === B.id) { xfBase = null; } else { xfBase = B.id; sel = [B.id]; e2BakeStraight(pg); toast('그림을 끌어 옮기고 모서리로 크기, 동그라미로 돌려요. 다 되면 Enter', 2600); }
+  renderProps(); requestRender();
+}
+function e2XfAct(a) {
+  const el = selEls()[0], pg = page(); if (!el) return;
+  if (a === 'e2-xf') { e2XfToggle(); return; }
+  const cx = pg.w / 2, cy = pg.h / 2;
+  if (el.lock) e2BakeStraight(pg);
+  if (a === 'e2-xf-center') { el.x = cx - el.w / 2; el.y = cy - el.h / 2; }
+  else if (a === 'e2-xf-fit' || a === 'e2-xf-fill') {
+    const f = (a === 'e2-xf-fit' ? Math.min : Math.max)(pg.w / el.w, pg.h / el.h); xfSetSize(el, el.w * f); el.x = cx - el.w / 2; el.y = cy - el.h / 2;
+  } else if (a === 'e2-xf-reset') { el.rot = 0; xfSetSize(el, xfNat(el)); el.x = cx - el.w / 2; el.y = cy - el.h / 2; }
+  e2SetHint('그림 변형'); commit(); renderProps(); requestRender();
+}
+propsEl.addEventListener('change', e => {
+  const t = e.target, k = t.dataset && t.dataset.e2x; if (!k) return;
+  const el = selEls()[0]; if (!el) return; if (el.lock) e2BakeStraight(page());
+  if (k === 'sc') xfSetSize(el, xfNat(el) * clamp(+t.value || 100, 1, 2000) / 100);
+  else if (k === 'rot') el.rot = clamp(+t.value || 0, -180, 180);
+  e2SetHint('그림 변형'); commit(); renderProps(); requestRender();
+});
+// 그림을 레이어로 넣기 (이미지 편집): 메뉴 '그림 넣기…', 캔버스에 파일을 끌어 놓을 때 고르기
+function e2AddImgLayer(id, at) {
+  const r = images.get(id), pg = page(); if (!r || !pg || pg.ph) return null;
+  const f = Math.min(1, pg.w * 0.9 / r.w, pg.h * 0.9 / r.h), w = r.w * f, h = r.h * f;
+  const c = at || { x: pg.w / 2, y: pg.h / 2 };
+  const P = makePanel(c.x, c.y, w, h, id); P.bw = 0; P.radius = 0; P.name = String(r.name || '그림').replace(/\.[^.]+$/, '').slice(0, 30);
+  pg.els.push(P); sel = [P.id]; return P;
+}
+async function e2ImgLayerFiles(files, at) {
+  const ids = await importFiles(files); if (!ids.length) return;
+  for (const id of ids) e2AddImgLayer(id, at);
+  e2SetHint('그림 넣기'); commit(); renderProps(); requestRender(); renderLayersSoon();
+  toast(ids.length > 1 ? `그림 ${ids.length}장을 레이어로 넣었어요` : '그림을 레이어로 넣었어요. 모서리를 끌어 크기를 바꿔요', 2600);
+}
+function e2PickImgLayer() {
+  const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'image/*'; inp.multiple = true;
+  inp.onchange = () => { const fs = [...inp.files]; if (fs.length) e2ImgLayerFiles(fs, null); }; inp.click();
+}
+function e2Choice(x, y, items) { // 작은 고르기 메뉴 → 고른 값 (없으면 null)
+  return new Promise(res => {
+    const m = document.createElement('div'); m.className = 'menu'; m.style.left = Math.min(x, innerWidth - 240) + 'px'; m.style.top = Math.min(y, innerHeight - 40 * items.length - 20) + 'px';
+    m.innerHTML = items.map(([v, l]) => `<button data-v="${v}">${l}</button>`).join(''); document.body.appendChild(m);
+    const done = v => { m.remove(); removeEventListener('pointerdown', out, true); removeEventListener('keydown', esc, true); res(v); };
+    const out = e => { if (!m.contains(e.target)) done(null); }, esc = e => { if (e.key === 'Escape') { e.preventDefault(); done(null); } };
+    m.addEventListener('click', e => { const b = e.target.closest('[data-v]'); if (b) done(b.dataset.v); });
+    setTimeout(() => { addEventListener('pointerdown', out, true); addEventListener('keydown', esc, true); }, 0);
+  });
 }

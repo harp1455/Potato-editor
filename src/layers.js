@@ -57,8 +57,9 @@ function renderLayers() {
   $('#layerFoot').innerHTML = ss.length ? `
     <div class="row"><span class="l">불투명도</span><input type="range" min="0" max="100" step="1" data-lk="eop" value="${one ? (one.eop ?? 100) : 100}"><input type="number" min="0" max="100" step="1" data-lk="eop" value="${one ? Math.round(one.eop ?? 100) : 100}"></div>
     <div class="row"><span class="l">섞는 법</span><select data-lk="eblend">${BLENDS_ALL.map(([v, l]) => `<option value="${v}" ${(one ? one.eblend || 'source-over' : 'source-over') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+    ${isImg() && ss.filter(o => !o.lock).length > 1 ? '<div class="btnrow"><button class="btn sm" data-lact="merge" title="고른 레이어를 그림 레이어 하나로 합쳐요. 합친 뒤에도 옮기기·크기·돌리기를 할 수 있어요">고른 것 합치기</button></div>' : ''}
     <div class="btnrow"><button class="btn sm" data-lact="up" title="한 칸 앞으로">위로</button><button class="btn sm" data-lact="down" title="한 칸 뒤로">아래로</button><button class="btn sm" data-lact="dup">복제</button>${one ? '<button class="btn sm" data-lact="rename">이름</button>' : ''}<button class="btn sm danger" data-lact="del">삭제</button></div>`
-    : `<p class="muted small">레이어를 누르면 골라져요. <kbd>Shift</kbd>로 여러 개. 끌어서 순서를 바꿔요.</p>${p.els.some(e => e.hidden) ? '<div class="btnrow"><button class="btn sm" data-lact="showall">숨긴 것 모두 보이기</button></div>' : ''}`;
+    : `<p class="muted small">레이어를 누르면 골라져요. <kbd>Shift</kbd>로 여러 개. 끌어서 순서를 바꿔요.</p>${p.els.some(e => e.hidden) ? '<div class="btnrow"><button class="btn sm" data-lact="showall">숨긴 것 모두 보이기</button></div>' : ''}${isImg() && p.els.filter(e => !e.hidden).length > 1 ? '<div class="btnrow"><button class="btn sm" data-lact="flatten" title="보이는 레이어를 바탕 그림 한 장으로 합쳐요 (숨긴 레이어는 그대로 남아요)">모두 합치기</button></div>' : ''}`;
 }
 (() => {
   const box = $('#layers'), foot = $('#layerFoot');
@@ -117,6 +118,8 @@ function renderLayers() {
     }
     if (a === 'dup') { duplicateSel(); renderLayers(); return; }
     if (a === 'del') { deleteSel(); renderLayers(); return; }
+    if (a === 'flatten') { lyFlatten(); return; }
+    if (a === 'merge') { lyMergeSel(); return; }
     if (a === 'showall') { for (const o of p.els) delete o.hidden; commit(); requestRender(); renderLayers(); return; }
     if (a === 'rename') { const o = selEls()[0]; if (!o) return; const n = await askText('레이어 이름', layerLabel(o, p), '바꾸기'); if (n === null || n === undefined) return; if (n.trim()) o.name = n.trim().slice(0, 30); else delete o.name; commit(); renderLayers(); }
   });
@@ -218,3 +221,41 @@ function sizeAct(act, v) {
     if (e.target.id === 'szW') $('#szH').value = Math.round(v * p.h / p.w); else $('#szW').value = Math.round(v * p.w / p.h);
   });
 })();
+/* ---- 레이어 합치기 (이미지 편집) ---- */
+// 모두 합치기: 보이는 레이어를 바탕 그림 한 장으로 굳혀요. 고른 것 합치기: 고른 레이어를 그림 레이어 하나로.
+// 합친 그림은 새 그림으로 따로 저장되니 Ctrl+Z로 그대로 되돌릴 수 있어요
+async function lyNewImg(c, name) {
+  const src = c.toDataURL('image/png'), im = await loadImg(src);
+  const r = { id: uid(), name, src, w: c.width, h: c.height, alpha: true, kind: 'stamp' }; addImageRecord(r, true, im); return r;
+}
+async function lyFlatten() {
+  const pg = page(); if (!isImg() || pg.ph) return;
+  const vis = pg.els.filter(e => !e.hidden); if (vis.length < 2) { toast('합칠 레이어가 없어요'); return; }
+  if (mode) setMode(null);
+  const c = newCanvas(pg.w, pg.h), g = c.getContext('2d');
+  drawPage(g, pg, { screen: false, rs: 1, view: { x0: 0, y0: 0, x1: pg.w, y1: pg.h } });
+  const r = await lyNewImg(c, (pg.name || '그림').replace(/\.[^.]+$/, '') + ' 합침.png');
+  const B = makePanel(pg.w / 2, pg.h / 2, pg.w, pg.h, r.id); B.bw = 0; B.lock = true;
+  pg.els = [B, ...pg.els.filter(e => e.hidden && !e.lock)];
+  sel = []; xfBase = null; activeLayer.clear(); commit(); renderProps(); renderLayers(); requestRender(); redrawCurThumb();
+  toast(`레이어 ${vis.length}개를 바탕 그림 한 장으로 합쳤어요. 되돌리려면 Ctrl+Z`, 3200);
+}
+async function lyMergeSel() {
+  const pg = page(); if (!isImg() || pg.ph) return;
+  const ss = pg.els.filter(e => sel.includes(e.id) && !e.lock && !e.hidden);
+  if (ss.length < 2) { toast('합칠 레이어를 두 개 넘게 골라 주세요'); return; }
+  if (ss.some(e => e.adjL || e.type === 'fx')) { toast('보정 레이어와 가리기는 따로 합칠 수 없어요. 레이어 탭의 \'모두 합치기\'를 쓰세요.', 3500); return; }
+  if (mode) setMode(null);
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const e of ss) { const b = elBounds(e); x0 = Math.min(x0, b.x0); y0 = Math.min(y0, b.y0); x1 = Math.max(x1, b.x1); y1 = Math.max(y1, b.y1); }
+  x0 = Math.floor(x0); y0 = Math.floor(y0); x1 = Math.ceil(x1); y1 = Math.ceil(y1);
+  const k = Math.min(1, 8000 / Math.max(x1 - x0, y1 - y0)), W = Math.max(1, Math.round((x1 - x0) * k)), H = Math.max(1, Math.round((y1 - y0) * k));
+  const c = newCanvas(W, H), g = c.getContext('2d'); g.setTransform(k, 0, 0, k, -x0 * k, -y0 * k);
+  const view = { x0, y0, x1, y1 }; for (const e of ss) drawEl(g, e, { screen: false, rs: k, view });
+  const r = await lyNewImg(c, '합친 레이어.png');
+  const P = makePanel((x0 + x1) / 2, (y0 + y1) / 2, x1 - x0, y1 - y0, r.id); P.bw = 0; P.radius = 0; P.name = '합친 레이어';
+  const at = pg.els.indexOf(ss[ss.length - 1]); pg.els.splice(at + 1, 0, P);
+  pg.els = pg.els.filter(e => !ss.includes(e));
+  sel = [P.id]; commit(); renderProps(); renderLayers(); requestRender();
+  toast(`${ss.length}개를 그림 레이어 하나로 합쳤어요`);
+}

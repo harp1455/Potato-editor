@@ -670,48 +670,120 @@ function ovHit(px, py, W, H) { // 맨 위부터
   return null;
 }
 function ovDrawSel(g, W, H) {
-  if (gs.focus !== 'ov' || gs.playing) return;
+  if (gs.playing) return;
+  if (gs.focus === 'scene') { scDrawSel(g, W, H); return; }
+  if (gs.focus !== 'ov') return;
   const o = gs.ovs.find(x => x.id === gs.osel); if (!o || o.hidden) return;
   const live = gs.t >= (o.t0 || 0) - 1e-6 && gs.t <= ovT1(o) + 1e-6, { hw, hh } = ovBox(o, W, H), k = W / Math.max(1, $('#gsCv').clientWidth);
   g.save(); g.translate(o.x * W, o.y * H); if (o.rot) g.rotate(o.rot * DEG);
   g.lineWidth = 1.5 * k; g.setLineDash([6 * k, 4 * k]); g.strokeStyle = live ? '#2f7bff' : 'rgba(47,123,255,.45)'; g.strokeRect(-hw - 4 * k, -hh - 4 * k, hw * 2 + 8 * k, hh * 2 + 8 * k);
   g.setLineDash([]); g.fillStyle = '#ffffff'; g.strokeStyle = '#2f7bff';
   for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) { g.beginPath(); g.rect(sx * (hw + 4 * k) - 4 * k, sy * (hh + 4 * k) - 4 * k, 8 * k, 8 * k); g.fill(); g.stroke(); }
-  if (!live) { g.fillStyle = 'rgba(47,123,255,.9)'; g.font = `${12 * k}px sans-serif`; g.textAlign = 'center'; g.fillText(`${fmtT(o.t0)}초부터 보여요`, 0, -hh - 12 * k); }
+  scRotKnob(g, 0, -hh - 4 * k, k);
+  if (!live) { g.fillStyle = 'rgba(47,123,255,.9)'; g.font = `${12 * k}px sans-serif`; g.textAlign = 'center'; g.fillText(`${fmtT(o.t0)}초부터 보여요`, 0, hh + 20 * k); }
   g.restore();
+}
+function scRotKnob(g, x, y, k) { // 돌리기 손잡이 (위쪽 동그라미)
+  g.beginPath(); g.moveTo(x, y); g.lineTo(x, y - 22 * k); g.lineWidth = 1.2 * k; g.strokeStyle = '#2f7bff'; g.stroke();
+  g.beginPath(); g.arc(x, y - 22 * k - 6 * k, 6 * k, 0, Math.PI * 2); g.fillStyle = '#fff'; g.fill(); g.lineWidth = 1.5 * k; g.stroke();
+}
+/* ---- 장면 그림 옮기기·키우기·돌리기 (미리보기에서) ---- */
+// 장면마다 tx·ty(화면 폭·높이 비율), tz(배율), trot(도), tflip. 같은 GIF·영상에서 나온 장면과 여럿 고른 장면은 함께 움직여요
+function scBox(s, W, H) {
+  const sc = (gsFit(s) === 'contain' ? Math.min(W / s.w, H / s.h) : Math.max(W / s.w, H / s.h)) * (s.tz || 1);
+  return { cx: W / 2 + (s.tx || 0) * W, cy: H / 2 + (s.ty || 0) * H, hw: s.w * sc / 2, hh: s.h * sc / 2, rot: s.trot || 0 };
+}
+function scTargets() {
+  const S = gs.slides, cur = S[gs.sel]; if (!cur) return [];
+  let list = gs.pick.size > 1 && gs.pick.has(cur.id) ? gsPicked() : [cur];
+  const clips = new Set(list.map(s => s.clip).filter(Boolean));
+  if (clips.size) list = S.filter(s => list.includes(s) || clips.has(s.clip));
+  return list;
+}
+function scDrawSel(g, W, H) {
+  const s = gs.slides[gs.sel]; if (!s || gsSceneAt(gs.t) !== gs.sel) return;
+  const b = scBox(s, W, H), k = W / Math.max(1, $('#gsCv').clientWidth);
+  g.save(); g.translate(b.cx, b.cy); if (b.rot) g.rotate(b.rot * DEG);
+  g.lineWidth = 1.5 * k; g.setLineDash([6 * k, 4 * k]); g.strokeStyle = '#2f7bff'; g.strokeRect(-b.hw, -b.hh, b.hw * 2, b.hh * 2); g.setLineDash([]);
+  g.fillStyle = '#fff';
+  for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) { g.beginPath(); g.rect(sx * b.hw - 5 * k, sy * b.hh - 5 * k, 10 * k, 10 * k); g.fill(); g.stroke(); }
+  scRotKnob(g, 0, -b.hh, k);
+  g.restore();
+}
+function scHit(s, px, py, W, H, tol) { // 'rot' | 'scale' | 'move' | null
+  const b = scBox(s, W, H), a = -b.rot * DEG, dx = px - b.cx, dy = py - b.cy, lx = dx * Math.cos(a) - dy * Math.sin(a), ly = dx * Math.sin(a) + dy * Math.cos(a);
+  if (Math.hypot(lx, ly + b.hh + 28 * tol / 14) < tol * 1.1) return 'rot';
+  if (Math.abs(Math.abs(lx) - b.hw) < tol && Math.abs(Math.abs(ly) - b.hh) < tol) return 'scale';
+  if (Math.abs(lx) <= b.hw && Math.abs(ly) <= b.hh) return 'move';
+  return null;
 }
 function ovBind() {
   const cv = $('#gsCv'); let D = null;
   const pt = e => { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) * cv.width / r.width, (e.clientY - r.top) * cv.height / r.height]; };
   const local = (o, px, py, W, H) => { const dx = px - o.x * W, dy = py - o.y * H, a = -(o.rot || 0) * DEG; return [dx * Math.cos(a) - dy * Math.sin(a), dx * Math.sin(a) + dy * Math.cos(a), dx, dy]; };
+  const tolOf = W => 14 * W / Math.max(1, cv.clientWidth);
   cv.addEventListener('pointerdown', e => {
     if (!gs.slides.length) return;
-    const [px, py] = pt(e), W = cv.width, H = cv.height;
-    let o = ovHit(px, py, W, H);
+    const [px, py] = pt(e), W = cv.width, H = cv.height, tol = tolOf(W);
     const sel = gs.ovs.find(x => x.id === gs.osel);
-    if (!o && sel && gs.focus === 'ov') { const { hw, hh } = ovBox(sel, W, H), [lx, ly] = local(sel, px, py, W, H); if (Math.abs(lx) <= hw + 12 && Math.abs(ly) <= hh + 12) o = sel; }
-    if (!o) { if (gs.focus === 'ov') { gs.focus = 'set'; gsRenderProps(); gsDraw(); gsRenderList(); } return; }
+    let o = null, rotO = false;
+    if (sel && gs.focus === 'ov') { // 고른 글자의 돌리기·크기 손잡이 먼저
+      const { hw, hh } = ovBox(sel, W, H), [lx, ly] = local(sel, px, py, W, H);
+      if (Math.hypot(lx, ly + hh + 4 * tol / 14 + 28 * tol / 14) < tol * 1.1) { o = sel; rotO = true; }
+      else if (Math.abs(lx) <= hw + 12 && Math.abs(ly) <= hh + 12) o = sel;
+    }
+    if (!o) o = ovHit(px, py, W, H);
+    if (!o) { // 글자·스티커가 없는 곳: 지금 보이는 장면 그림을 골라서 옮기기·키우기·돌리기
+      const i = gsSceneAt(gs.t), s = gs.slides[i]; if (!s) return;
+      const was = gs.focus === 'scene' && gs.sel === i, how = was ? scHit(s, px, py, W, H, tol) : 'move';
+      if (!was) { gs.focus = 'scene'; if (gs.sel !== i) { gs.sel = i; if (!gs.pick.has(s.id)) gs.pick = new Set(); } gsRenderProps(); gsRenderList(); }
+      gsPause();
+      const b = scBox(s, W, H), list = scTargets();
+      D = { scene: true, how: how || 'move', list: list.map(x => ({ s: x, tx: x.tx || 0, ty: x.ty || 0, tz: x.tz || 1, trot: x.trot || 0 })), sx: px, sy: py, cx: b.cx, cy: b.cy, d0: Math.max(1, Math.hypot(px - b.cx, py - b.cy)), a0: Math.atan2(py - b.cy, px - b.cx), moved: false };
+      cv.setPointerCapture(e.pointerId); gsDraw(); e.preventDefault(); return;
+    }
     gsPause();
-    const { hw, hh } = ovBox(o, W, H), [lx, ly, dx, dy] = local(o, px, py, W, H), tol = 14 * W / cv.clientWidth;
-    const corner = Math.abs(Math.abs(lx) - hw) < tol && Math.abs(Math.abs(ly) - hh) < tol;
-    D = { o, sx: px, sy: py, ox: o.x, oy: o.y, sc: o.sc || 1, d0: Math.hypot(dx, dy), corner, moved: false };
+    const { hw, hh } = ovBox(o, W, H), [lx, ly, dx, dy] = local(o, px, py, W, H);
+    const corner = !rotO && Math.abs(Math.abs(lx) - hw) < tol && Math.abs(Math.abs(ly) - hh) < tol;
+    D = { o, sx: px, sy: py, ox: o.x, oy: o.y, sc: o.sc || 1, d0: Math.hypot(dx, dy), corner, rot: rotO, r0: o.rot || 0, a0: Math.atan2(py - o.y * H, px - o.x * W), moved: false };
     const changed = gs.osel !== o.id || gs.focus !== 'ov'; gs.osel = o.id; gs.focus = 'ov'; if (changed) { gsRenderProps(); gsRenderList(); }
     cv.setPointerCapture(e.pointerId); gsDraw(); e.preventDefault();
   });
+  const snapAng = (a, e) => { a = ((a + 180) % 360 + 360) % 360 - 180; if (e.shiftKey) return Math.round(a / 15) * 15; const r9 = Math.round(a / 90) * 90; return Math.abs(a - r9) < 4 ? r9 : Math.round(a * 10) / 10; };
   cv.addEventListener('pointermove', e => {
     const [px, py] = pt(e), W = cv.width, H = cv.height;
-    if (!D) { const o = gs.slides.length && ovHit(px, py, W, H); cv.style.cursor = o ? 'move' : ''; return; }
+    if (!D) {
+      const o = gs.slides.length && ovHit(px, py, W, H); let c = o ? 'move' : '';
+      if (!o && gs.focus === 'scene' && gs.slides[gs.sel] && gsSceneAt(gs.t) === gs.sel) { const h = scHit(gs.slides[gs.sel], px, py, W, H, tolOf(W)); c = h === 'rot' ? 'grab' : h === 'scale' ? 'nwse-resize' : h === 'move' ? 'move' : ''; }
+      cv.style.cursor = c; return;
+    }
+    if (!D.moved && Math.hypot(px - D.sx, py - D.sy) < 3) return;
     D.moved = true;
-    if (D.corner) D.o.sc = clamp(D.sc * Math.hypot(px - D.ox * W, py - D.oy * H) / Math.max(1, D.d0), 0.1, 8);
+    if (D.scene) {
+      for (const q of D.list) {
+        if (D.how === 'scale') q.s.tz = clamp(q.tz * Math.hypot(px - D.cx, py - D.cy) / D.d0, 0.05, 20);
+        else if (D.how === 'rot') q.s.trot = snapAng(q.trot + (Math.atan2(py - D.cy, px - D.cx) - D.a0) / DEG, e);
+        else { let nx = q.tx + (px - D.sx) / W, ny = q.ty + (py - D.sy) / H; if (Math.abs(nx) < 0.012) nx = 0; if (Math.abs(ny) < 0.012) ny = 0; q.s.tx = clamp(nx, -2, 2); q.s.ty = clamp(ny, -2, 2); }
+      }
+      gsDraw(); return;
+    }
+    if (D.rot) D.o.rot = snapAng(D.r0 + (Math.atan2(py - D.oy * H, px - D.ox * W) - D.a0) / DEG, e);
+    else if (D.corner) D.o.sc = clamp(D.sc * Math.hypot(px - D.ox * W, py - D.oy * H) / Math.max(1, D.d0), 0.1, 8);
     else { let nx = D.ox + (px - D.sx) / W, ny = D.oy + (py - D.sy) / H; if (Math.abs(nx - 0.5) < 0.012) nx = 0.5; if (Math.abs(ny - 0.5) < 0.012) ny = 0.5; D.o.x = clamp(nx, -0.2, 1.2); D.o.y = clamp(ny, -0.2, 1.2); }
     gsDraw();
   });
-  const end = () => { if (!D) return; const m = D.moved; D = null; if (m) gsChanged(); };
+  const end = () => { if (!D) return; const m = D.moved, sc = D.scene; D = null; if (m) { gsChanged(); if (sc) gsRenderProps(); } };
   cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end);
   cv.addEventListener('wheel', e => {
-    const o = gs.ovs.find(x => x.id === gs.osel); if (!o || gs.focus !== 'ov') return;
-    const [px, py] = pt(e); if (ovHit(px, py, cv.width, cv.height) !== o) return;
-    e.preventDefault(); o.sc = clamp((o.sc || 1) * Math.pow(1.1, -e.deltaY / 100), 0.1, 8); gsDraw(); clearTimeout(gsSaveT); gsSaveT = setTimeout(() => gsChanged(), 400);
+    const [px, py] = pt(e), o = gs.ovs.find(x => x.id === gs.osel);
+    if (o && gs.focus === 'ov' && ovHit(px, py, cv.width, cv.height) === o) {
+      e.preventDefault(); o.sc = clamp((o.sc || 1) * Math.pow(1.1, -e.deltaY / 100), 0.1, 8); gsDraw(); clearTimeout(gsSaveT); gsSaveT = setTimeout(() => gsChanged(), 400); return;
+    }
+    if (gs.focus === 'scene' && gs.slides[gs.sel] && gsSceneAt(gs.t) === gs.sel && !ovHit(px, py, cv.width, cv.height)) { // 장면 그림 확대·축소
+      e.preventDefault(); const f = Math.pow(1.1, -e.deltaY / 100);
+      for (const s of scTargets()) s.tz = clamp((s.tz || 1) * f, 0.05, 20);
+      gsDraw(); clearTimeout(gsSaveT); gsSaveT = setTimeout(() => { gsChanged(); gsRenderProps(); }, 400);
+    }
   }, { passive: false });
   cv.addEventListener('dblclick', () => { const ta = $('#gsProps textarea[data-gk="o.text"]'); if (ta) { ta.focus(); ta.select(); } });
 }

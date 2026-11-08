@@ -208,7 +208,7 @@ function gsRenderProps() {
   if ((gs.focus === 'ov' && !o) || (gs.focus === 'fx' && !f) || ((gs.focus === 'scene' || gs.focus === 'tr') && !s) || (gs.focus === 'tr' && gs.sel < 1)) gs.focus = 'set';
   const opt = (arr, cur) => arr.map(([v, l]) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${l}</option>`).join('');
   let k = '전체', head = '움짤 전체 설정', body = '';
-  if (gs.focus === 'scene' && gs.pick.size > 1) { k = '장면'; head = `고른 장면 ${gs.pick.size}개`; body = gsBatchHtml(); }
+  if (gs.focus === 'scene' && gs.pick.size > 1) { k = '장면'; head = `고른 장면 ${gs.pick.size}개`; body = gsBatchHtml() + (S[gs.sel] ? `<div class="sec">${gsXfHtml(S[gs.sel], 0)}</div>` : ''); }
   else if (gs.focus === 'scene') {
     k = '장면'; head = `${gs.sel + 1}번 장면 <span class="muted small">/ ${S.length}</span>`;
     const nClip = s.clip ? S.filter(x => x.clip === s.clip).length : 0;
@@ -217,6 +217,7 @@ function gsRenderProps() {
         ${row('움직임', `<select data-gk="s.motion"><option value="">전체 설정 따름</option>${opt(GS_MOTIONS, s.motion ?? '')}</select>`)}
         ${row('맞추기', `<select data-gk="s.fit"><option value="">전체 설정 따름</option>${opt([['cover', '꽉 채우기'], ['contain', '전체 보이기']], s.fit ?? '')}</select>`)}
         <p class="gp-tip">시간 막대에서 장면 오른쪽 끝을 끌면 길이가 바뀌고, 가운데를 끌면 순서가 바뀌어요.</p>
+        ${gsXfHtml(s, nClip)}
         <div class="btnrow"><button class="btn sm" data-g="dup" title="Ctrl+D">복제</button><button class="btn sm" data-g="split" title="재생 위치에서 두 장면으로 (Ctrl+K)">재생 위치에서 나누기</button><button class="btn sm danger" data-g="del-sel">빼기</button></div>
         ${nClip > 1 ? `<div class="btnrow"><button class="btn sm" data-g="pick-clip" data-v="${s.clip}" title="같은 GIF·영상에서 나온 장면을 모두 골라 속도·거꾸로·부메랑을 한꺼번에">이 GIF·영상 장면 모두 고르기 (${nClip}장)</button></div>` : ''}</div>
       ${gs.sel > 0 ? `<div class="sec"><h3>들어올 때 넘김</h3>${row('넘김', gsTransSel('s.tr', s.tr ?? '', true))}${row('길이', `<input type="number" data-gk="s.trd" min="0.05" max="3" step="0.05" value="${s.trd ?? ''}" placeholder="${set.trDur}"> 초`)}</div>` : ''}`;
@@ -253,6 +254,15 @@ function gsRenderProps() {
   }
   el.innerHTML = `<div class="gp-insp-h"><span class="k k-${k === '전체' ? 'set' : 'x'}">${k}</span><b>${head}</b><span class="flex1"></span>${gs.focus !== 'set' ? '<button class="gp-ib sm" data-g="desel" title="고르기 풀기 (Esc)">×</button>' : ''}</div>` + body;
   if (gs.lib === 'tr') gpTrMark();
+}
+function gsXfHtml(s, nClip) { // 장면 그림 위치·크기·회전
+  const n = v => Math.round(v * 10) / 10, xf = !!(s.tx || s.ty || (s.tz && s.tz !== 1) || s.trot || s.tflip);
+  return `<h4 class="advh">그림 위치·크기·회전</h4>
+    <div class="grid2"><span>가로 위치</span><span class="gp-nu"><input type="number" data-gk="sx.tx" step="1" value="${n((s.tx || 0) * 100)}">%</span><span>세로 위치</span><span class="gp-nu"><input type="number" data-gk="sx.ty" step="1" value="${n((s.ty || 0) * 100)}">%</span>
+      <span>크기</span><span class="gp-nu"><input type="number" data-gk="sx.tz" min="5" max="2000" step="1" value="${n((s.tz || 1) * 100)}">%</span><span>회전</span><span class="gp-nu"><input type="number" data-gk="sx.trot" min="-180" max="180" step="1" value="${n(s.trot || 0)}">°</span></div>
+    ${row('뒤집기', `<label class="chk"><input type="checkbox" data-gk="sx.tflip" ${s.tflip ? 'checked' : ''}> 좌우 뒤집기</label>`)}
+    <div class="btnrow"><button class="btn sm" data-g="xf-center">가운데로</button><button class="btn sm" data-g="xf-reset" ${xf ? '' : 'disabled'}>원래대로</button><button class="btn sm" data-g="xf-all" title="이 위치·크기·회전을 모든 장면에">모든 장면에 같게</button></div>
+    <p class="gp-tip">미리보기에서 그림을 끌면 옮겨지고, 모서리를 끌거나 휠을 돌리면 크기, 위쪽 동그라미로 돌려요(Shift = 15°씩).${nClip > 1 ? ' 같은 GIF·영상에서 나온 장면은 함께 움직여요.' : ''}</p>`;
 }
 function gsSaveHtml() {
   const set = gs.set, opt = (arr, cur) => arr.map(([v, l]) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${l}</option>`).join('');
@@ -512,6 +522,16 @@ function gsInput(e) {
   if (e.type === 'input' && (t.tagName === 'SELECT' || t.type === 'checkbox')) return;
   if (k.startsWith('o.') || k.startsWith('f.')) { const r = ovSetKey(k, t); if (r) gsChanged(r !== 'props' && (e.type === 'input' || !/\.(t0|t1|text)$/.test(k))); return; } // 글자·스티커, 효과
   let v = t.type === 'checkbox' ? t.checked : t.value;
+  if (k.startsWith('sx.')) { // 장면 그림 위치·크기·회전 (같은 영상·여럿 고른 장면도 함께)
+    const f = k.slice(3), list = scTargets(); if (!list.length) return;
+    for (const s of list) {
+      if (f === 'tflip') s.tflip = !!v || undefined;
+      else if (f === 'tz') s.tz = clamp((+v || 100) / 100, 0.05, 20);
+      else if (f === 'trot') s.trot = clamp(+v || 0, -180, 180);
+      else s[f] = clamp((+v || 0) / 100, -2, 2);
+    }
+    gsChanged(e.type === 'input'); return;
+  }
   if (k.startsWith('s.')) {
     const s = gs.slides[gs.sel]; if (!s) return; const f = k.slice(2);
     if (f === 'dur') s.dur = v === '' ? null : clamp(+v || 0.02, 0.02, 60);
@@ -530,8 +550,11 @@ async function gsClick(e) {
   const b = e.target.closest('[data-g]'); if (!b || b.disabled) return;
   const a = b.dataset.g, S = gs.slides, fps = +gs.set.fps || 12;
   if (a === 'tr-gal' || a.startsWith('ov-') || a.startsWith('fx-')) { ovClick(a, b); return; }
-  if (a === 'close') closeGifStudio();
+  if (a === 'close') pjBackToEditor();
   else if (a === 'export-open') gsExportOpen();
+  else if (a === 'xf-center') { for (const s of scTargets()) { s.tx = 0; s.ty = 0; } gsChanged(); gsRenderProps(); }
+  else if (a === 'xf-reset') { for (const s of scTargets()) { delete s.tx; delete s.ty; delete s.tz; delete s.trot; delete s.tflip; } gsChanged(); gsRenderProps(); }
+  else if (a === 'xf-all') { const c = S[gs.sel]; if (c) { for (const s of S) { s.tx = c.tx; s.ty = c.ty; s.tz = c.tz; s.trot = c.trot; s.tflip = c.tflip; } gsChanged(); toast('모든 장면에 같은 위치·크기·회전을 넣었어요', 2000); } }
   else if (a === 'lib') { gs.lib = b.dataset.v; gpLibRender(); }
   else if (a === 'add-file') $('#gsFile').click();
   else if (a === 'add-lib') gsPickLibrary();
@@ -577,7 +600,7 @@ function gpDelete() {
 }
 function gsKey(e) {
   const mod = e.ctrlKey || e.metaKey, k = e.key, fps = +gs.set.fps || 12;
-  if (k === 'Escape') { if (modalOpen()) closeModal(); else if (gs.tool === 'razor') { gs.tool = 'sel'; gpTbarRender(); } else if (gs.focus !== 'set' || gs.pick.size) gpDeselect(); else closeGifStudio(); e.preventDefault(); return; }
+  if (k === 'Escape') { if (modalOpen()) closeModal(); else if (gs.tool === 'razor') { gs.tool = 'sel'; gpTbarRender(); } else if (gs.focus !== 'set' || gs.pick.size) gpDeselect(); else pjBackToEditor(); e.preventDefault(); return; }
   if (isTyping(e.target) || modalOpen()) return;
   const lk = k.toLowerCase();
   if (k === ' ') { e.preventDefault(); gs.playing ? gsPause() : gsPlay(); }

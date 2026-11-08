@@ -239,15 +239,28 @@ function normalizeDoc(d) {
 }
 
 /* ================= 되돌리기 ================= */
-let hist = [], hi = -1;
+// 기록은 작품 전체 상태를 통째로 담아요. 이미지 편집에서는 Ctrl+Z가 '지금 그림'에 생긴 변경만 차례로 되돌려요
+// (다른 그림으로 넘어가지 않아요). 기록마다 그림(페이지)별 지문(ph)을 남겨 어느 그림이 바뀌었는지 알아요
+let hist = [], hi = -1, imgRedo = [];
 const snapStr = () => JSON.stringify({ name: doc.name, mode: doc.mode, folders: doc.folders, pages: doc.pages, defaults: doc.defaults });
-function resetHistory() { hist = [{ s: snapStr(), cur: doc.cur, l: '처음 상태', t: Date.now() }]; hi = 0; updateUndo(); renderHistSoon(); }
-function commit() {
-  const s = snapStr();
-  if (hist[hi] && hist[hi].s === s) return;
-  hist = hist.slice(0, hi + 1); hist.push({ s, cur: doc.cur, l: e2HistLabel(), t: Date.now() });
+const hstr = t => { let h = 2166136261; for (let i = 0; i < t.length; i++) { h ^= t.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36) + '.' + t.length.toString(36); };
+const PG_TOKEN = '\u0001PAGES\u0001';
+function histEntry() {
+  const pj = doc.pages.map(p => JSON.stringify(p)), ph = {};
+  doc.pages.forEach((p, i) => { ph[p.id] = hstr(pj[i]); });
+  const head = JSON.stringify({ name: doc.name, mode: doc.mode, folders: doc.folders, pages: PG_TOKEN, defaults: doc.defaults });
+  return { s: head.replace(JSON.stringify(PG_TOKEN), '[' + pj.join(',') + ']'), ph, po: doc.pages.map(p => p.id).join(','), pz: doc.pages.filter(p => p.ph).map(p => p.id).join(','), sg: hstr(head) };
+}
+function resetHistory() { hist = [Object.assign(histEntry(), { cur: doc.cur, l: '처음 상태', t: Date.now() })]; hi = 0; imgRedo = []; updateUndo(); renderHistSoon(); }
+function commit(opt) {
+  const e = histEntry();
+  if (hist[hi] && hist[hi].s === e.s) return;
+  Object.assign(e, { cur: doc.cur, l: e2HistLabel(), t: Date.now() }); if (opt && opt.u) e.u = 1;
+  if (hist.length > hi + 1) imgRedo = imgRedo.filter(x => !x.g); // 앞으로 갈 기록이 잘려 나가요
+  hist = hist.slice(0, hi + 1); hist.push(e);
   if (hist.length > 150) hist.shift();
   hi = hist.length - 1;
+  if (!(opt && opt.u)) imgRedo = [];
   afterChange();
 }
 function restoreHist(h) {
@@ -256,12 +269,56 @@ function restoreHist(h) {
   doc.cur = clamp(h.cur, 0, doc.pages.length - 1);
   const back = id => { if (id && !images.has(id) && trash.has(id)) { addImageRecord(trash.get(id), true); trash.delete(id); } };
   for (const p of doc.pages) for (const e of p.els) { back(e.img); for (const L of e.layers || []) back(L.img); }
-  sel = sel.filter(id => findEl(id)); imageEditId = null; closeInline(true);
+  sel = sel.filter(id => findEl(id)); imageEditId = null; xfBase = null; closeInline(true);
   layoutSpacer(); renderAll(); afterChange();
 }
-function undo() { if (hi <= 0) return; hi--; restoreHist(hist[hi]); }
-function redo() { if (hi >= hist.length - 1) return; hi++; restoreHist(hist[hi]); }
-function updateUndo() { $('#bUndo').disabled = hi <= 0; $('#bRedo').disabled = hi >= hist.length - 1; }
+function undo() { if (isImg()) { imgUndo(); return; } if (hi <= 0) return; hi--; restoreHist(hist[hi]); }
+function redo() { if (isImg()) { imgRedoDo(); return; } if (hi >= hist.length - 1) return; hi++; restoreHist(hist[hi]); }
+function imgUndoAt(P) { // 지금 그림에서 되돌릴 기록 번호 (없으면 -1)
+  if (!P) return -1;
+  for (let k = hi; k >= 1; k--) {
+    const e = hist[k], e0 = hist[k - 1]; if (e.u || !e.ph || !e0.ph) continue;
+    const a = e.ph[P.id], b = e0.ph[P.id];
+    if (a === undefined || b === undefined || a === b || (e.pud && e.pud[P.id])) continue;
+    return k;
+  }
+  return -1;
+}
+function imgGone() { // 방금 한 일이 그림을 목록에서 뺀 것이면 그 그림 id들
+  const h = hist[hi], h0 = hist[hi - 1]; if (!h || !h0 || h.u || h.po === h0.po) return [];
+  const now = new Set(h.po.split(',')), ph = new Set((h0.pz || '').split(',')); return h0.po.split(',').filter(id => id && !now.has(id) && !ph.has(id)); // 빈 자리(그림 없음)는 빼고
+}
+function imgUndo() {
+  const gone = imgGone();
+  if (gone.length) { hi--; restoreHist(hist[hi]); imgRedo.push({ g: 1 }); const i = doc.pages.findIndex(p => p.id === gone[0]); if (i >= 0 && i !== doc.cur) switchPage(i); updateUndo(); return; }
+  const P = page(), k = imgUndoAt(P);
+  if (k < 0) { toast('이 그림에서는 더 되돌릴 게 없어요', 1600); return; }
+  const o = JSON.parse(hist[k - 1].s), prev = o.pages.find(p => p.id === P.id); if (!prev) return;
+  const i = doc.pages.indexOf(P), after = JSON.stringify(P), lab = hist[k].l;
+  doc.pages[i] = prev; (hist[k].pud || (hist[k].pud = {}))[P.id] = 1;
+  imgRedo.push({ pid: P.id, e: hist[k], after });
+  imgPageSwapped(prev, '되돌리기' + (lab && lab !== '처음 상태' ? ' · ' + lab : ''));
+}
+function imgRedoDo() {
+  const P = page(); let j = -1;
+  for (let i = imgRedo.length - 1; i >= 0; i--) if (imgRedo[i].g || (P && imgRedo[i].pid === P.id)) { j = i; break; }
+  if (j < 0) { toast('이 그림에서 다시 할 게 없어요', 1400); return; }
+  const it = imgRedo.splice(j, 1)[0];
+  if (it.g) { if (hi < hist.length - 1) { hi++; restoreHist(hist[hi]); } return; }
+  const i = doc.pages.findIndex(p => p.id === it.pid); if (i < 0) return;
+  const pg = JSON.parse(it.after); doc.pages[i] = pg; if (it.e.pud) delete it.e.pud[it.pid];
+  imgPageSwapped(pg, '다시 하기');
+}
+function imgPageSwapped(pg, label) {
+  const back = id => { if (id && !images.has(id) && trash.has(id)) { addImageRecord(trash.get(id), true); trash.delete(id); } };
+  for (const e of pg.els) { back(e.img); for (const L of e.layers || []) back(L.img); }
+  sel = sel.filter(id => findEl(id)); imageEditId = null; xfBase = null; closeInline(true);
+  e2SetHint(label); commit({ u: true }); layoutSpacer(); renderAll(); redrawCurThumb();
+}
+function updateUndo() {
+  if (isImg()) { const P = page(); $('#bUndo').disabled = imgUndoAt(P) < 0 && !imgGone().length; $('#bRedo').disabled = !imgRedo.some(x => x.g || (P && x.pid === P.id)); return; }
+  $('#bUndo').disabled = hi <= 0; $('#bRedo').disabled = hi >= hist.length - 1;
+}
 function afterChange() { updateUndo(); scheduleSave(); scheduleThumbs(); updateHint(); renderLibSoon(); renderLayersSoon(); renderHistSoon(); }
 
 /* ================= 저장소 (자동 저장) ================= */
@@ -270,7 +327,7 @@ const idb = {
   open() {
     return new Promise(res => {
       try {
-        const r = indexedDB.open('cut-editor', 3);
+        const r = indexedDB.open('cut-editor', 4);
         r.onupgradeneeded = () => {
           const db = r.result, has = n => db.objectStoreNames.contains(n);
           if (!has('kv')) db.createObjectStore('kv');
@@ -278,6 +335,7 @@ const idb = {
           if (!has('fonts')) db.createObjectStore('fonts', { keyPath: 'name' });
           if (!has('stamps')) db.createObjectStore('stamps', { keyPath: 'id' });
           if (!has('packs')) db.createObjectStore('packs', { keyPath: 'id' });
+          if (!has('pimg')) db.createObjectStore('pimg', { keyPath: 'k' }).createIndex('pj', 'pj'); // 작업(탭)마다 그림 따로 (k = 작업id:그림id)
         };
         r.onsuccess = () => { this.db = r.result; res(true); };
         r.onerror = () => res(false);
@@ -299,17 +357,32 @@ const idb = {
   put(st, v) { return this.tx(st, 'readwrite', s => s.put(v)); },
   del(st, k) { return this.tx(st, 'readwrite', s => s.delete(k)); },
   clear(st) { return this.tx(st, 'readwrite', s => s.clear()); },
+  putAll(st, arr) { return this.tx(st, 'readwrite', s => { for (const v of arr) s.put(v); return null; }); },
+  byPj(pj) { return this.tx('pimg', 'readonly', s => s.index('pj').getAll(IDBKeyRange.only(pj))); },
+  delPj(pj) { // 이 작업의 그림을 모두 지워요
+    return new Promise(res => {
+      if (!this.db) return res(false);
+      try {
+        const t = this.db.transaction('pimg', 'readwrite'), st = t.objectStore('pimg'), rq = st.index('pj').openKeyCursor(IDBKeyRange.only(pj));
+        rq.onsuccess = () => { const c = rq.result; if (c) { st.delete(c.primaryKey); c.continue(); } };
+        t.oncomplete = () => res(true); t.onerror = () => res(false); t.onabort = () => res(false);
+      } catch (e) { res(false); }
+    });
+  },
 };
 let saveT = null;
 function scheduleSave() { clearTimeout(saveT); $('#saveState').textContent = '저장 중…'; saveT = setTimeout(saveNow, 900); }
 async function saveNow() {
   clearTimeout(saveT); saveT = null;
-  const ok = await idb.set('doc', { s: snapStr(), cur: doc.cur, imageOrder, at: Date.now() });
+  if (!edPj) return;
+  const ok = await idb.set('doc:' + edPj, { s: snapStr(), cur: doc.cur, imageOrder, at: Date.now() });
+  pjTouch();
   const t = new Date();
   $('#saveState').textContent = ok ? `저장됨 ${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}` : '자동 저장 안 됨';
   $('#saveState').title = ok ? '이 브라우저에 자동으로 저장됐어요' : '자동 저장이 안 돼요. 저장 버튼으로 파일을 받아 두세요.';
 }
 document.addEventListener('visibilitychange', () => { if (document.hidden && saveT) saveNow(); });
+/*@@PROJ@@*/
 
 /* ================= 그림 ================= */
 function readAsDataURL(file) { return new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = rej; fr.readAsDataURL(file); }); }
@@ -328,8 +401,9 @@ function hasAlpha(im) {
     return n > 20;
   } catch (e) { return false; }
 }
-const recData = rec => ({ id: rec.id, name: rec.name, src: rec.src, w: rec.w, h: rec.h, thumb: rec.thumb, kind: rec.kind, alpha: rec.alpha, folder: rec.folder || null });
+const recData = rec => ({ k: (rec.pj || edPj) + ':' + rec.id, pj: rec.pj || edPj, id: rec.id, name: rec.name, src: rec.src, w: rec.w, h: rec.h, thumb: rec.thumb, kind: rec.kind, alpha: rec.alpha, folder: rec.folder || null });
 function addImageRecord(rec, persist, imEl) {
+  if (!rec.pj) rec.pj = edPj;
   images.set(rec.id, rec);
   if (rec.kind !== 'stamp' && !imageOrder.includes(rec.id)) imageOrder.push(rec.id);
   const done = im => {
@@ -341,10 +415,10 @@ function addImageRecord(rec, persist, imEl) {
   if (imEl) { done(imEl); imgCache.set(rec.id, imEl); }
   else {
     const im = new Image();
-    im.onload = () => { if (done(im) && images.has(rec.id)) idb.put('imgs', recData(rec)); clearImgCaches(rec.id); alphaMaps.delete(rec.id); requestRender(); renderLibSoon(); scheduleThumbs(); };
+    im.onload = () => { if (done(im) && images.get(rec.id) === rec) idb.put('pimg', recData(rec)); clearImgCaches(rec.id); alphaMaps.delete(rec.id); requestRender(); renderLibSoon(); scheduleThumbs(); };
     im.src = rec.src; imgCache.set(rec.id, im);
   }
-  if (persist) idb.put('imgs', recData(rec));
+  if (persist) idb.put('pimg', recData(rec));
 }
 const isImageFile = f => /^image\//.test(f.type) || /\.(png|jpe?g|webp|gif|bmp|avif)$/i.test(f.name || '');
 async function importFiles(files) {
@@ -447,9 +521,9 @@ function usedSet() { const s = new Set(); for (const p of doc.pages) for (const 
 function removeImage(id) {
   if (usedSet().has(id) && !confirm('이 그림을 쓰는 컷이 있어요. 보관함에서 빼면 그 컷에서도 사라져요. 뺄까요?')) return;
   for (const p of doc.pages) for (const e of p.els) { if (e.img === id) e.img = null; if (e.layers) e.layers = e.layers.filter(L => L.img !== id); }
-  trash.set(id, images.get(id)); images.delete(id); imgCache.delete(id);
+  const tr = images.get(id); trash.set(id, tr); images.delete(id); imgCache.delete(id);
   imageOrder = imageOrder.filter(x => x !== id); marks = marks.filter(x => x !== id);
-  idb.del('imgs', id); commit(); renderLib(); renderProps(); requestRender();
+  idb.del('pimg', ((tr && tr.pj) || edPj) + ':' + id); commit(); renderLib(); renderProps(); requestRender();
 }
 // 가장자리와 이어진 단색 배경을 투명하게 (캐릭터 그림용)
 async function removeBg(src) {
@@ -1670,10 +1744,11 @@ function shapeOutline(el, color, w, dpr) { // 잘린 컷의 실제 모양 테두
   for (const poly of el.clips) { polyPath(ctx, el, poly); ctx.stroke(); }
   ctx.restore();
 }
+const imgLayerEl = el => isImg() && el.type === 'panel' && !el.adjL && !(el.fill && el.pass); // 이미지 편집의 그림 레이어: 모서리 = 비율 그대로 크기
 function handlesFor(el) {
-  if (el.lock) return [];
+  if (el.lock && xfBase !== el.id) return []; // 바탕 그림은 '자유 변형'일 때만
   const hs = [], c = center(el), a = (el.rot || 0) * DEG;
-  const cornersOnly = el.type === 'text' || el.type === 'stamp';
+  const cornersOnly = el.type === 'text' || el.type === 'stamp' || imgLayerEl(el);
   const pts = cornersOnly ? [[-1, -1], [1, -1], [1, 1], [-1, 1]] : [[-1, -1], [0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0]];
   for (const [hx, hy] of pts) {
     if ((hx === 0 || hy === 0) && ((hx === 0 && el.w * zoom < 46) || (hy === 0 && el.h * zoom < 46))) continue;
@@ -2178,6 +2253,7 @@ function updateHover(p) {
     if (sel.length === 1 && !imageEditId) { const el = findEl(sel[0]); const h = el && hitHandle(el, p); if (h) { scroller.style.cursor = cursorFor(h, el); if (hoverId) { hoverId = null; requestRender(); } return; } }
     const hit = hitTest(p);
     if (hit && !hit.lock) { hid = hit.id; cur = imageEditId === hit.id ? 'grab' : 'move'; }
+    else if (hit && hit.lock && xfBase === hit.id) cur = 'move';
   }
   scroller.style.cursor = cur;
   if (hid !== hoverId) { hoverId = hid; requestRender(); }
@@ -2219,6 +2295,12 @@ function onDown(e) {
       if (L && L.img) { drag = { mode: 'panimg', el, L, base: L === el, sx: p.x, sy: p.y, ox: L.ox || 0, oy: L.oy || 0 }; scroller.setPointerCapture(e.pointerId); scroller.style.cursor = 'grabbing'; renderProps(); requestRender(); return; }
     }
     imageEditId = null;
+  }
+  if (xfBase && !(hit && hit.id === xfBase)) { xfBase = null; requestRender(); } // 바탕 그림 밖을 누르면 자유 변형 끝
+  if (hit && hit.lock && xfBase === hit.id) { // 자유 변형 중인 바탕 그림 옮기기
+    sel = [hit.id];
+    drag = { mode: 'move', sx: p.x, sy: p.y, start: [{ el: hit, x: hit.x, y: hit.y }], bb: aabb(hit), moved: false, clickId: hit.id, shift: false };
+    scroller.setPointerCapture(e.pointerId); renderProps(); requestRender(); return;
   }
   if (hit && hit.lock) { // 바탕 그림: 끌면 여러 개 고르기, 그냥 누르면 바탕 그림 고르기
     if (!e.shiftKey) sel = [];
@@ -2298,8 +2380,8 @@ function doResize(d, p, e) {
   const o = d.o, el = d.el, a = (o.rot || 0) * DEG, c0 = center(o);
   const q = rot(p.x - c0.x, p.y - c0.y, -a);
   const ax = -d.hx * o.w / 2, ay = -d.hy * o.h / 2;
-  let nw = o.w, nh = o.h;
-  if (el.type === 'text' || el.type === 'stamp') {
+  let nw = o.w, nh = o.h; const imgL = imgLayerEl(el);
+  if (el.type === 'text' || el.type === 'stamp' || imgL) {
     const vx = d.hx * o.w / 2 - ax, vy = d.hy * o.h / 2 - ay;
     const f = clamp(((q.x - ax) * vx + (q.y - ay) * vy) / (vx * vx + vy * vy), 0.04, 60);
     if (el.type === 'text') {
@@ -2322,7 +2404,8 @@ function doResize(d, p, e) {
   const lcx = d.hx ? ax + d.hx * nw / 2 : 0, lcy = d.hy ? ay + d.hy * nh / 2 : 0;
   const wc = rot(lcx, lcy, a);
   el.w = nw; el.h = nh; el.x = c0.x + wc.x - nw / 2; el.y = c0.y + wc.y - nh / 2;
-  if (el.type === 'panel') reframe(el, o, { x: lcx, y: lcy });
+  if (imgL) xfScaleInner(el, o, nw / o.w); // 그림이 틀과 함께 커지고 작아져요
+  else if (el.type === 'panel') reframe(el, o, { x: lcx, y: lcy });
 }
 scroller.addEventListener('pointerdown', onDown);
 scroller.addEventListener('pointermove', onMove);
@@ -2376,6 +2459,11 @@ scroller.addEventListener('drop', async e => {
   const zip = files.find(f => /\.zip$/i.test(f.name));
   if (zip) { importPackZip(zip); return; }
   const items = await itemsP;
+  if (isImg() && !items.some(it => it.dir) && files.length && page() && !page().ph && files.every(f => /^image\//.test(f.type) || /\.(png|jpe?g|webp|gif|bmp|avif)$/i.test(f.name))) {
+    const v = await e2Choice(e.clientX, e.clientY, [['layer', files.length > 1 ? `이 그림 위에 레이어로 넣기 (${files.length}장)` : '이 그림 위에 레이어로 넣기'], ['new', files.length > 1 ? `새 그림으로 추가 (${files.length}장)` : '새 그림으로 추가']]);
+    if (v === 'layer') { await e2ImgLayerFiles(files, p); return; }
+    if (v !== 'new') return;
+  }
   if (isImg() || items.some(it => it.dir)) { await addImages(items); return; }
   const ids = await importFiles(files), panel = hitTest(p, 'panel');
   if (ids.length === 1) dropImage(ids[0], p, e.shiftKey);
@@ -2728,13 +2816,13 @@ function imgPageProps() {
   const p = page();
   if (p.ph) return `<div class="sec"><h3>이미지 편집</h3><p class="muted">왼쪽 위 <b>+ 그림</b>이나 <b>+ 폴더째</b>로 고칠 그림을 불러오세요. 그림이나 폴더를 화면으로 바로 끌어와도 돼요.</p></div>${aaSec()}`;
   const rec = p.img && images.get(p.img), B = baseEl(p);
-  const changed = p.els.length > 1 || (rec && (p.w !== rec.w || p.h !== rec.h)) || (B && (B.rot || B.flip));
+  const changed = p.els.length > 1 || (rec && (p.w !== rec.w || p.h !== rec.h)) || (B && (B.rot || B.flip || B.img !== p.img));
   return `<div class="sec"><h3>이 그림</h3>
     <div class="imginfo"><span>이름</span><span title="${esc(p.name)}">${esc(p.name)}</span><span>크기</span><span>${p.w} × ${p.h}${rec && (rec.w !== p.w || rec.h !== p.h) ? ` (원본 ${rec.w} × ${rec.h})` : ''}</span></div>
     ${row('폴더', `<select data-act="pg-folder"><option value="">폴더 없음</option>${folderOptions(p.folder)}</select>`)}
     <div class="btnrow"><button class="btn sm" data-act="crop">자르기</button><button class="btn sm" data-act="rot-l">왼쪽으로 돌리기</button><button class="btn sm" data-act="rot-r">오른쪽으로 돌리기</button>${B ? '<button class="btn sm" data-act="flip-img">좌우 뒤집기</button>' : ''}</div>
     ${B ? row('수평', `<input type="range" data-e2s="1" min="-30" max="30" step="0.1" value="${B.straight || 0}"><input type="number" data-e2s="1" min="-30" max="30" step="0.1" value="${B.straight || 0}"> °`) + `<div class="btnrow"><button class="btn sm" data-act="e2-level" title="수평이어야 할 선을 따라 그으면 그만큼 돌려요">선을 그어 수평 맞추기</button>${B.straight ? '<button class="btn sm" data-act="e2-level0">수평 되돌리기</button>' : ''}</div><p class="muted small" style="margin:0 0 6px">기울인 만큼 생기는 빈 곳이 없도록 조금 확대해요.</p>` : ''}
-    <div class="btnrow"><button class="btn sm" data-act="img-reset" ${changed ? '' : 'disabled'}>처음 상태로</button><button class="btn sm danger" data-act="img-del">목록에서 빼기</button></div>
+    <div class="btnrow">${p.els.filter(e => !e.hidden).length > 1 ? '<button class="btn sm" data-act="e2-flatten" title="글자·도형·그림 레이어를 바탕 그림 한 장으로 합쳐요">레이어 모두 합치기</button>' : ''}<button class="btn sm" data-act="img-reset" ${changed ? '' : 'disabled'}>처음 상태로</button><button class="btn sm danger" data-act="img-del">목록에서 빼기</button></div>
     ${row('바탕색', `<input type="color" data-k="bg" data-scope="page">`)}
     <p class="muted small">바탕색은 투명한 그림 뒤나 늘린 캔버스에 깔리는 색이에요.</p>
   </div>
@@ -2751,7 +2839,7 @@ function lockProps(el) {
   let h = panelProps(el);
   h = h.replace(/<details class="sec" data-sec="(img|border|geom)"[\s\S]*?<\/details>/g, '');
   const i = h.indexOf('<div class="sec"><h3>순서</h3>'); if (i >= 0) h = h.slice(0, i);
-  return `<div class="sec"><h3>바탕 그림</h3><p class="muted small">불러온 그림이에요. 움직이지 않게 고정돼 있어요. 아래에서 밝기와 분위기를 바꿀 수 있어요. 그림 위를 끌면 위에 올린 것들을 한꺼번에 고를 수 있어요.</p></div>` + h;
+  return `<div class="sec"><h3>바탕 그림</h3><p class="muted small">불러온 그림이에요. 평소엔 고정돼 있어서 그림 위를 끌면 위에 올린 것들을 한꺼번에 고를 수 있어요. '자유 변형'(<kbd>Ctrl+T</kbd>)을 누르면 옮기고 크기·각도를 바꿀 수 있어요.</p></div>` + xfSec(el) + h;
 }
 function copySec() {
   const p = page(), fo = p.folder && folderById(p.folder);
@@ -2785,7 +2873,7 @@ function renderProps() {
   if (!ss.length) html = isImg() ? imgPageProps() : pageProps();
   else if (ss.length > 1) html = multiProps();
   else html = ss[0].lock ? lockProps(ss[0]) : ({ panel: panelProps, bubble: bubbleProps, text: textProps, stamp: stampProps, draw: drawProps, fx: fxProps, shape: shapeProps, tmpl: tmplProps })[ss[0].type](ss[0]);
-  if (ss.length === 1 && !ss[0].lock) html = html.replace('<div class="sec"><h3>순서</h3>', lmSec(ss[0]) + '<div class="sec"><h3>순서</h3>');
+  if (ss.length === 1 && !ss[0].lock) html = (imgLayerEl(ss[0]) && ss[0].img ? xfSec(ss[0]) : '') + html.replace('<div class="sec"><h3>순서</h3>', lmSec(ss[0]) + '<div class="sec"><h3>순서</h3>');
   if (isImg() && ss.some(o => !o.lock && !o.inPanel) && realIdx().length > 1) html += copySec();
   const st = $('#right').scrollTop;
   propsEl.innerHTML = html;
@@ -2832,7 +2920,7 @@ async function stampWhite(el) {
   toast('흰 배경을 지우는 중…', 1500);
   const src = await whiteToAlpha(r.src), im = await loadImg(src);
   r.src = src; r.thumb = null; makeThumb(r, im, true); imgCache.set(r.id, im); clearImgCaches(r.id);
-  idb.put('imgs', { id: r.id, name: r.name, src: r.src, w: r.w, h: r.h, thumb: r.thumb, kind: r.kind });
+  idb.put('pimg', recData(r));
   const s = stamps.get(r.id); if (s) { s.src = src; s.thumb = r.thumb; idb.put('stamps', s); renderStamps(); }
   renderProps(); requestRender(); toast('흰 배경을 지웠어요');
 }
@@ -3064,7 +3152,7 @@ function gotoPage(i) { if (i !== doc.cur) switchPage(i); }
 function navImg(d) { const idx = realIdx(); if (!idx.length) return; const k = idx.indexOf(doc.cur); gotoPage(idx[clamp((k < 0 ? 0 : k) + d, 0, idx.length - 1)]); }
 function moveToFolder(t, fid) {
   if (t.page != null) { const p = doc.pages[t.page]; if (!p || p.folder === fid) return; p.folder = fid; commit(); }
-  else { const r = images.get(t.img); if (!r || (r.folder || null) === fid) return; r.folder = fid; idb.put('imgs', recData(r)); }
+  else { const r = images.get(t.img); if (!r || (r.folder || null) === fid) return; r.folder = fid; idb.put('pimg', recData(r)); }
   renderLib(); renderProps(); const f = folderById(fid); toast(f ? `'${folderPath(fid, ' › ')}' 폴더로 옮겼어요` : '폴더에서 뺐어요', 1600);
 }
 async function newFolder(parent) {
@@ -3089,7 +3177,7 @@ function deleteFolder(id) {
   doc.folders = doc.folders.filter(x => x !== f);
   for (const x of doc.folders) if (x.parent === id) x.parent = up;
   for (const p of doc.pages) if (p.folder === id) p.folder = up;
-  for (const r of images.values()) if (r.folder === id) { r.folder = up; idb.put('imgs', recData(r)); }
+  for (const r of images.values()) if (r.folder === id) { r.folder = up; idb.put('pimg', recData(r)); }
   commit(); renderLib(); renderProps();
 }
 function deleteImagePage(i) {
@@ -3210,8 +3298,8 @@ function drawThumbs() {
 $('#pages').addEventListener('click', e => { const t = e.target.closest('[data-pg]'); if (t) switchPage(+t.dataset.pg); });
 function switchPage(i) {
   if (i === doc.cur || !doc.pages[i]) return;
-  closeInline(); if (mode) setMode(null); doc.cur = i; sel = []; imageEditId = null; fitView(); renderPages(); renderProps(); updateHint(); requestRender();
-  markLibCur(); updateNav();
+  closeInline(); if (mode) setMode(null); doc.cur = i; sel = []; imageEditId = null; xfBase = null; fitView(); renderPages(); renderProps(); updateHint(); requestRender();
+  markLibCur(); updateNav(); updateUndo();
 }
 function pageCmd(cmd) {
   const i = doc.cur, p = page();
@@ -3261,7 +3349,12 @@ const gs = {
   slides: [], sel: -1, playing: false, t: 0, raf: 0, start: 0, busy: false, built: false,
   set: { size: 'first800', cw: 800, ch: 800, bg: '#ffffff', fit: 'cover', dur: 1.5, motion: 'none', trans: 'fade', trDur: 0.4, fps: 12, loop: true, fmt: 'gif', dither: true, q: 88 },
 };
+const GS_SET0 = clone(gs.set);
 const gifOpen = () => gs.built && !$('#gifStudio').hidden;
+function gsReset() { // 다른 움짤 탭으로 바꿀 때 비우기
+  if (gs.playing) gsPause(); clearTimeout(gsSaveT);
+  Object.assign(gs, { slides: [], sel: -1, t: 0, ovs: [], fx: [], osel: null, fsel: null, focus: 'set', pick: new Set(), trSel: -1, loaded: false, set: clone(GS_SET0) });
+}
 const gsDur = s => (s.dur ?? gs.set.dur);
 const gsMo = s => s.motion ?? gs.set.motion;
 const gsFit = s => s.fit ?? gs.set.fit;
@@ -3287,7 +3380,8 @@ function gsDrawSlide(g, s, p, W, H, ms) {
   else if (mo === 'pan') { z = 1.14; dx = (0.5 - p) * W * 0.12; }
   else if (mo === 'shake') { const a = Math.min(W, H) * 0.025 * (1 - p * 0.7); z = 1.06; dx = Math.sin(ms * 0.09) * a; dy = Math.cos(ms * 0.127) * a * 0.8; }
   else if (mo === 'pulse') z = 1 + 0.04 * Math.max(0, Math.sin(ms / 1000 * Math.PI * 4));
-  g.save(); g.translate(W / 2 + dx, H / 2 + dy); g.scale(sc * z, sc * z); g.imageSmoothingQuality = 'high'; g.drawImage(s.bmp, -iw / 2, -ih / 2); g.restore();
+  const k = sc * z * (s.tz || 1); // 장면 그림 위치·크기·회전 (미리보기에서 끌어서)
+  g.save(); g.translate(W / 2 + dx + (s.tx || 0) * W, H / 2 + dy + (s.ty || 0) * H); if (s.trot) g.rotate(s.trot * DEG); g.scale(s.tflip ? -k : k, k); g.imageSmoothingQuality = 'high'; g.drawImage(s.bmp, -iw / 2, -ih / 2); g.restore();
 }
 function gsRenderAt(g, t, W, H) {
   g.fillStyle = gs.set.bg; g.fillRect(0, 0, W, H);
@@ -3512,7 +3606,7 @@ async function gsExport() {
   const prog = (i, n, tries) => { btn.textContent = (tries ? `용량 맞추는 중 (${tries + 1}번째) ` : '만드는 중 ') + `${i} / ${n}`; };
   try {
     const { blob, W, H } = await gsEncodeTarget(fmt, prog), [W0] = gsSize();
-    if (await download(blob, `${safeName(doc.name)}_움짤.${fmt}`)) toast(`${fmt === 'gif' ? 'GIF' : fmt === 'mp4' ? 'MP4' : 'WebP'}로 저장했어요 (${(blob.size / 1048576).toFixed(1)}MB${W !== W0 ? `, 용량에 맞춰 ${W}×${H}로 줄였어요` : ''})`, 4500);
+    if (await download(blob, `${safeName(gifName())}.${fmt}`)) toast(`${fmt === 'gif' ? 'GIF' : fmt === 'mp4' ? 'MP4' : 'WebP'}로 저장했어요 (${(blob.size / 1048576).toFixed(1)}MB${W !== W0 ? `, 용량에 맞춰 ${W}×${H}로 줄였어요` : ''})`, 4500);
   } catch (e) {
     const m = e && e.message;
     toast(m === 'nowebp' ? '이 브라우저는 WebP 저장을 못 해요. 크롬이나 엣지에서 해 보세요.' : m === 'nomp4' ? '이 컴퓨터에서는 MP4로 저장할 수 없어요. GIF나 WebP로 저장해 주세요.' : '저장하지 못했어요. 크기를 줄여 다시 해 보세요.', 4500);
@@ -3520,16 +3614,19 @@ async function gsExport() {
   gs.busy = false; btn.disabled = false; gsExpRender();
 }
 async function gsSave() {
-  if (!gs.loaded) return;
-  const slides = [];
+  if (!gs.loaded || !gifPj) return;
+  const key = 'gif:' + gifPj, slides = []; // 저장하는 동안 다른 움짤 탭으로 바뀌어도 원래 자리에
+
   for (const s of gs.slides) {
     if (!s.blob || s.blobOf !== s.bmp) { s.blob = await new Promise(r => s.bmp.toBlob ? s.bmp.toBlob(r, 'image/webp', 0.95) : r(null)); s.blobOf = s.bmp; }
-    slides.push({ id: s.id, name: s.name, blob: s.blob, w: s.w, h: s.h, dur: s.dur, motion: s.motion, fit: s.fit, tr: s.tr, trd: s.trd, clip: s.clip });
+    slides.push({ id: s.id, name: s.name, blob: s.blob, w: s.w, h: s.h, dur: s.dur, motion: s.motion, fit: s.fit, tr: s.tr, trd: s.trd, clip: s.clip, tx: s.tx, ty: s.ty, tz: s.tz, trot: s.trot, tflip: s.tflip });
   }
-  idb.set('gif', { slides, set: gs.set, ovs: gs.ovs.map(ovPlain), fx: clone(gs.fx) });
+  await idb.set(key, { slides, set: gs.set, ovs: gs.ovs.map(ovPlain), fx: clone(gs.fx) });
+  pjTouch(key.slice(4));
 }
 async function gsLoad() {
-  const d = await idb.get('gif'); if (!d) return;
+  if (!gifPj) return;
+  const d = await idb.get('gif:' + gifPj); if (!d) return;
   Object.assign(gs.set, d.set || {});
   for (const s of d.slides || []) {
     try { const bm = await createImageBitmap(s.blob), c = newCanvas(bm.width, bm.height); c.getContext('2d').drawImage(bm, 0, 0); gs.slides.push({ ...s, bmp: c, blobOf: c }); } catch (e) { }
@@ -3559,13 +3656,13 @@ const closeModal = () => { $('#modalRoot').innerHTML = ''; };
 const modalOpen = () => !!$('#modalRoot').firstChild;
 
 function openNewModal(first) {
-  const hasWork = doc.pages.some(p => p.els.length) || imageOrder.length;
   let pick = 0, kind = 'cut';
   const m = modal(`<h2>${first ? '무엇을 할까요?' : '새로 만들기'}</h2>
-    <p class="sub">${first ? '나중에 위쪽 <b>새로 만들기</b>에서 언제든 다시 고를 수 있어요.' : '지금 작업은 사라져요. 남겨 두려면 먼저 위쪽 <b>저장</b>을 누르세요. 효과음 보관함은 그대로 남아요.'}</p>
+    <p class="sub">${first ? '나중에 맨 위 탭 줄의 <b>+</b>나 <b>새로 만들기</b>로 언제든 새 작업을 열 수 있어요.' : '새 탭으로 열려요. 지금 작업은 맨 위 탭에 그대로 남아 있고, 누르면 바로 돌아가요.'}</p>
     <div class="modechoose">
       <button class="preset on" data-kind="cut"><b>컷 편집</b><span>웹툰·만화처럼 여러 그림을 칸에 나눠 담고 말풍선과 효과음을 올려요.</span></button>
       <button class="preset" data-kind="image"><b>이미지 편집</b><span>그림을 한 장씩 그대로 열어 글자, 가리기, 자동 흰칠을 하고 원래 이름으로 저장해요. 폴더째 열 수 있어요.</span></button>
+      <button class="preset" data-kind="gif"><b>움짤</b><span>사진·GIF·영상을 이어 붙이고 글자와 효과를 얹어 GIF, 움직이는 WebP, MP4로 저장해요.</span></button>
     </div>
     ${row('작품 이름', `<input type="text" id="nName" value="${esc(first ? doc.name : '새 작품')}" spellcheck="false">`)}
     <div id="nCut"><div class="presets" style="margin-top:12px">${PRESETS.map((p, i) => { const s = 46 / Math.max(p.w, p.h * 0.5); return `<button class="preset ${i === 0 ? 'on' : ''}" data-i="${i}"><div class="shape" style="width:${Math.round(p.w * s)}px;height:${Math.round(Math.min(p.h * s, 70))}px"></div><b>${p.name}</b><span>${p.w} × ${p.h}<br>${p.desc}</span></button>`; }).join('')}
@@ -3573,31 +3670,41 @@ function openNewModal(first) {
     <div id="nImg" hidden><div class="dropzone" id="nDrop"><b>고칠 그림이나 폴더를 여기로 끌어오세요</b><br><span class="small">여러 장, 폴더 여러 개를 한꺼번에 넣어도 돼요. 폴더 이름 그대로 묶여요.</span>
       <div class="btnrow"><button class="btn" id="nPickF">그림 파일 고르기</button><button class="btn" id="nPickD">폴더 통째로 고르기</button></div></div>
       <p class="muted small" style="margin-top:8px">그림 없이 '만들기'를 눌러도 돼요. 나중에 왼쪽 위에서 불러올 수 있어요.</p></div>
+    <div id="nGif" hidden><div class="dropzone" id="nGDrop"><b>쓸 사진·GIF·영상을 여기로 끌어오세요</b><br><span class="small">넣은 순서대로 장면이 돼요. 그냥 '만들기'를 눌러 빈 움짤로 시작해도 돼요.</span></div></div>
     <div class="foot">${first ? '<button class="btn" id="nOpen">저장해 둔 파일 열기</button>' : '<button class="btn" data-close>취소</button>'}<button class="btn primary" id="nGo">만들기</button></div>`, { wide: true });
-  $$('[data-kind]', m).forEach(b => b.addEventListener('click', () => { kind = b.dataset.kind; $$('[data-kind]', m).forEach(x => x.classList.toggle('on', x === b)); $('#nCut', m).hidden = kind !== 'cut'; $('#nImg', m).hidden = kind !== 'image'; }));
+  const nm = $('#nName', m), autoNm = new Set(['새 작품']), gifNm = pjGifName();
+  $$('[data-kind]', m).forEach(b => b.addEventListener('click', () => {
+    kind = b.dataset.kind; $$('[data-kind]', m).forEach(x => x.classList.toggle('on', x === b)); $('#nCut', m).hidden = kind !== 'cut'; $('#nImg', m).hidden = kind !== 'image'; $('#nGif', m).hidden = kind !== 'gif';
+    if (autoNm.has(nm.value.trim()) || nm.value.trim() === gifNm) nm.value = kind === 'gif' ? gifNm : '새 작품';
+  }));
   $$('#nCut .preset', m).forEach(b => b.addEventListener('click', () => { pick = +b.dataset.i; $$('#nCut .preset', m).forEach(x => x.classList.toggle('on', x === b)); }));
   if (first) $('#nOpen', m).addEventListener('click', () => { closeModal(); $('#fileProj').click(); });
   let busy = false;
   const start = async items => {
     if (busy) return; busy = true;
-    const name = $('#nName', m).value.trim() || '새 작품';
-    if (!first && hasWork) { images.clear(); imgCache.clear(); thumbImgs.clear(); imageOrder = []; marks = []; await idb.clear('imgs'); }
+    const name = $('#nName', m).value.trim() || (kind === 'gif' ? gifNm : '새 작품');
+    if (kind === 'gif') { closeModal(); await pjNewGif(name); if (items && items.length) await gsAddFiles(items.map(x => x.file)); return; }
     if (mode) setMode(null);
-    const defaults = first ? doc.defaults : DEFAULTS();
+    await pjNewEd(kind, name); // 새 탭 (지금 작업이 비어 있으면 그 자리에)
+    const defaults = DEFAULTS();
     if (kind === 'cut') {
       const pr = pick >= 0 ? PRESETS[pick] : { w: clamp(+$('#nW', m).value || 800, 50, 60000), h: clamp(+$('#nH', m).value || 1200, 50, 60000) };
       doc = { name, mode: 'cut', folders: [], pages: [newPage(pr.w, pr.h, '페이지 1')], cur: 0, defaults };
     } else doc = { name, mode: 'image', folders: [], pages: [phPage()], cur: 0, defaults };
-    sel = []; imageEditId = null; closeModal(); resetHistory(); fitView(); renderAll(); scheduleSave();
+    sel = []; imageEditId = null; closeModal(); resetHistory(); fitView(); renderAll(); renderTabs(); saveNow();
     if (items && items.length) await addImages(items);
   };
   $('#nGo', m).addEventListener('click', () => start(null));
   $('#nPickF', m).addEventListener('click', () => pickFiles(false, items => { if (items.length) start(items); }));
   $('#nPickD', m).addEventListener('click', () => pickFiles(true, items => { if (items.length) start(items); }));
-  const dz = $('#nDrop', m), box = m.closest('.modal-bg') || m;
-  box.addEventListener('dragover', e => { if (![...e.dataTransfer.types].includes('Files')) return; e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; dz.classList.add('drop'); });
-  box.addEventListener('dragleave', e => { if (!box.contains(e.relatedTarget)) dz.classList.remove('drop'); });
-  box.addEventListener('drop', async e => { if (![...e.dataTransfer.types].includes('Files')) return; e.preventDefault(); e.stopPropagation(); dz.classList.remove('drop'); const items = await dtItems(e.dataTransfer); if (items.length) start(items); });
+  const box = m.closest('.modal-bg') || m, dzs = () => [$('#nDrop', m), $('#nGDrop', m)];
+  box.addEventListener('dragover', e => { if (![...e.dataTransfer.types].includes('Files')) return; e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; dzs().forEach(d => d.classList.add('drop')); });
+  box.addEventListener('dragleave', e => { if (!box.contains(e.relatedTarget)) dzs().forEach(d => d.classList.remove('drop')); });
+  box.addEventListener('drop', async e => {
+    if (![...e.dataTransfer.types].includes('Files')) return; e.preventDefault(); e.stopPropagation(); dzs().forEach(d => d.classList.remove('drop'));
+    if (kind === 'gif') { const fs = [...e.dataTransfer.files]; if (fs.length) start(fs.map(f => ({ file: f }))); return; }
+    const items = await dtItems(e.dataTransfer); if (items.length) start(items);
+  });
 }
 
 const TEMPLATES = [
@@ -3837,7 +3944,7 @@ async function openProjectFile(file) {
     const d = JSON.parse(await file.text());
     if (!d || (d.app !== 'cut-editor' && d.app !== 'potato-editor') || !d.doc) throw new Error('format');
     if (mode) setMode(null);
-    images.clear(); imgCache.clear(); thumbImgs.clear(); imageOrder = []; marks = []; clearImgCaches(); layoutCache.clear(); alphaMaps.clear(); activeLayer.clear(); await idb.clear('imgs');
+    await pjNewEd(d.doc.mode === 'image' ? 'image' : 'cut', d.doc.name || '새 작품'); // 새 탭으로 열어요 (빈 작업이면 그 자리에)
     for (const r of d.images || []) {
       addImageRecord({ id: r.id, name: r.name, src: r.src, w: r.w, h: r.h, kind: r.kind, alpha: r.alpha, folder: r.folder || null }, true);
       if (r.kind === 'stamp' && !stamps.has(r.id)) { const s = { id: r.id, name: r.name, src: r.src, w: r.w, h: r.h, kind: 'stamp', at: Date.now() }; stamps.set(r.id, s); loadImg(r.src).then(im => { makeThumb(s, im, true); idb.put('stamps', s); renderStamps(); }).catch(() => { }); }
@@ -3845,7 +3952,7 @@ async function openProjectFile(file) {
     imageOrder = (d.imageOrder || imageOrder).filter(id => images.has(id) && images.get(id).kind !== 'stamp');
     for (const f of d.fonts || []) await registerFont(f.name, f.data, true);
     doc = normalizeDoc(d.doc); sel = []; imageEditId = null;
-    closeModal(); resetHistory(); fitView(); renderAll(); scheduleSave(); toast(`'${doc.name}'을(를) 열었어요`);
+    closeModal(); resetHistory(); fitView(); renderAll(); pjTouch(); saveNow(); toast(`'${doc.name}'을(를) 열었어요`);
   } catch (e) { toast('이 파일은 열 수 없어요. 이 편집기에서 저장한 .json 파일인지 확인해 주세요.', 4000); }
 }
 
@@ -3918,9 +4025,12 @@ function openCzMenu() {
 function openHelp() {
   modal(`<h2>사용법</h2>
     <ol class="tips" style="font-size:13px">
-      <li><b>두 가지 방식</b>: <b>컷 편집</b>은 여러 그림을 칸에 나눠 웹툰·만화를 만들고, <b>이미지 편집</b>은 그림을 한 장씩 그대로 고쳐서 원래 이름으로 저장해요. 위쪽 '새로 만들기'에서 골라요.</li>
+      <li><b>세 가지 방식</b>: <b>컷 편집</b>은 여러 그림을 칸에 나눠 웹툰·만화를 만들고, <b>이미지 편집</b>은 그림을 한 장씩 그대로 고쳐서 원래 이름으로 저장하고, <b>움짤</b>은 GIF·WebP·MP4를 만들어요. 위쪽 '새로 만들기'나 탭 줄의 <b>+</b>에서 골라요.</li>
+      <li><b>작업 탭</b>: 작업마다 맨 위에 탭이 생기고, 누르면 그 작업으로 바로 돌아가요(<kbd>Ctrl</kbd>+<kbd>Tab</kbd>로 다음 탭). 새로 만들거나 파일을 열어도 지금 작업은 탭에 남아요. 탭을 두 번 누르면 이름 바꾸기, 끌면 순서 바꾸기. ×로 닫아도 지워지지 않고 오른쪽 '작업 목록'에서 다시 열거나 아예 지울 수 있어요.</li>
       <li><b>그림·폴더 넣기</b>: 왼쪽 '+ 그림', '+ 폴더째' 또는 그림·폴더를 화면에 끌어오기. 폴더째 넣으면 폴더 이름 그대로 묶여요. '새 폴더'로 폴더를 만들고 그림을 폴더 이름 위로 끌어다 놓아 정리해요. 복사한 그림은 <kbd>Ctrl</kbd>+<kbd>V</kbd>.</li>
-      <li><b>이미지 편집</b>: 왼쪽 목록에서 그림을 골라 고쳐요(<kbd>PageUp</kbd>/<kbd>PageDown</kbd>로 넘기기). 바탕 그림은 고정돼 있어요. 위쪽 '자르기', 오른쪽 '돌리기·뒤집기'를 쓸 수 있고, 글자를 고른 뒤 '다른 그림에도 넣기'로 서명을 한 번에 넣어요.</li>
+      <li><b>이미지 편집</b>: 왼쪽 목록에서 그림을 골라 고쳐요(<kbd>PageUp</kbd>/<kbd>PageDown</kbd>로 넘기기). 바탕 그림은 고정돼 있어요. 위쪽 '자르기', 오른쪽 '돌리기·뒤집기'를 쓸 수 있고, 글자를 고른 뒤 '다른 그림에도 넣기'로 서명을 한 번에 넣어요. <kbd>Ctrl</kbd>+<kbd>Z</kbd>는 지금 보고 있는 그림에서 한 일만 되돌려요(다른 그림으로 넘어가지 않아요).</li>
+      <li><b>자유 변형</b> (이미지 편집): 다른 그림을 '레이어 ▾ → 그림 넣기…'로 넣거나 화면에 끌어와 '레이어로 넣기'를 고르면 그림 레이어가 돼요. 끌어서 옮기고, 모서리로 크기(비율 유지), 위 동그라미로 돌려요(<kbd>Shift</kbd> 15°씩). 바탕 그림은 <kbd>Ctrl</kbd>+<kbd>T</kbd>(또는 오른쪽 '자유 변형')로 풀어서 움직이고 <kbd>Enter</kbd>로 끝내요. 오른쪽에서 배율·각도를 숫자로 넣거나 '가운데로·캔버스에 맞추기·꽉 채우기·원래대로'를 써요.</li>
+      <li><b>레이어 합치기</b> (이미지 편집): 레이어 탭에서 여러 개를 골라 '고른 것 합치기'를 누르면 그림 레이어 하나가 돼요. 아무것도 안 고르고 '모두 합치기'를 누르면 보이는 것 전부를 바탕 그림 한 장으로 굳혀요. 둘 다 <kbd>Ctrl</kbd>+<kbd>Z</kbd>로 되돌릴 수 있어요.</li>
       <li><b>컷 만들기</b>: 보관함 그림을 캔버스로 끌어다 놓기. 컷 위에 놓으면 그 컷 안으로 들어가요. 웹툰은 '세로로 자동 배치'가 가장 빨라요.</li>
       <li><b>컷 자르기</b>: 위쪽 '컷 나누기'에서 직선이나 곡선을 고르고, 컷을 가로질러 선을 그어요.</li>
       <li><b>컷 안에서 그림 옮기기</b>: 컷을 더블클릭한 뒤 끌기, 마우스 휠로 크기 조절. 투명한 그림은 레이어로 겹쳐져요(한 컷에 10장).</li>
@@ -3932,7 +4042,7 @@ function openHelp() {
       <li><b>자동 흰칠</b>: '자동 흰칠'에서 이 페이지(이미지 편집이면 모든 그림, 이 폴더)를 고르면 성기 모양을 따라 흰칠해요(유두는 그대로). '빠르게'와 '정밀하게'는 설정에서 바꿔요. 잘못 칠한 곳은 지우개로, 빠진 곳은 칠하기로 고쳐요. 모두 이 컴퓨터 안에서만 처리돼요.</li>
       <li><b>저장</b>: '내보내기'에서 PNG/JPG/WebP로 저장해요. 이미지 편집은 원래 이름 그대로, 여러 장이면 폴더째 ZIP으로 묶여요. 'NAI 정보'에서 생성 정보를 지울지 남길지 골라요.</li>
       <li><b>가장자리 매끄럽게</b>: 아무것도 안 고른 상태에서 오른쪽 아래 '가장자리 매끄럽게'로 말풍선·글자 가장자리를 더 곱게 할 수 있어요.</li>
-      <li><b>보관</b>: 작업은 이 브라우저에 자동 저장돼요. 다른 컴퓨터로 옮기거나 백업하려면 '저장'으로 파일을 받아 두세요. 오른쪽 위 달 모양 버튼으로 어두운 화면을 켜요.</li>
+      <li><b>보관</b>: 작업은 탭마다 이 컴퓨터에 자동 저장돼요. 다른 컴퓨터로 옮기거나 백업하려면 '저장'으로 파일을 받아 두세요. 오른쪽 위 달 모양 버튼으로 어두운 화면을 켜요.</li>
       <li><b>고급 보정</b>: 그림이나 컷을 고르면 오른쪽 '고급 보정'에서 빛·색, 곡선, 레벨, 색상별, 선명하게·필름 질감, 보정 프리셋을 써요. 같은 보정을 폴더나 모든 그림에 한 번에 넣을 수 있어요.</li>
       <li><b>선택</b>: 위쪽 '선택'으로 마법 붓·사각형·타원·올가미·비슷한 색을 골라요(<kbd>Shift</kbd> 더하기, <kbd>Alt</kbd> 빼기, <kbd>Ctrl+Z</kbd> 선택 되돌리기). <b>마법 붓</b>은 고를 곳 위를 펜처럼 그으면 선(경계)까지 묶어서 골라요. 그을수록 더해지고, <kbd>[</kbd> <kbd>]</kbd>로 붓 크기를 바꿔요. 설치판은 'AI로 다듬기'로 모양을 더 깔끔하게 따요. 고른 곳을 흐리게·모자이크·칠하기·지우기 하거나, '이 부분만 보정', '새 레이어로 복사'를 써요. 'AI 인물'·'AI 배경'은 인물이나 배경을 한 번에 골라요.</li>
       <li><b>고치기 붓</b>: '가리기'에서 지우기(투명), 도장(<kbd>Alt</kbd>+클릭으로 복사할 곳), 잡티 지우기, 밝게·어둡게·문지르기를 골라 칠해요.</li>
@@ -3942,7 +4052,7 @@ function openHelp() {
       <li><b>수평·기록·LUT</b>: 그림 속성의 '수평'으로 기울기를 바로잡거나 '선을 그어 수평 맞추기'를 써요. 왼쪽 '기록' 탭에서 지난 단계로 바로 돌아가요. 고급 보정의 'LUT'에서 .cube 파일을 불러와 색감을 입혀요. 글자는 '한 글자씩 나누기'로 따로 움직일 수 있어요.</li>
       <li><b>AI 도구</b> (설치판): 그림을 고르면 오른쪽 'AI 도구'에서 배경 지우기·인물만 새 레이어로·배경만 흐리게, 화질 키우기(2배·4배), 선화 추출(가는 선·굵은 선)을 써요. <b>AI 지우개</b>는 '가리기' 붓의 'AI 지우개'로 지울 물건을 칠하거나, '선택'으로 고른 뒤 'AI로 지우기'를 누르면 둘레에 맞게 메워요. 처음 쓸 때 팩을 받아요.</li>
       <li><b>레이어</b>: 왼쪽 '레이어' 탭에서 숨기기·잠그기·끌어서 순서 바꾸기·불투명도·섞는 법을 바꿔요. 두 번 누르면 이름을 바꿔요.</li>
-      <li><b>움짤</b>: 위쪽 '움짤'을 누르면 프리미어 프로처럼 왼쪽 재료(장면·글자·효과·넘김), 가운데 미리보기, 오른쪽 속성, 아래 시간 막대로 나뉜 화면이 열려요. 시간 막대에서 장면 오른쪽 끝을 끌면 길이, 가운데를 끌면 순서가 바뀌어요. 글자·효과 막대는 끌어서 시간과 줄을 옮기고 양끝으로 늘여요. 장면 사이 ◇를 누르면 넘김을 골라요. 단축키: <kbd>Space</kbd> 재생, <kbd>←</kbd><kbd>→</kbd> 한 장씩, <kbd>↑</kbd><kbd>↓</kbd> 장면 경계로, <kbd>C</kbd> 자르기 도구, <kbd>V</kbd> 고르기 도구, <kbd>Ctrl</kbd>+<kbd>K</kbd> 재생 위치에서 나누기, <kbd>T</kbd> 글자 넣기, <kbd>Ctrl</kbd>+휠 확대, <kbd>Ctrl</kbd>+<kbd>M</kbd> 내보내기.</li>
+      <li><b>움짤</b>: 위쪽 '움짤'을 누르면 프리미어 프로처럼 왼쪽 재료(장면·글자·효과·넘김), 가운데 미리보기, 오른쪽 속성, 아래 시간 막대로 나뉜 화면이 열려요. 시간 막대에서 장면 오른쪽 끝을 끌면 길이, 가운데를 끌면 순서가 바뀌어요. 글자·효과 막대는 끌어서 시간과 줄을 옮기고 양끝으로 늘여요. 장면 사이 ◇를 누르면 넘김을 골라요. 미리보기 빈 곳을 누르면 그 장면이 골라져 끌어서 옮기고, 모서리로 크기, 위 동그라미로 돌리고, 휠로 확대해요(오른쪽 '그림 위치·크기·회전'에서 숫자로도). 단축키: <kbd>Space</kbd> 재생, <kbd>←</kbd><kbd>→</kbd> 한 장씩, <kbd>↑</kbd><kbd>↓</kbd> 장면 경계로, <kbd>C</kbd> 자르기 도구, <kbd>V</kbd> 고르기 도구, <kbd>Ctrl</kbd>+<kbd>K</kbd> 재생 위치에서 나누기, <kbd>T</kbd> 글자 넣기, <kbd>Ctrl</kbd>+휠 확대, <kbd>Ctrl</kbd>+<kbd>M</kbd> 내보내기.</li>
       <li><b>크기</b>: 이미지 편집에서 아무것도 안 고르면 오른쪽 '크기 바꾸기'로 그림 크기, 캔버스 크기, 정사각형·4:5 여백을 바꿔요.</li>
     </ol>
     <p class="muted small" style="margin-top:12px">되돌리기 <kbd>Ctrl+Z</kbd>, 다시 하기 <kbd>Ctrl+Y</kbd>, 복제 <kbd>Ctrl+D</kbd>, 복사와 붙여넣기 <kbd>Ctrl+C</kbd>/<kbd>V</kbd>, 삭제 <kbd>Delete</kbd>, 조금씩 옮기기 방향키(<kbd>Shift</kbd>와 함께 10칸), 화면 끌기 <kbd>Space</kbd>+드래그, 확대 <kbd>Ctrl</kbd>+휠, 비율 유지 <kbd>Shift</kbd>+모서리, 자석 잠시 끄기 <kbd>Alt</kbd></p>
@@ -3954,14 +4064,14 @@ const CMDS = {
   'add-panel': addPanel, 'bubble-menu': () => openMenu('#menuBubble', '#bBubble'), 'layer-menu': () => openMenu('#menuLayer', '#bLayerAdd'), shape: () => setMode(mode === 'shape' ? null : 'shape'), 'split-menu': () => openMenu('#menuSplit', '#bSplit'), 'cz-menu': openCzMenu,
   'add-text': () => addText(), pen: () => setMode(mode === 'pen' ? null : 'pen'), brush: () => setMode(mode === 'brush' ? null : 'brush'),
   'zoom-in': () => zoomStep(1), 'zoom-out': () => zoomStep(-1), 'zoom-fit': fitView,
-  export: openExportModal, help: openHelp, theme: () => setTheme(isDark() ? 'light' : 'dark'), gif: openGifStudio, import: () => pickFiles(false), 'import-dir': () => pickFiles(true), 'new-folder': () => newFolder(null),
+  export: openExportModal, help: openHelp, theme: () => setTheme(isDark() ? 'light' : 'dark'), gif: pjOpenGif, import: () => pickFiles(false), 'import-dir': () => pickFiles(true), 'new-folder': () => newFolder(null),
   'img-prev': () => navImg(-1), 'img-next': () => navImg(1), crop: () => setMode(mode === 'crop' ? null : 'crop'), select: () => setMode(mode === 'select' ? null : 'select'), autolayout: openAutoLayout,
   'import-stamp': () => $('#fileStamp').click(), 'import-pack': () => $('#filePack').click(),
   'page-add': () => pageCmd('page-add'), 'page-dup': () => pageCmd('page-dup'), 'page-up': () => pageCmd('page-up'), 'page-down': () => pageCmd('page-down'), 'page-del': () => pageCmd('page-del'),
 };
 document.addEventListener('click', e => { const b = e.target.closest('[data-cmd]'); if (b && CMDS[b.dataset.cmd]) CMDS[b.dataset.cmd](); });
 $('#snapTgl').addEventListener('change', e => { snapOn = e.target.checked; });
-$('#docName').addEventListener('change', e => { doc.name = e.target.value.trim() || '새 작품'; e.target.value = doc.name; commit(); });
+$('#docName').addEventListener('change', e => { doc.name = e.target.value.trim() || '새 작품'; e.target.value = doc.name; commit(); pjTouch(); });
 $('#docName').addEventListener('keydown', e => { if (e.key === 'Enter') e.target.blur(); });
 $('#fileImg').addEventListener('change', async e => { const files = [...e.target.files]; e.target.value = ''; const cb = pickCb; pickCb = null; const items = files.map(f => ({ file: f, dir: null })); if (cb) cb(items); else await addImages(items); });
 $('#fileDir').addEventListener('change', async e => { const files = [...e.target.files]; e.target.value = ''; const cb = pickCb; pickCb = null; const items = files.map(f => ({ file: f, dir: dirOf(f.webkitRelativePath || '') })); if (cb) cb(items); else await addImages(items); });
@@ -4014,6 +4124,8 @@ document.addEventListener('keydown', e => {
     renderModebar(); requestRender(); return;
   }
   if ((mode === 'select' || mode === 'shape' || mode === 'mask' || mode === 'level') && (e.key === 'Enter' || e.key === 'Escape')) { e.preventDefault(); setMode(null); return; }
+  if (!mode && mod && k === 't' && isImg()) { e.preventDefault(); e2XfToggle(); return; }
+  if (!mode && xfBase && (e.key === 'Enter' || e.key === 'Escape')) { e.preventDefault(); xfBase = null; renderProps(); requestRender(); return; }
   if (mode === 'mask' && !mod && k === 'x') { e.preventDefault(); mkOpt.hide = !mkOpt.hide; renderModebar(); requestRender(); return; }
   if ((mode === 'pen' || mode === 'brush') && e.key === 'Enter') { e.preventDefault(); setMode(null); return; }
   if (mod && k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
@@ -4037,13 +4149,16 @@ document.addEventListener('keydown', e => {
 document.addEventListener('keyup', e => { if (e.key === ' ') { spaceDown = false; if (!drag) scroller.style.cursor = mode ? 'crosshair' : 'default'; } });
 window.addEventListener('blur', () => { spaceDown = false; });
 const CLIP_MARK = '[감자 편집기 요소]';
+let clipImgs = new Map(); // 복사한 요소가 쓰는 그림 (다른 탭에 붙여 넣어도 그림이 따라가요)
+const clipRefs = els => { const s = new Set(); for (const o of els) { if (o.img) s.add(o.img); for (const L of o.layers || []) if (L.img) s.add(L.img); } return s; };
+function clipTake() { clip = selEls().filter(o => !o.lock).map(clone); clipImgs = new Map(); for (const id of clipRefs(clip)) { const r = images.get(id); if (r) clipImgs.set(id, r); } return clip.length; }
 document.addEventListener('copy', e => {
   if (gifOpen() || czOpen() || isTyping(e.target) || !sel.length) return;
-  clip = selEls().filter(o => !o.lock).map(clone); if (!clip.length) return; e.clipboardData.setData('text/plain', CLIP_MARK); e.preventDefault(); toast(`${clip.length}개 복사했어요`, 1400);
+  if (!clipTake()) return; e.clipboardData.setData('text/plain', CLIP_MARK); e.preventDefault(); toast(`${clip.length}개 복사했어요`, 1400);
 });
 document.addEventListener('cut', e => {
   if (gifOpen() || czOpen() || isTyping(e.target) || !sel.length) return;
-  clip = selEls().filter(o => !o.lock).map(clone); if (!clip.length) return; e.clipboardData.setData('text/plain', CLIP_MARK); e.preventDefault(); deleteSel();
+  if (!clipTake()) return; e.clipboardData.setData('text/plain', CLIP_MARK); e.preventDefault(); deleteSel();
 });
 document.addEventListener('paste', async e => {
   if (isTyping(e.target) || modalOpen()) return;
@@ -4058,7 +4173,9 @@ document.addEventListener('paste', async e => {
     if (ids[0]) placeImage(ids[0]); return;
   }
   if (clip && clip.length) {
-    e.preventDefault(); const copies = clip.map(o => { const c = clone(o); c.id = uid(); moveBy(c, 24, 24); return c; });
+    e.preventDefault();
+    for (const id of clipRefs(clip)) if (!images.has(id) && clipImgs.has(id)) { const { pj, k, ...r } = clipImgs.get(id); addImageRecord({ ...r, kind: isImg() ? 'stamp' : r.kind }, true); } // 다른 탭에서 복사한 그림
+    const copies = clip.map(o => { const c = clone(o); c.id = uid(); moveBy(c, 24, 24); return c; });
     clip = copies.map(clone); page().els.push(...copies); sel = copies.map(c => c.id); commit(); renderProps(); requestRender();
   }
 });
@@ -4130,22 +4247,12 @@ async function boot() {
   try { const v = localStorage.getItem('cutSfxVar'); if (v === 'ink' || v === 'outline' || v === 'white') sfxVar = v; } catch (_) { }
   for (const s of (await idb.all('stamps')) || []) stamps.set(s.id, s);
   for (const p of (await idb.all('packs')) || []) packs.push(p);
-  const saved = await idb.get('doc');
-  let restored = false;
   for (const f of (await idb.all('fonts')) || []) await registerFont(f.name, f.data, false);
-  if (saved && saved.s) {
-    try {
-      const imgs = (await idb.all('imgs')) || [];
-      for (const r of imgs) addImageRecord(r, false);
-      imageOrder = (saved.imageOrder || []).filter(id => images.has(id) && images.get(id).kind !== 'stamp');
-      for (const r of imgs) if (r.kind !== 'stamp' && !imageOrder.includes(r.id)) imageOrder.push(r.id);
-      doc = normalizeDoc({ ...JSON.parse(saved.s), cur: saved.cur });
-      restored = true;
-    } catch (e) { restored = false; }
-  }
-  resetHistory(); fitView(); renderAll();
-  if (restored) { $('#saveState').textContent = '지난 작업 열림'; toast('지난번 작업을 이어서 열었어요'); }
-  else openNewModal(true);
+  const { restored, actGif } = await pjBoot();
+  resetHistory(); fitView(); renderAll(); renderTabs();
+  if (actGif) await pjSwitch(gifPj);
+  else if (restored) { $('#saveState').textContent = '지난 작업 열림'; toast(projects.filter(p => p.open).length > 1 ? '지난번 작업을 이어서 열었어요. 다른 작업은 위쪽 탭에 있어요.' : '지난번 작업을 이어서 열었어요'); }
+  if (!restored && !actGif) openNewModal(true);
 }
 boot();
 if (appApi()) setTimeout(() => checkUpdate(false), 4000);

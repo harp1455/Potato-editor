@@ -19,7 +19,7 @@
 html,body{margin:0;height:100%;overflow:hidden;color:var(--ink);font-size:13px;background:var(--side);line-height:1.45}
 button,input,select,textarea{font:inherit;color:inherit}
 :focus-visible{outline:2px solid var(--blue);outline-offset:1px}
-#app{display:grid;grid-template-rows:50px minmax(0,1fr);grid-template-columns:240px minmax(0,1fr) 288px;height:100vh}
+#app{display:grid;grid-template-rows:34px 50px minmax(0,1fr);grid-template-columns:240px minmax(0,1fr) 288px;height:100vh}
 
 /* 위쪽 막대 */
 #top{grid-column:1/-1;display:flex;align-items:center;gap:8px;padding:0 10px;background:var(--paper);border-bottom:1px solid var(--line);min-width:0;overflow-x:auto}
@@ -180,6 +180,7 @@ kbd{font:inherit;font-size:11px;border:1px solid var(--line2);border-bottom-widt
 .moods .btn{height:28px;padding:0 4px;font-size:12px}
 
 /* 메뉴 */
+.gp-nu{display:flex;align-items:center;gap:3px;min-width:0}.gp-nu input{width:64px;min-width:0}
 .menu{position:fixed;z-index:40;background:var(--paper);border:1px solid var(--line2);border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.18);padding:5px;min-width:200px}
 .menu button{display:flex;align-items:center;gap:10px;width:100%;border:0;background:transparent;padding:7px 9px;border-radius:5px;cursor:pointer;text-align:left}
 .menu button:hover{background:var(--side)}
@@ -621,7 +622,7 @@ html[data-theme="dark"] #scroller::-webkit-scrollbar-thumb{background-color:rgba
 body.imgmode .onlyimg{display:flex !important}
 body.imgmode .onlycut{display:none !important}
 #navLbl{min-width:54px;text-align:center;align-self:center;font-variant-numeric:tabular-nums}
-.modechoose{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:4px 0 14px}
+.modechoose{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin:4px 0 14px}
 .modechoose .preset{padding:14px}
 .modechoose .preset b{font-size:14px}
 .dropzone{border:2px dashed var(--line2);border-radius:12px;padding:26px 16px;text-align:center;color:var(--ink2);margin-top:12px}
@@ -630,10 +631,39 @@ body.imgmode .onlycut{display:none !important}
 .imginfo{display:grid;grid-template-columns:auto 1fr;gap:4px 10px;font-size:12px;margin-bottom:6px}
 .imginfo span:nth-child(odd){color:var(--ink2)}
 .imginfo span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* 작업 탭 */
+#ptabs{grid-column:1/-1;display:flex;align-items:flex-end;gap:6px;padding:0 8px 0 6px;background:var(--side);border-bottom:1px solid var(--line);min-width:0;height:34px;position:relative;z-index:51}
+.ptlist{display:flex;align-items:flex-end;gap:2px;min-width:0;flex:1;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;height:100%}
+.ptlist::-webkit-scrollbar{display:none}
+.ptab{display:flex;align-items:center;gap:6px;height:28px;flex:0 1 200px;min-width:88px;max-width:220px;padding:0 4px 0 10px;border:1px solid transparent;border-bottom:0;border-radius:8px 8px 0 0;color:var(--ink2);cursor:pointer;position:relative;user-select:none;-webkit-user-select:none}
+.ptab:hover{background:var(--press)}
+.ptab.on{background:var(--paper);color:var(--ink);border-color:var(--line);height:30px;margin-bottom:-1px;font-weight:600}
+.ptab .pi{flex:none;display:flex;opacity:.75}
+.ptab .pn{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ptab .px{flex:none;width:20px;height:20px;border:0;border-radius:5px;background:transparent;cursor:pointer;color:var(--ink3);font-size:15px;line-height:1;display:grid;place-items:center;padding:0}
+.ptab .px:hover{background:var(--line);color:var(--ink)}
+.ptab.drag{opacity:.45}
+.ptab.dl{box-shadow:inset 2px 0 0 var(--blue)} .ptab.dr{box-shadow:inset -2px 0 0 var(--blue)}
+.ptin{flex:1;min-width:0;height:22px;border:1px solid var(--blue);border-radius:4px;padding:0 5px;background:var(--paper)}
+.padd{flex:none;width:28px;height:26px;margin-bottom:2px;border:0;border-radius:6px;background:transparent;cursor:pointer;color:var(--ink2);font-size:18px;line-height:1}
+.padd:hover{background:var(--press);color:var(--ink)}
+.plist{flex:none;height:26px;margin-bottom:4px;align-self:center;border:1px solid transparent;border-radius:6px;background:transparent;cursor:pointer;color:var(--ink2);display:flex;align-items:center;gap:5px;padding:0 8px;white-space:nowrap}
+.plist:hover{background:var(--press);color:var(--ink)}
+#gifStudio.gs{top:34px}
+.pjl{display:flex;flex-direction:column;gap:6px;max-height:56vh;overflow:auto;margin-top:6px}
+.pjr{display:flex;align-items:center;gap:12px;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--paper)}
+.pjr.open{border-color:var(--line2)}
+.pjt{flex:none;width:72px;height:54px;border-radius:5px;overflow:hidden;background:var(--press);display:grid;place-items:center;color:var(--ink3)}
+.pjt img{width:100%;height:100%;object-fit:cover;display:block}
+.pjm{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.pjm b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pjnow{color:var(--blue);font-weight:600}
+.pjb{flex:none;display:flex;gap:4px}
 </style>
 </head>
 <body>
 <div id="app">
+  <nav id="ptabs" aria-label="작업 탭"></nav>
   <header id="top">
     <div class="brand" title="감자 편집기">
       <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true"><path d="M5.2 4.6C7.9 1.9 13.6 1.5 17 4.3c3.3 2.7 3.6 7.9 1.3 11.4-2.4 3.7-7.7 5.6-11.5 4C2.9 18.1 1.4 13 2.4 9.3c.5-1.9 1.4-3.4 2.8-4.7z" fill="#e8b866" stroke="#8a5a1f" stroke-width="1.3"/><circle cx="8" cy="8.4" r=".9" fill="#8a5a1f"/><circle cx="13.6" cy="6.6" r=".8" fill="#8a5a1f"/><circle cx="14.6" cy="12.6" r=".9" fill="#8a5a1f"/><circle cx="8.6" cy="15" r=".75" fill="#8a5a1f"/></svg>
@@ -752,6 +782,8 @@ body.imgmode .onlycut{display:none !important}
   <button data-bubble="shout"><svg width="26" height="20" viewBox="0 0 26 20"><path d="M13 1l2 4 5-3-1 5 6 1-5 3 4 4-6-1 0 5-4-4-3 4-1-5-6 2 3-4-5-3 6-1-2-5 5 3z" fill="#fff" stroke="#1d2026" stroke-width="1.3" stroke-linejoin="round"/></svg>외침 말풍선</button>
 </div>
 <div id="menuLayer" class="menu" hidden>
+  <button data-e2l="img"><span class="mswatch" style="background:linear-gradient(160deg,#9fd3ff 0 55%,#7cc47c 55%)"></span>그림 넣기… (레이어로)</button>
+  <hr>
   <button data-e2l="black"><span class="mswatch" style="background:#000"></span>검은 화면</button>
   <button data-e2l="white"><span class="mswatch" style="background:#fff"></span>흰 화면</button>
   <button data-e2l="color"><span class="mswatch" style="background:linear-gradient(135deg,#ff6fa0,#7aa7ff)"></span>색 화면</button>
