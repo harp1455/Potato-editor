@@ -198,12 +198,44 @@ function trAnalyze(g, CW, CH, bx) {
     const r = Math.max(2, Math.round((fsEst || Math.min(bw, bh) * 0.3) * 0.09));
     trDilate(mask, R.w, R.h, r); for (let i = 0; i < N; i++) if (protect[i]) mask[i] = 0;
   } else {
-    // 그림 위 글자: 글자 상자를 조금 넓혀 통째로
-    const r = Math.max(3, Math.round(Math.min(bw, bh) * 0.08));
-    for (let y = Math.max(0, iy0 - r); y < Math.min(R.h, iy1 + r); y++) for (let x = Math.max(0, ix0 - r); x < Math.min(R.w, ix1 + r); x++) mask[y * R.w + x] = 1;
-    // 글자색: 상자 안에서 가장 밝은 것·어두운 것 중 많은 쪽 (보통 흰 글자에 검은 테두리, 또는 그 반대)
-    let lo = 0, hi = 0; for (let y = iy0; y < iy1; y++) for (let x = ix0; x < ix1; x++) { const o = (y * R.w + x) * 4, v = d[o] + d[o + 1] + d[o + 2]; if (v > 640) hi++; else if (v < 120) lo++; }
-    tcol = hi >= lo ? [255, 255, 255] : [20, 20, 20];
+    // 그림 위 글자: 글줄 자리 안의 색을 셋(바탕·글자 속·글자 테두리)으로 나눠 글자 획만 지워요 (그림은 최대한 그대로)
+    const inM = new Uint8Array(N), lines = bx.lines && bx.lines.length ? bx.lines : [bx];
+    for (const L of lines) {
+      const pd = Math.max(2, Math.min(L.x1 - L.x0, L.y1 - L.y0) * 0.15);
+      for (let y = Math.max(0, Math.floor(L.y0 - pd - R.y)); y < Math.min(R.h, Math.ceil(L.y1 + pd - R.y)); y++) for (let x = Math.max(0, Math.floor(L.x0 - pd - R.x)); x < Math.min(R.w, Math.ceil(L.x1 + pd - R.x)); x++) inM[y * R.w + x] = 1;
+    }
+    const lum = i => d[i * 4] * 0.3 + d[i * 4 + 1] * 0.59 + d[i * 4 + 2] * 0.11, idx = []; for (let i = 0; i < N; i++) if (inM[i]) idx.push(i);
+    const fallback = () => { for (const i of idx) mask[i] = 1; let lo = 0, hi = 0; for (const i of idx) { const v = lum(i); if (v > 213) hi++; else if (v < 40) lo++; } tcol = hi >= lo ? [255, 255, 255] : [20, 20, 20]; };
+    if (idx.length < 30) fallback();
+    else {
+      // 색 무리 넷 (k-means). 글줄 안에 몰려 있는 색 = 글자(속·테두리), 둘레에도 많은 색 = 그림 바탕
+      const K = 4, smp = idx.length > 40000 ? idx.filter((_, j) => j % Math.ceil(idx.length / 40000) === 0) : idx, byL = smp.slice().sort((p, q) => lum(p) - lum(q));
+      let C = [0.06, 0.35, 0.65, 0.94].map(q => { const i = byL[Math.min(byL.length - 1, (byL.length * q) | 0)]; return [d[i * 4], d[i * 4 + 1], d[i * 4 + 2]]; });
+      const near = i => { let bk = 0, bd = 1e9; for (let k = 0; k < K; k++) { const dd = trDist(d, i * 4, C[k]); if (dd < bd) { bd = dd; bk = k; } } return bk; };
+      for (let it = 0; it < 10; it++) { const S = C.map(() => [0, 0, 0, 0]); for (const i of smp) { const k = near(i); S[k][0] += d[i * 4]; S[k][1] += d[i * 4 + 1]; S[k][2] += d[i * 4 + 2]; S[k][3]++; } C = C.map((c, k) => S[k][3] ? [S[k][0] / S[k][3], S[k][1] / S[k][3], S[k][2] / S[k][3]] : c); }
+      const lab = new Int8Array(N).fill(-1), cnt = new Array(K).fill(0), ring = new Array(K).fill(0);
+      for (const i of idx) { const k = near(i); lab[i] = k; cnt[k]++; }
+      let nOut = 0; for (let i = 0; i < N; i++) if (!inM[i]) { ring[near(i)]++; nOut++; }
+      const enr = k => (cnt[k] / idx.length) / ((ring[k] + 1) / (nOut + K));
+      let ks = [...Array(K).keys()].filter(k => cnt[k] > idx.length * 0.02 && (nOut < 50 ? true : enr(k) > 1.8)).sort((p, q) => enr(q) - enr(p)).slice(0, 2);
+      if (!ks.length && nOut >= 50) { const top = [...Array(K).keys()].sort((p, q) => enr(q) - enr(p))[0]; if (enr(top) > 1.25) ks = [top]; }
+      const isText = new Uint8Array(K); for (const k of ks) isText[k] = 1;
+      const adj = k => { let a2 = 0, n2 = 0; for (const i of idx) { if (lab[i] !== k) continue; n2++; const x = i % R.w; for (const j of [x > 0 ? i - 1 : -1, x < R.w - 1 ? i + 1 : -1, i - R.w, i + R.w]) if (j >= 0 && j < N && (!inM[j] || !isText[lab[j]])) { a2++; break; } } return n2 ? a2 / n2 : 1; };
+      const mean = k => C[k], txt = ks.reduce((n2, k) => n2 + cnt[k], 0);
+      if (!ks.length || txt > idx.length * 0.8) fallback();
+      else {
+        let fillK = ks[0], strK = null;
+        if (ks.length === 2) { // 속(바탕과 덜 닿음) + 테두리
+          // 테두리가 바탕에 더 많이 닿아요. 거의 같으면 글줄 안에 더 몰려 있는 색이 속
+          const a0 = adj(ks[0]), a1 = adj(ks[1]), [f, o] = Math.abs(a0 - a1) > 0.1 ? (a0 < a1 ? [ks[0], ks[1]] : [ks[1], ks[0]]) : [ks[0], ks[1]];
+          if (cnt[o] > txt * 0.12) { fillK = f; strK = o; } else fillK = f;
+        }
+        for (const i of idx) if (lab[i] === fillK || lab[i] === strK) mask[i] = 1;
+        tcol = mean(fillK); if (strK != null) { bx.stroke = mean(strK); bx.strokeR = cnt[strK] / Math.max(1, cnt[fillK]); }
+        const r = Math.max(2, Math.round((bx.th || Math.min(bw, bh)) * 0.15)); // 흐린 테두리(번짐)까지
+        trDilate(mask, R.w, R.h, r); for (let i = 0; i < N; i++) if (!inM[i]) mask[i] = 0; // 글줄 자리 밖은 안 건드려요
+      }
+    }
   }
   if (!fsEst) fsEst = (bx.th || Math.min(bw, bh) / Math.max(1, bx.nl || 1)) * 0.95; // 글자 크기 짐작 (글줄 굵기)
   return { R, id, mask, bg: bg.c, uniform, tcol, fsEst, stroke: bx.stroke || null, strokeR: bx.strokeR || 0 };
@@ -307,13 +339,12 @@ function trWrap(el, text, maxW, cjk) {
 }
 // 상자(page 좌표)에 맞춰 글자 크기·줄바꿈 정하기
 function trFit(el, text, box, cap) {
-  const cjk = el.vert || /^(ja|zh)$/.test(el.trL || ''), paras = String(text).split('\n').length;
+  const cjk = /^(ja|zh)$/.test(el.trL || ''), paras = String(text).split('\n').length;
   const lay = fs => { // 이 크기에서 줄 나누기 → {lines, w, h}
     el.fs = fs;
-    if (el.vert) { // 세로쓰기: 줄 = 세로 한 칸
-      const per = Math.max(1, Math.floor(box.h / (fs * 1.02))), cols = [];
-      for (const para of String(text).split('\n')) { const cs = [...para]; for (let i = 0; i < Math.max(1, cs.length); i += per) cols.push(cs.slice(i, i + per).join('')); }
-      return { lines: cols, w: cols.length * fs * el.lh, h: Math.max(...cols.map(c => [...c].length)) * fs * 1.02 };
+    if (el.vert) { // 세로쓰기: 줄 = 세로 한 칸 (낱말은 되도록 안 끊어요)
+      const cols = trWrapV(trVText(text), box.h, fs, cjk), len = c => [...c].reduce((a, ch) => a + (ch === ' ' ? 0.45 : 0.98), 0) * fs;
+      return { lines: cols, w: cols.length * fs * el.lh, h: Math.max(...cols.map(len)) };
     }
     const lines = trWrap(el, text, box.w - (el.sw || 0) * 2, cjk); mctx.font = fontStr(el);
     return { lines, w: Math.max(...lines.map(l => mctx.measureText(l).width)), h: lines.length * fs * el.lh };
@@ -329,6 +360,26 @@ function trFit(el, text, box, cap) {
   if (!best) { const L = lay(lo); best = { fs: lo, lines: L.lines }; }
   el.fs = Math.round(best.fs * 10) / 10; el.text = best.lines.join('\n');
   const cx = box.x + box.w / 2, cy = box.y + box.h / 2; el.x = cx - 5; el.y = cy - 5; el.w = 10; el.h = 10; fitText(el);
+  if (el.vert && el.trTop) { el.x = box.x + box.w - el.w; el.y = box.y; } // 원래 세로 글처럼 오른쪽 위에서 시작
+}
+// 세로쓰기용 문장 부호 (… → ︙ 등)
+const TR_VMAP = { '…': '︙', '‥': '︰', '—': '︱', '―': '︱', '-': '︱', 'ー': '丨', '~': '≀', '～': '≀', '(': '︵', ')': '︶', '（': '︵', '）': '︶', '「': '﹁', '」': '﹂', '『': '﹃', '』': '﹄', '[': '﹇', ']': '﹈' };
+const trVText = t => [...String(t)].map(c => TR_VMAP[c] || c).join('');
+function trWrapV(text, H, fs, cjk) {
+  const u = ch => (ch === ' ' ? 0.45 : 0.98) * fs, L = s2 => [...s2].reduce((a, ch) => a + u(ch), 0), out = [];
+  for (const para of String(text).split('\n')) {
+    if (cjk) { let col = ''; for (const ch of para) { if (col && L(col + ch) > H && !TR_NOSTART.has(ch)) { out.push(col); col = ch; } else col += ch; } out.push(col); continue; }
+    let col = '';
+    for (const wd of para.split(/\s+/).filter(Boolean)) {
+      const cand = col ? col + ' ' + wd : wd;
+      if (L(cand) <= H) { col = cand; continue; }
+      if (col) out.push(col);
+      col = wd;
+      while (L(col) > H && [...col].length > 1) { const cs = [...col]; let k = cs.length - 1; while (k > 1 && L(cs.slice(0, k).join('')) > H) k--; out.push(cs.slice(0, k).join('')); col = cs.slice(k).join(''); }
+    }
+    out.push(col);
+  }
+  return out;
 }
 const trHex = c => '#' + c.map(v => clamp(Math.round(v), 0, 255).toString(16).padStart(2, '0')).join('');
 function trMakeText(o, blk, box, info, k) {
@@ -336,7 +387,8 @@ function trMakeText(o, blk, box, info, k) {
   Object.assign(el, { font: o.font || '고딕', bold: blk.kind === 'sfx' || blk.kind === 'sign', italic: false, lh: o.dst === 'ko' ? 1.22 : 1.15, align: 'center', sw: 0, sw2: 0, ext: 0, glow: 0, shA: 0, boxOn: false, jit: 0, grow: 0, sp: 0, skew: 0, rough: 0, fillGrad: false, arc: 0 });
   const dl = o.dst === 'same' ? trGuessLang(blk.translation) : o.dst;
   el.lh = dl === 'ko' ? 1.22 : 1.15;
-  el.vert = !!blk.vertical && /^(ja|zh)$/.test(dl);
+  el.vert = !!blk.vertical; // 원래 세로 글이면 세로로 (오른쪽 줄부터), 가로면 가로로
+  if (el.vert) { el.lh = 1.3; el.align = blk.inBubble ? 'center' : 'left'; el.trTop = !blk.inBubble; } // 세로: 말풍선 밖이면 원래처럼 위에서부터
   el.trL = dl; el.trT = 1;
   const S = o.style && myStyleById(o.style);
   if (S) styleApply(el, S, true);
@@ -546,6 +598,11 @@ async function trPage(p, o, ctx, tk, pre) {
     const bx = b.box, t = bx.t || bx;
     let room = w.info.uniform ? trRoom(g, CW, CH, t, w.info.bg) : null;
     if (room && (room.w < (t.x1 - t.x0) * 0.6 || room.h < (t.y1 - t.y0) * 0.6)) room = null;
+    b.inBubble = !!room;
+    if (!room && b.vertical) { // 그림 위 세로 글: 원래 글 자리 그대로 (아래로만 조금 여유)
+      const ww = t.x1 - t.x0, hh = t.y1 - t.y0, pd = Math.max(2, ww * 0.04);
+      room = { cx: (t.x0 + t.x1) / 2, cy: t.y0 - pd + (hh * 1.15 + pd * 2) / 2, w: ww + pd * 2, h: hh * 1.15 + pd * 2 };
+    }
     if (!room) {
       const ww = (t.x1 - t.x0), hh = (t.y1 - t.y0), cx = (t.x0 + t.x1) / 2, cy = (t.y0 + t.y1) / 2, vt = /^(ja|zh)$/.test(o.dst === 'same' ? trGuessLang(b.translation) : o.dst);
       if (hh > ww * 1.4 && !vt) { const A = ww * hh * 1.3, w2 = clamp(Math.sqrt(A * 1.1), ww * 1.1, Math.max(ww * 1.1, hh)); room = { cx, cy, w: w2, h: A / w2 * 1.1 }; } // 세로 글 → 가로 글: 넓이를 비슷하게
