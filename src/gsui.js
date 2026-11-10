@@ -224,7 +224,7 @@ function gsRenderProps() {
         ${row('맞추기', `<select data-gk="s.fit"><option value="">전체 설정 따름</option>${opt([['cover', '꽉 채우기'], ['contain', '전체 보이기']], s.fit ?? '')}</select>`)}
         <p class="gp-tip">시간 막대에서 장면 오른쪽 끝을 끌면 길이가 바뀌고, 가운데를 끌면 순서가 바뀌어요.</p>
         ${gsXfHtml(s, nClip)}
-        ${nClip > 1 ? `<div class="btnrow"><button class="btn sm" data-g="pick-clip" data-v="${s.clip}" title="이 GIF·영상 장면을 모두 고르면 오른쪽에 'AI로 부드럽게'가 나와요">AI로 부드럽게 (중간 장면)…</button></div>` : `<div class="btnrow"><button class="btn sm" data-g="ai-para" title="AI가 잰 거리대로 앞뒤를 나눠 카메라가 움직이는 것 같은 장면들로 바꿔요">입체 움직임 (AI 깊이)…</button></div>`}
+        ${nClip > 1 ? `<div class="btnrow"><button class="btn sm" data-g="pick-clip" data-v="${s.clip}" title="이 GIF·영상 장면을 모두 고르면 오른쪽에 'AI로 부드럽게'가 나와요">AI로 부드럽게 (중간 장면)…</button></div>` : `<div class="btnrow"><button class="btn sm" data-g="ai-para" title="AI가 잰 거리대로 앞뒤를 나눠 카메라가 움직이는 것 같은 장면들로 바꿔요">입체 움직임 (AI 깊이)…</button><button class="btn sm" data-g="ai-vid" title="이 장면 그림과 '어떻게 움직일지' 적은 글로 영상을 만들어요 (제미나이 유료 키)">AI 영상으로 (제미나이)…</button></div>`}
         <div class="btnrow"><button class="btn sm" data-g="dup" title="Ctrl+D">복제</button><button class="btn sm" data-g="split" title="재생 위치에서 두 장면으로 (Ctrl+K)">재생 위치에서 나누기</button><button class="btn sm danger" data-g="del-sel">빼기</button></div>
         ${nClip > 1 ? `<div class="btnrow"><button class="btn sm" data-g="pick-clip" data-v="${s.clip}" title="같은 GIF·영상에서 나온 장면을 모두 골라 속도·거꾸로·부메랑을 한꺼번에">이 GIF·영상 장면 모두 고르기 (${nClip}장)</button></div>` : ''}</div>
       ${gs.sel > 0 ? `<div class="sec"><h3>들어올 때 넘김</h3>${row('넘김', gsTransSel('s.tr', s.tr ?? '', true))}${row('길이', `<input type="number" data-gk="s.trd" min="0.05" max="3" step="0.05" value="${s.trd ?? ''}" placeholder="${set.trDur}"> 초`)}</div>` : ''}`;
@@ -586,6 +586,7 @@ async function gsClick(e) {
   if (a === 'close') pjBackToEditor();
   else if (a === 'export-open') gsExportOpen();
   else if (a === 'ai-para') dpParaFromScene();
+  else if (a === 'ai-vid') vgFromScene();
   else if (a === 'xf-center') { for (const s of scTargets()) { s.tx = 0; s.ty = 0; } gsChanged(); gsRenderProps(); }
   else if (a === 'xf-reset') { for (const s of scTargets()) { delete s.tx; delete s.ty; delete s.tz; delete s.trot; delete s.tflip; } gsChanged(); gsRenderProps(); }
   else if (a === 'xf-all') { const c = S[gs.sel]; if (c) { for (const s of S) { s.tx = c.tx; s.ty = c.ty; s.tz = c.tz; s.trot = c.trot; s.tflip = c.tflip; } gsChanged(); toast('모든 장면에 같은 위치·크기·회전을 넣었어요', 2000); } }

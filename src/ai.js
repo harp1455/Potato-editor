@@ -259,6 +259,8 @@ function aiSec() {
     <div class="btnrow"><button class="btn sm" data-act="ai-line" data-v="layer" title="원래 그림은 두고, 투명 바탕 선화를 위에 새 레이어로">선화 레이어로</button><button class="btn sm" data-act="ai-line" data-v="replace" title="그림을 흰 바탕 선화로 바꿔요">그림을 선화로</button></div>
     <h4 class="advh">깊이 효과</h4>
     <div class="btnrow"><button class="btn sm" data-act="ai-dof" title="AI가 잰 거리대로, 멀수록 더 흐리게 (카메라 심도처럼)">거리에 따라 흐리게…</button><button class="btn sm" data-act="ai-para" title="그림 한 장을 앞뒤로 나눠 카메라가 움직이는 것 같은 움짤로">입체 움짤 만들기…</button></div>
+    <h4 class="advh">AI 영상 (제미나이)</h4>
+    <div class="btnrow"><button class="btn sm" data-act="ai-vid" title="그림과 '어떻게 움직일지' 적은 글로 몇 초짜리 영상을 만들어요 (제미나이 유료 키)">AI 영상 만들기…</button></div>
     <h4 class="advh">AI 지우개</h4>
     <p class="muted small" style="margin:0">위쪽 '가리기' 붓의 'AI 지우개'로 지울 물건을 칠하거나, '선택'으로 고른 뒤 'AI로 지우기'를 누르면 둘레에 맞게 메워요. (지우개 95MB, 선화 16MB 팩)</p>`);
 }
@@ -268,6 +270,7 @@ function aiAct(act, v) {
   if (act === 'ai-md') { aiSr.model = v; renderProps(); return; }
   if (act === 'ai-dof') { dpOpenDof(); return; }
   if (act === 'ai-para') { dpParaFromImage(); return; }
+  if (act === 'ai-vid') { vgFromImage(); return; }
   if (act === 'ai-bg') { aiRun('bg', v); return; }
   if (act === 'ai-sr') { aiRun('sr'); return; }
   if (act === 'ai-lnm') { aiLine.model = v; renderProps(); return; }
