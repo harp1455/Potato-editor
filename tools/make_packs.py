@@ -44,6 +44,9 @@ SRC = {  # 원본: 주소 + sha256 (주소 내용이 바뀌면 멈춰요)
                 'sha256': '345f249eda90f33e0548890f2fe1e89662c1dbb5a8b7c10a50492558f65e85a3'},
     'depth_d': {'url': HF.format(repo='onnx-community/depth-anything-v2-small-ONNX', rev='c3b67641fd837b2368757101311e5d21e511441e', path='onnx/model.onnx_data'),
                 'sha256': 'c4fba31e921953367d8c5348b92296b2bf41f9cef9745ffaca01e2b1653e6d08'},
+    # 글자 찾기: PP-OCRv4 mobile 검출(Apache-2.0, PaddleOCR) ONNX (RapidOCR 변환본) — 페이지 번역에서 글자 자리만 잘라 보낼 때
+    'ppocr4det': {'url': HF.format(repo='SWHL/RapidOCR', rev='1cfba2e90fc938db55889873735088de210cc173', path='PP-OCRv4/ch_PP-OCRv4_det_infer.onnx'),
+                  'sha256': 'd2a7720d45a54257208b1e13e36a8479894cb74155a5efe29462512d42f49da9'},
 }
 # 편집기 안 이름(id) ← 원본, 변환, 팩 파일 이름, 어느 팩
 FILES = [
@@ -62,6 +65,7 @@ FILES = [
     ('czM_lineC', 'line_coarse', 'fp16w', 'lineart-coarse.onnx.gz', 'line'),
     ('czM_rife', 'rife49', 'fp16w', 'rife-v4.9.onnx.gz', 'interp'),
     ('czM_depth', 'depth_g+depth_d', 'fp16w_ext', 'depth-anything-v2-small.onnx.gz', 'depth'),
+    ('czM_tdet', 'ppocr4det', None, 'ppocr-det-v4.onnx.gz', 'text'),
 ]
 PACKS = {'base': {'label': '기본 팩', 'desc': "AI 실행 도구, 찾기 모델, '빠르게' 모양 모델, 윤곽 따기"},
          'precise': {'label': '정밀 팩', 'desc': "'정밀하게' 모양 모델"},
@@ -70,7 +74,8 @@ PACKS = {'base': {'label': '기본 팩', 'desc': "AI 실행 도구, 찾기 모�
          'erase': {'label': 'AI 지우개 팩', 'desc': '칠한 곳을 둘레에 맞게 메우는 LaMa 모델 (애니·만화용)'},
          'line': {'label': 'AI 선화 추출 팩', 'desc': '그림에서 선만 뽑는 모델 (가는 선·굵은 선)'},
          'interp': {'label': 'AI 중간 장면 팩', 'desc': '움짤 장면 사이를 새로 그려 부드럽게 하는 RIFE 모델 (애니용 v4.9)'},
-         'depth': {'label': 'AI 깊이 팩', 'desc': '그림의 앞뒤 거리를 재는 Depth Anything V2 모델 (배경 흐림·입체 움짤)'}}
+         'depth': {'label': 'AI 깊이 팩', 'desc': '그림의 앞뒤 거리를 재는 Depth Anything V2 모델 (배경 흐림·입체 움짤)'},
+         'text': {'label': 'AI 글자 찾기 팩', 'desc': '그림 속 글자 자리를 찾는 PP-OCR 모델 (페이지 번역에서 글자 부분만 보낼 때)'}}
 sha = lambda b: hashlib.sha256(b).hexdigest()
 
 

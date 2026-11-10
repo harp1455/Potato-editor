@@ -2794,7 +2794,8 @@ function panelProps(el) {
 }
 function bubbleProps(el) {
   return `<div class="sec"><h3>대사</h3><textarea class="big" data-k="text" rows="3" spellcheck="false"></textarea>
-    <p class="muted small">Enter로 줄을 바꿔요. 캔버스에서 말풍선을 더블클릭해도 고칠 수 있어요.</p></div>
+    <p class="muted small">Enter로 줄을 바꿔요. 캔버스에서 말풍선을 더블클릭해도 고칠 수 있어요.</p>
+    <div class="btnrow"><button class="btn sm" data-act="tx-ai" title="제미나이로 번역하거나 자연스럽게·짧게 고쳐요">AI로 번역·다듬기…</button></div></div>
   <div class="sec"><h3>모양</h3>
     ${segBtns('shape', el.shape, [['round', '둥근'], ['box', '네모'], ['rect', '나레이션'], ['thought', '생각'], ['shout', '외침']])}
     <div class="btnrow" style="margin-top:9px">${check('tail', '꼬리')}&nbsp;&nbsp;${check('dash', '점선 (속삭임)')}</div>
@@ -2818,6 +2819,7 @@ function bubbleProps(el) {
 function textProps(el) {
   return `<div class="sec"><h3>글자</h3><textarea class="big" data-k="text" rows="2" spellcheck="false"></textarea>
     <p class="muted small">모서리를 끌면 글자 크기가 함께 바뀌어요.</p>
+    <div class="btnrow"><button class="btn sm" data-act="tx-ai" title="제미나이로 번역하거나 자연스럽게·짧게 고쳐요">AI로 번역·다듬기…</button></div>
     <p class="muted small" style="margin:8px 0 4px">스타일 한 번에 바꾸기</p>
     <div class="sfxbtns">${TEXT_STYLES.map((t, i) => `<button class="btn" data-act="tstyle" data-v="${i}">${t.n}</button>`).join('')}</div>
     <p class="muted small" style="margin:10px 0 4px">내 스타일 <span title="글꼴·색·테두리·후광·그림자·띠 같은 꾸밈을 저장해요(글자 크기는 빼고). 모든 작업과 움짤 글자에서 써요.">ⓘ</span></p>
@@ -2934,6 +2936,7 @@ function imgPageProps() {
     ${row('바탕색', `<input type="color" data-k="bg" data-scope="page">`)}
     <p class="muted small">바탕색은 투명한 그림 뒤나 늘린 캔버스에 깔리는 색이에요.</p>
   </div>
+  ${trSec()}
   ${sizeSec()}
   ${bxSec()}
   ${aaSec()}
@@ -2979,7 +2982,7 @@ function renderProps() {
   const ss = selEls();
   if (ss.length !== sel.length) sel = ss.map(e => e.id);
   let html;
-  if (!ss.length) html = isImg() ? imgPageProps() : pageProps();
+  if (!ss.length) html = isImg() ? imgPageProps() : pageProps() + aiTxSec();
   else if (ss.length > 1) html = multiProps();
   else html = ss[0].lock ? lockProps(ss[0]) : ({ panel: panelProps, bubble: bubbleProps, text: textProps, stamp: stampProps, draw: drawProps, fx: fxProps, shape: shapeProps, tmpl: tmplProps })[ss[0].type](ss[0]);
   if (ss.length === 1 && !ss[0].lock) html = (imgLayerEl(ss[0]) && ss[0].img ? xfSec(ss[0]) : '') + html.replace('<div class="sec"><h3>순서</h3>', lfxSec(ss[0]) + lmSec(ss[0]) + '<div class="sec"><h3>순서</h3>');
@@ -3037,6 +3040,9 @@ function doAct(act, v) {
   const ss = selEls(), el = ss[0], pg = page();
   if (act.startsWith('adv-') || act.startsWith('cm-')) { advAct(act, v); return; }
   if (act.startsWith('bx-')) { bxAct(act, v); return; }
+  if (act.startsWith('tr-')) { trAct(act, v); return; }
+  if (act === 'tx-ai') { aiTxEl(); return; }
+  if (act === 'tx-page' || act === 'tx-all') { aiTxPages(act === 'tx-all'); return; }
   if (act.startsWith('sz-')) { sizeAct(act, v); return; }
   if (act.startsWith('ai-')) { aiAct(act, v); return; }
   if (act.startsWith('e2-')) { e2Act(act, v); return; }
@@ -3767,6 +3773,7 @@ async function gsLoad() {
 /*@@DEPTH@@*/
 /*@@LIQUIFY@@*/
 /*@@BATCH@@*/
+/*@@TRANS@@*/
 /*@@CZ@@*/
 /* ================= 모달 ================= */
 function modal(html, opts = {}) {
@@ -4191,6 +4198,8 @@ function openHelp() {
       <li><b>레이어 효과</b>: 그림 레이어·효과음 그림·도형을 고르고 오른쪽 '레이어 효과'에서 외곽선·그림자·빛을 켜요. 그림 모양을 따라 붙고 언제든 끌 수 있어요.</li>
       <li><b>색감 맞추기</b>: 그림(컷)을 고르고 '고급 보정 → 색감 맞추기'에서 기준 그림을 골라 밝기·색 분위기를 맞춰요. 마음에 드는 그림에서 '모든 그림을 이 그림에'를 누르면 한 번에 맞춰요.</li>
       <li><b>배경 음악·효과음</b> (움짤): 시간 막대 위 '+ 소리'로 MP3·WAV·M4A(영상 파일이면 그 소리만)를 넣어요. 막대를 끌어 자리·길이를 바꾸고 크기·서서히 커지기/작아지기·반복을 골라요. MP4로 저장할 때 들어가요.</li>
+      <li><b>페이지 번역</b> (이미지 편집, 제미나이 API 키 필요): 아무것도 안 고르고 오른쪽 '페이지 번역 (AI)' → '번역하기…'. 그림 속 글자를 찾아 번역하고, 원래 글자만 지운 뒤(말풍선은 바탕색, 그림 위는 AI 지우개) 고칠 수 있는 글자로 다시 써요. 오른쪽 목록에서 번역문을 고치고, '원문 보기'로 비교해요. 용어집·말투 메모를 적어 두면 이름·신조어를 늘 같게 옮겨요. '원문 그대로'를 고르면 번역 없이 글자만 깔끔한 글꼴로 다시 써요. 제미나이가 그림을 거절하면 글자 자리만 찾아 그 부분만 보내요('그림 보내기', 설치판 AI 글자 찾기 팩).</li>
+      <li><b>AI로 번역·다듬기</b> (제미나이): 말풍선·글자(움짤 글자도)를 고르고 'AI로 번역·다듬기…'에서 다른 말로 번역, 자연스럽게, 짧게, 반말·존댓말, 직접 요청을 골라요. 후보 3개 중 누르면 바뀌어요. 컷 편집에서 아무것도 안 고르면 '말풍선·글자 번역'으로 페이지 전체를 한 번에 번역해요(다른 나라 말 판 만들기).</li>
       <li><b>일괄 처리</b> (이미지 편집): 아무것도 안 고르고 오른쪽 '일괄 처리'에서 '● 기록 시작'을 누른 뒤 한 그림을 고쳐요. '기록 끝내기'를 누르면 한 일(돌리기·자르기·크기·보정·AI 배경 지우기·자동 흰칠·글자 넣기)이 동작으로 저장되고, 폴더나 모든 그림에 똑같이 할 수 있어요.</li>
     </ol>
     <p class="muted small" style="margin-top:12px">되돌리기 <kbd>Ctrl+Z</kbd>, 다시 하기 <kbd>Ctrl+Y</kbd>, 복제 <kbd>Ctrl+D</kbd>, 복사와 붙여넣기 <kbd>Ctrl+C</kbd>/<kbd>V</kbd>, 삭제 <kbd>Delete</kbd>, 조금씩 옮기기 방향키(<kbd>Shift</kbd>와 함께 10칸), 화면 끌기 <kbd>Space</kbd>+드래그, 확대 <kbd>Ctrl</kbd>+휠, 비율 유지 <kbd>Shift</kbd>+모서리, 자석 잠시 끄기 <kbd>Alt</kbd></p>

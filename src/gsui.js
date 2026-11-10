@@ -129,7 +129,7 @@ function gpLibRender() {
   } else if (gs.lib === 'text') {
     const prev = P => { const s = P.st, sw = Math.min(3, (s.sw || 0) / 4); const sh = [s.sw ? [[-1, -1], [1, -1], [-1, 1], [1, 1], [0, 1.4], [0, -1.4], [1.4, 0], [-1.4, 0]].map(([x, y]) => `${x * sw}px ${y * sw}px 0 ${s.sc}`).join(',') : '', s.glow ? `0 0 ${Math.min(10, s.glow / 4)}px ${s.glowColor}` : ''].filter(Boolean).join(',');
       return `color:${s.fillGrad ? s.color : s.color};${sh ? `text-shadow:${sh};` : ''}${s.bold === false ? 'font-weight:500;' : ''}${s.boxOn ? 'background:rgba(0,0,0,.6);padding:1px 6px;border-radius:4px;' : ''}`; };
-    h += `<button class="btn primary gp-wide" data-g="ov-add" data-lib="ov-add" draggable="true">+ 글자 넣기</button>
+    h += `<button class="btn primary gp-wide" data-g="ov-add" data-lib="ov-add" draggable="true">+ 글자 넣기</button>${gs.ovs.some(o => o.kind !== 'image') ? '<button class="btn gp-wide" data-g="ov-trall" title="제미나이로 움짤의 글자를 한 번에 번역해요" style="margin-top:6px">글자 모두 번역 (AI)…</button>' : ''}
       <h4>빠른 꾸미기 <span class="muted small">${OV_PRESETS.length}가지</span></h4><div class="gp-pre">${OV_PRESETS.map((P, i) => `<button class="gp-pcard" data-g="ov-preadd" data-v="${i}" data-lib="ov-preadd" draggable="true" title="${esc(P.n)}: 모양과 움직임이 한 번에 들어가요"><span style="${prev(P)}">가나다</span><small>${esc(P.n)}</small></button>`).join('')}</div>
       <h4>이모지 스티커</h4><div class="emo">${EMOJIS.map(e => `<button data-g="ov-emoji" data-v="${e}" data-lib="ov-emoji" draggable="true">${e}</button>`).join('')}</div>
       <h4>그림 스티커</h4><div class="btnrow"><button class="btn sm" data-g="ov-img">파일에서</button><button class="btn sm" data-g="ov-lib">보관함에서</button></div>
@@ -579,6 +579,7 @@ function gsInput(e) {
 async function gsClick(e) {
   const b = e.target.closest('[data-g]'); if (!b || b.disabled) return;
   const a = b.dataset.g, S = gs.slides, fps = +gs.set.fps || 12;
+  if (a === 'ov-ai' || a === 'ov-trall') { aiTxGs(a); return; }
   if (a === 'tr-gal' || a.startsWith('ov-') || a.startsWith('fx-')) { ovClick(a, b); return; }
   if (a.startsWith('kf-')) { kfAct(a, b.dataset.v); return; }
   if (a.startsWith('au-')) { auClick(a); return; }
