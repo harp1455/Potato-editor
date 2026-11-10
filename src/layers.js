@@ -11,6 +11,7 @@ const LAYER_ICON = {
   shape: '<svg viewBox="0 0 16 16"><rect x="1.5" y="6.5" width="8" height="8" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="10.5" cy="5.5" r="4" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>',
   tmpl: '<svg viewBox="0 0 16 16"><path d="M2 5V2h3M11 2h3v3M14 11v3h-3M5 14H2v-3" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="5" cy="5.5" r="1.2" fill="#ff3b30"/></svg>',
   adj: '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M8 2.5a5.5 5.5 0 010 11z" fill="currentColor"/></svg>',
+  group: '<svg viewBox="0 0 16 16"><path d="M1.8 4.2c0-.7.5-1.2 1.2-1.2h3l1.4 1.6h5.6c.7 0 1.2.5 1.2 1.2v6.4c0 .7-.5 1.2-1.2 1.2H3c-.7 0-1.2-.5-1.2-1.2z" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>',
 };
 const LOCK_SVG = on => on ? '<svg width="14" height="14" viewBox="0 0 16 16"><rect x="3.5" y="7" width="9" height="7" rx="1.5" fill="currentColor"/><path d="M5.5 7V5a2.5 2.5 0 015 0v2" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>'
   : '<svg width="14" height="14" viewBox="0 0 16 16"><rect x="3.5" y="7" width="9" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M5.5 7V5a2.5 2.5 0 014.8-1" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>';
@@ -41,31 +42,59 @@ function renderLayers() {
   const box = $('#layers'); if (!box || $('#tab-layers').hidden) return;
   const p = page(), ids = new Set(sel);
   if (!p || p.ph) { box.innerHTML = '<p class="muted small" style="padding:10px">그림을 먼저 불러오세요.</p>'; $('#layerFoot').innerHTML = ''; return; }
-  const rows = p.els.slice().reverse().map(el => {
+  const lyRow = (el, inG) => {
     const r = el.type === 'panel' && el.img ? images.get(el.img) : el.type === 'stamp' ? images.get(el.img) : null;
     const thumb = r && r.thumb ? `<img src="${r.thumb}" alt="">` : el.adjL ? LAYER_ICON.adj : el.type === 'panel' && el.fill && el.pass ? `<span class="lyr-sw" style="background:${el.fill}"></span>` : LAYER_ICON[el.type] || '';
-    return `<div class="lyr ${ids.has(el.id) ? 'on' : ''} ${el.hidden ? 'off' : ''}" data-lid="${el.id}" draggable="${el.lock ? 'false' : 'true'}">
+    return `<div class="lyr ${inG ? 'in' : ''} ${ids.has(el.id) ? 'on' : ''} ${el.hidden ? 'off' : ''}" data-lid="${el.id}" draggable="${el.lock ? 'false' : 'true'}">
       <button class="lyr-eye" data-lact="eye" title="${el.hidden ? '보이기' : '숨기기'}">${eyeSvg(!el.hidden)}</button>
       <span class="lyr-th">${thumb}</span>
       <span class="lyr-nm" title="두 번 누르면 이름 바꾸기">${esc(layerLabel(el, p))}</span>
       ${(el.eop ?? 100) < 100 ? `<span class="lyr-badge">${Math.round(el.eop)}%</span>` : ''}${el.lmask ? '<span class="lyr-badge" title="레이어 마스크">마스크</span>' : ''}${el.eblend && el.eblend !== 'source-over' ? '<span class="lyr-badge">섞기</span>' : ''}
       ${el.lock ? '<span class="lyr-lock" title="바탕 그림은 늘 고정돼 있어요">' + LOCK_SVG(true) + '</span>' : `<button class="lyr-lock ${el.ulock ? 'on' : ''}" data-lact="lock" title="${el.ulock ? '잠금 풀기' : '잠그기 (화면에서 안 골라져요)'}">${LOCK_SVG(!!el.ulock)}</button>`}
     </div>`;
-  }).join('');
+  };
+  const grpRow = g => {
+    const ms = lyMembers(p, g.id), on = ms.every(m => ids.has(m.id)), vis = ms.some(m => !m.hidden), lk = ms.every(m => m.ulock);
+    return `<div class="lyr grp ${on ? 'on' : ''} ${vis ? '' : 'off'}" data-gid="${g.id}" draggable="true">
+      <button class="lyr-eye" data-lact="geye" title="${vis ? '묶음 숨기기' : '묶음 보이기'}">${eyeSvg(vis)}</button>
+      <button class="lyr-fold" data-lact="gfold" title="${g.open === false ? '펼치기' : '접기'}">${g.open === false ? '▸' : '▾'}</button>
+      <span class="lyr-th">${LAYER_ICON.group}</span>
+      <span class="lyr-nm" title="누르면 묶음 전체를 골라요. 두 번 누르면 이름 바꾸기">${esc(g.name)}</span><span class="lyr-badge">${ms.length}</span>
+      <button class="lyr-lock ${lk ? 'on' : ''}" data-lact="glock" title="${lk ? '묶음 잠금 풀기' : '묶음 잠그기'}">${LOCK_SVG(lk)}</button>
+    </div>`;
+  };
+  let rows = '', curG = null;
+  for (const el of p.els.slice().reverse()) {
+    const g = el.gid && lyGroupOf(p, el.gid);
+    if (!g) { curG = null; rows += lyRow(el, false); continue; }
+    if (curG !== g.id) { curG = g.id; rows += grpRow(g); }
+    if (g.open !== false) rows += lyRow(el, true);
+  }
   box.innerHTML = rows || '<p class="muted small" style="padding:10px">아직 아무것도 없어요.</p>';
-  const ss = selEls(), one = ss.length === 1 ? ss[0] : null;
+  const ss = selEls(), one = ss.length === 1 ? ss[0] : null, nl = ss.filter(o => !o.lock), gids = [...new Set(nl.map(o => o.gid).filter(Boolean))];
+  const wholeG = gids.length === 1 && nl.every(o => o.gid === gids[0]) && lyMembers(p, gids[0]).length === nl.length;
+  const below = one && !one.lock ? p.els[p.els.indexOf(one) - 1] : null;
   $('#layerFoot').innerHTML = ss.length ? `
     <div class="row"><span class="l">불투명도</span><input type="range" min="0" max="100" step="1" data-lk="eop" value="${one ? (one.eop ?? 100) : 100}"><input type="number" min="0" max="100" step="1" data-lk="eop" value="${one ? Math.round(one.eop ?? 100) : 100}"></div>
     <div class="row"><span class="l">섞는 법</span><select data-lk="eblend">${BLENDS_ALL.map(([v, l]) => `<option value="${v}" ${(one ? one.eblend || 'source-over' : 'source-over') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
-    ${isImg() && ss.filter(o => !o.lock).length > 1 ? '<div class="btnrow"><button class="btn sm" data-lact="merge" title="고른 레이어를 그림 레이어 하나로 합쳐요. 합친 뒤에도 옮기기·크기·돌리기를 할 수 있어요">고른 것 합치기</button></div>' : ''}
+    ${nl.length > 1 || gids.length || (isImg() && below) ? `<div class="btnrow">${nl.length > 1 && !wholeG ? '<button class="btn sm" data-lact="group" title="고른 것을 한 묶음으로 (Ctrl+G). 화면에서 누르면 묶음째 골라지고 같이 움직여요">묶기</button>' : ''}${gids.length ? '<button class="btn sm" data-lact="ungroup" title="묶음을 풀어요 (Ctrl+Shift+G). 레이어는 그대로 남아요">묶음 풀기</button>' : ''}${isImg() && nl.length > 1 ? `<button class="btn sm" data-lact="merge" title="고른 레이어를 그림 레이어 하나로 합쳐요. 합친 뒤에도 옮기기·크기·돌리기를 할 수 있어요">${wholeG ? '묶음 합치기' : '고른 것 합치기'}</button>` : ''}${isImg() && below ? `<button class="btn sm" data-lact="mdown" title="바로 아래 레이어(${esc(layerLabel(below, p))})와 하나로 합쳐요${below.lock ? '. 바탕 그림이면 바탕에 굳혀요' : ''}">아래와 합치기</button>` : ''}</div>` : ''}
     <div class="btnrow"><button class="btn sm" data-lact="up" title="한 칸 앞으로">위로</button><button class="btn sm" data-lact="down" title="한 칸 뒤로">아래로</button><button class="btn sm" data-lact="dup">복제</button>${one ? '<button class="btn sm" data-lact="rename">이름</button>' : ''}<button class="btn sm danger" data-lact="del">삭제</button></div>`
-    : `<p class="muted small">레이어를 누르면 골라져요. <kbd>Shift</kbd>로 여러 개. 끌어서 순서를 바꿔요.</p>${p.els.some(e => e.hidden) ? '<div class="btnrow"><button class="btn sm" data-lact="showall">숨긴 것 모두 보이기</button></div>' : ''}${isImg() && p.els.filter(e => !e.hidden).length > 1 ? '<div class="btnrow"><button class="btn sm" data-lact="flatten" title="보이는 레이어를 바탕 그림 한 장으로 합쳐요 (숨긴 레이어는 그대로 남아요)">모두 합치기</button></div>' : ''}`;
+    : `<p class="muted small">레이어를 누르면 골라져요. <kbd>Shift</kbd>로 여러 개, <kbd>Ctrl</kbd>+<kbd>G</kbd>로 묶기. 끌어서 순서를 바꾸고, 묶음 안으로 끌어 넣을 수 있어요.</p>${p.els.some(e => e.hidden) ? '<div class="btnrow"><button class="btn sm" data-lact="showall">숨긴 것 모두 보이기</button></div>' : ''}${isImg() && p.els.filter(e => !e.hidden).length > 1 ? '<div class="btnrow"><button class="btn sm" data-lact="flatten" title="보이는 레이어를 바탕 그림 한 장으로 합쳐요 (숨긴 레이어는 그대로 남아요)">모두 합치기</button></div>' : ''}`;
 }
 (() => {
   const box = $('#layers'), foot = $('#layerFoot');
   const find = id => page().els.find(e => e.id === id);
   box.addEventListener('click', e => {
     const row = e.target.closest('.lyr'); if (!row) return;
+    if (row.dataset.gid) { // 묶음 머리 줄
+      const p = page(), g = lyGroupOf(p, row.dataset.gid); if (!g) return; const ms = lyMembers(p, g.id), a = e.target.closest('[data-lact]');
+      if (a && a.dataset.lact === 'gfold') { g.open = g.open === false; renderLayers(); scheduleSave(); return; }
+      if (a && a.dataset.lact === 'geye') { const show = !ms.some(m => !m.hidden); for (const m of ms) { if (show) delete m.hidden; else m.hidden = true; } if (!show) sel = sel.filter(i => !ms.some(m => m.id === i)); commit(); renderProps(); requestRender(); renderLayers(); return; }
+      if (a && a.dataset.lact === 'glock') { const lk = !ms.every(m => m.ulock); for (const m of ms) { if (lk) m.ulock = true; else delete m.ulock; } commit(); renderLayers(); return; }
+      const gi = ms.map(m => m.id);
+      if (e.shiftKey || e.ctrlKey || e.metaKey) { const on = gi.every(i => sel.includes(i)); sel = on ? sel.filter(i => !gi.includes(i)) : [...new Set([...sel, ...gi])]; } else sel = gi;
+      renderProps(); requestRender(); renderLayers(); return;
+    }
     const el = find(row.dataset.lid); if (!el) return;
     const act = e.target.closest('[data-lact]');
     if (act && act.dataset.lact === 'eye') { el.hidden = !el.hidden; if (!el.hidden) delete el.hidden; if (el.hidden) sel = sel.filter(i => i !== el.id); commit(); renderProps(); requestRender(); renderLayers(); return; }
@@ -76,13 +105,14 @@ function renderLayers() {
   });
   box.addEventListener('dblclick', async e => {
     const row = e.target.closest('.lyr'); if (!row || e.target.closest('[data-lact]')) return;
+    if (row.dataset.gid) { const g = lyGroupOf(page(), row.dataset.gid); if (!g) return; const n = await askText('묶음 이름', g.name, '바꾸기'); if (n && n.trim()) { g.name = n.trim().slice(0, 30); commit(); renderLayers(); } return; }
     const el = find(row.dataset.lid); if (!el) return;
     const n = await askText('레이어 이름', layerLabel(el, page()), '바꾸기'); if (n === null || n === undefined) return;
     if (n.trim()) el.name = n.trim().slice(0, 30); else delete el.name; commit(); renderLayers();
   });
   // 끌어서 순서 바꾸기 (위가 앞)
   let dragId = null;
-  box.addEventListener('dragstart', e => { const row = e.target.closest('.lyr'); if (!row) return; dragId = row.dataset.lid; e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/x-potato-layer', dragId); } catch (_) { } row.classList.add('dragging'); });
+  box.addEventListener('dragstart', e => { const row = e.target.closest('.lyr'); if (!row) return; dragId = row.dataset.gid ? 'g:' + row.dataset.gid : row.dataset.lid; e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/x-potato-layer', dragId); } catch (_) { } row.classList.add('dragging'); });
   box.addEventListener('dragend', () => { dragId = null; $$('.lyr', box).forEach(r => r.classList.remove('dragging', 'dropA', 'dropB')); });
   const where = e => { const row = e.target.closest('.lyr'); if (!row) return null; const r = row.getBoundingClientRect(); return { row, before: e.clientY < r.top + r.height / 2 }; };
   box.addEventListener('dragover', e => {
@@ -91,12 +121,20 @@ function renderLayers() {
   });
   box.addEventListener('drop', e => {
     if (!dragId) return; e.preventDefault(); e.stopPropagation();
-    const w = where(e), p = page(), el = find(dragId); dragId = null; if (!w || !el) { renderLayers(); return; }
-    const tgt = find(w.row.dataset.lid); if (!tgt || tgt === el) { renderLayers(); return; }
-    p.els.splice(p.els.indexOf(el), 1);
-    let i = p.els.indexOf(tgt) + (w.before ? 1 : 0); // 목록 위 = 배열 뒤쪽
+    const w = where(e), p = page(), src = dragId; dragId = null; if (!w) { renderLayers(); return; }
+    const isG = src.startsWith('g:'), sg = isG ? src.slice(2) : null, moving = isG ? lyMembers(p, sg) : [find(src)].filter(Boolean);
+    const tg = w.row.dataset.gid, tEl = !tg && find(w.row.dataset.lid);
+    if (!moving.length || (!tg && !tEl) || (tEl && moving.includes(tEl)) || (tg && tg === sg)) { renderLayers(); return; }
+    let ref, above, join = 'keep'; // 목록에서 위 = 배열 뒤쪽
+    if (tg) { const ms = lyMembers(p, tg); if (w.before) { ref = ms[ms.length - 1]; above = true; join = null; } else if (!isG) { ref = ms[ms.length - 1]; above = true; join = tg; } else { ref = ms[0]; above = false; } }
+    else if (isG && tEl.gid) { const ms = lyMembers(p, tEl.gid); ref = w.before ? ms[ms.length - 1] : ms[0]; above = w.before; } // 묶음 안에 묶음은 없어요
+    else { ref = tEl; above = w.before; if (!isG) join = tEl.gid || null; }
+    p.els = p.els.filter(x => !moving.includes(x));
+    let i = p.els.indexOf(ref) + (above ? 1 : 0);
     const B = p.els.findIndex(x => x.lock); if (B >= 0) i = Math.max(i, B + 1); // 바탕 그림 아래로는 못 가요
-    p.els.splice(i, 0, el); commit(); requestRender(); renderLayers();
+    p.els.splice(i, 0, ...moving);
+    if (join !== 'keep') for (const m of moving) { if (join) m.gid = join; else delete m.gid; }
+    lyFixGroups(p); commit(); requestRender(); renderLayers();
   });
   // 아래 칸: 불투명도·섞는 법·버튼
   foot.addEventListener('input', e => {
@@ -114,12 +152,15 @@ function renderLayers() {
         if (j < 0 || j >= p.els.length || p.els[j].lock || sel.includes(p.els[j].id)) continue;
         [p.els[i], p.els[j]] = [p.els[j], p.els[i]];
       }
-      commit(); requestRender(); renderLayers(); return;
+      lyFixGroups(p); commit(); requestRender(); renderLayers(); return;
     }
     if (a === 'dup') { duplicateSel(); renderLayers(); return; }
     if (a === 'del') { deleteSel(); renderLayers(); return; }
     if (a === 'flatten') { lyFlatten(); return; }
     if (a === 'merge') { lyMergeSel(); return; }
+    if (a === 'mdown') { lyMergeDown(); return; }
+    if (a === 'group') { lyGroup(); return; }
+    if (a === 'ungroup') { lyUngroup(); return; }
     if (a === 'showall') { for (const o of p.els) delete o.hidden; commit(); requestRender(); renderLayers(); return; }
     if (a === 'rename') { const o = selEls()[0]; if (!o) return; const n = await askText('레이어 이름', layerLabel(o, p), '바꾸기'); if (n === null || n === undefined) return; if (n.trim()) o.name = n.trim().slice(0, 30); else delete o.name; commit(); renderLayers(); }
   });
@@ -242,7 +283,10 @@ async function lyFlatten() {
 }
 async function lyMergeSel() {
   const pg = page(); if (!isImg() || pg.ph) return;
-  const ss = pg.els.filter(e => sel.includes(e.id) && !e.lock && !e.hidden);
+  return lyMergeEls(pg.els.filter(e => sel.includes(e.id) && !e.lock && !e.hidden));
+}
+async function lyMergeEls(ss) {
+  const pg = page();
   if (ss.length < 2) { toast('합칠 레이어를 두 개 넘게 골라 주세요'); return; }
   if (ss.some(e => e.adjL || e.type === 'fx')) { toast('보정 레이어와 가리기는 따로 합칠 수 없어요. 레이어 탭의 \'모두 합치기\'를 쓰세요.', 3500); return; }
   if (mode) setMode(null);
@@ -254,8 +298,71 @@ async function lyMergeSel() {
   const view = { x0, y0, x1, y1 }; for (const e of ss) drawEl(g, e, { screen: false, rs: k, view });
   const r = await lyNewImg(c, '합친 레이어.png');
   const P = makePanel((x0 + x1) / 2, (y0 + y1) / 2, x1 - x0, y1 - y0, r.id); P.bw = 0; P.radius = 0; P.name = '합친 레이어';
+  const g0 = ss[0].gid; if (g0 && ss.every(e => e.gid === g0) && lyMembers(pg, g0).length > ss.length) P.gid = g0; // 묶음 안 일부만 합치면 그 묶음에 남아요
   const at = pg.els.indexOf(ss[ss.length - 1]); pg.els.splice(at + 1, 0, P);
-  pg.els = pg.els.filter(e => !ss.includes(e));
+  pg.els = pg.els.filter(e => !ss.includes(e)); lyFixGroups(pg);
   sel = [P.id]; commit(); renderProps(); renderLayers(); requestRender();
   toast(`${ss.length}개를 그림 레이어 하나로 합쳤어요`);
+}
+// 아래와 합치기: 바로 아래가 바탕 그림이면 바탕에 굳히고(보정 레이어·가리기도 돼요), 아니면 그림 레이어 하나로
+async function lyMergeDown() {
+  const pg = page(); if (!isImg() || pg.ph) return;
+  const one = pg.els.find(e => sel.length === 1 && e.id === sel[0]); if (!one || one.lock) return;
+  const below = pg.els[pg.els.indexOf(one) - 1]; if (!below) { toast('아래에 합칠 레이어가 없어요'); return; }
+  if (one.hidden || below.hidden) { toast('숨긴 레이어는 합칠 수 없어요. 먼저 보이게 해 주세요.'); return; }
+  if (!below.lock) return lyMergeEls([below, one]);
+  if (mode) setMode(null);
+  const c = newCanvas(pg.w, pg.h), g = c.getContext('2d');
+  drawPage(g, { ...pg, els: [below, one] }, { screen: false, rs: 1, view: { x0: 0, y0: 0, x1: pg.w, y1: pg.h } });
+  const r = await lyNewImg(c, (pg.name || '그림').replace(/\.[^.]+$/, '') + ' 합침.png');
+  const B = makePanel(pg.w / 2, pg.h / 2, pg.w, pg.h, r.id); B.bw = 0; B.lock = true;
+  pg.els = [B, ...pg.els.filter(e => e !== below && e !== one)]; lyFixGroups(pg);
+  sel = []; xfBase = null; activeLayer.clear(); commit(); renderProps(); renderLayers(); requestRender(); redrawCurThumb();
+  toast(`'${layerLabel(one, pg)}'을(를) 바탕 그림에 합쳤어요. 되돌리려면 Ctrl+Z`, 3000);
+}
+/* ---- 레이어 묶기 ---- */
+// 요소에 gid, 페이지에 groups [{id, name, open}]. 묶음 안 요소는 늘 붙어 있어요(사이에 다른 레이어가 끼지 않게 lyFixGroups가 모아 줘요)
+const lyGroupOf = (p, gid) => (p.groups || []).find(g => g.id === gid) || null;
+const lyMembers = (p, gid) => p.els.filter(e => e.gid === gid);
+function lyFixGroups(p) {
+  if (!p) return;
+  if (!p.groups || !p.groups.length) { for (const e of p.els) delete e.gid; delete p.groups; return; }
+  const has = new Set(p.els.map(e => e.gid).filter(Boolean));
+  p.groups = p.groups.filter(g => has.has(g.id));
+  for (const e of p.els) if (e.gid && (e.lock || !lyGroupOf(p, e.gid))) delete e.gid;
+  const top = p.els.slice().reverse(), out = [], done = new Set();
+  for (const e of top) { if (!e.gid) { out.push(e); continue; } if (done.has(e.gid)) continue; done.add(e.gid); out.push(...top.filter(x => x.gid === e.gid)); }
+  p.els = out.reverse();
+  if (!p.groups.length) delete p.groups;
+}
+function lyGroup() {
+  const p = page(); if (!p || p.ph) return;
+  const ss = p.els.filter(e => sel.includes(e.id) && !e.lock);
+  if (ss.length < 2) { toast('묶을 것을 두 개 넘게 골라 주세요 (Shift+누르기)'); return; }
+  const top = p.els.indexOf(ss[ss.length - 1]), rest = p.els.filter(e => !ss.includes(e)), at = p.els.slice(0, top).filter(e => !ss.includes(e)).length;
+  if (!p.groups) p.groups = [];
+  let n = 1; while (p.groups.some(g => g.name === `묶음 ${n}`)) n++;
+  const g = { id: uid(), name: `묶음 ${n}` }; p.groups.push(g);
+  for (const e of ss) e.gid = g.id;
+  p.els = [...rest.slice(0, at), ...ss, ...rest.slice(at)]; lyFixGroups(p);
+  sel = ss.map(e => e.id); e2SetHint('묶기'); commit(); renderProps(); renderLayers(); requestRender();
+  toast(`${ss.length}개를 '${g.name}'으로 묶었어요. 화면에서 누르면 같이 골라지고, 하나만 고르려면 Alt+누르기`, 3500);
+}
+function lyUngroup() {
+  const p = page(); if (!p) return;
+  const gids = new Set(p.els.filter(e => sel.includes(e.id) && e.gid).map(e => e.gid)); if (!gids.size) { toast('고른 것 중에 묶음이 없어요'); return; }
+  for (const e of p.els) if (gids.has(e.gid)) delete e.gid;
+  lyFixGroups(p); e2SetHint('묶음 풀기'); commit(); renderProps(); renderLayers(); requestRender(); toast('묶음을 풀었어요');
+}
+// 복제·붙여넣기·다른 그림에 넣기: 묶음째 복사하면 새 묶음, 일부만이면 묶음 없이
+function lyCopyGroups(copies, p, srcP) {
+  const cnt = new Map(); for (const c of copies) if (c.gid) cnt.set(c.gid, (cnt.get(c.gid) || 0) + 1);
+  const map = new Map();
+  for (const [gid, k] of cnt) {
+    if (k < 2) continue;
+    const src = lyGroupOf(srcP || p, gid), g = { id: uid(), name: ((src && src.name) || '묶음') + (srcP && srcP !== p ? '' : ' 복사') };
+    if (!p.groups) p.groups = []; p.groups.push(g); map.set(gid, g.id);
+  }
+  for (const c of copies) { if (c.gid && map.has(c.gid)) c.gid = map.get(c.gid); else delete c.gid; }
+  lyFixGroups(p);
 }

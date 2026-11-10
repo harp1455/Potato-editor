@@ -370,6 +370,8 @@ function e2Act(act, v) {
   if (act.startsWith('e2-xf')) { e2XfAct(act); return; }
   if (act === 'e2-flatten') { lyFlatten(); return; }
   if (act === 'e2-merge') { lyMergeSel(); return; }
+  if (act === 'e2-group') { lyGroup(); return; }
+  if (act === 'e2-ungroup') { lyUngroup(); return; }
   switch (act) {
     case 'e2-tsplit': if (el && el.type === 'text') e2SplitText(el); return;
     case 'e2-fillc': if (el) { el.fill = v; commit(); renderProps(); requestRender(); } return;

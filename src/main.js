@@ -122,6 +122,33 @@ const TEXT_STYLES = [
   { n: '아치 (휘기)', p: { arc: 45, vert: false } },
   { n: '세로쓰기', p: { vert: true, arc: 0 } },
 ];
+// 내 글자 스타일 (저장해 두고 편집기·움짤 글자에 다시 씀). 글자 크기는 빼고, 테두리 굵기는 글자 크기에 맞춰 늘고 줄어요
+const TSTYLE_KEYS = TEXT_LOOK.filter(k => !['text', 'seed', 'fs', 'align'].includes(k));
+let myStyles = [], myStyleDef = null;
+try { myStyles = JSON.parse(localStorage.getItem('potatoTextStyles') || '[]') || []; myStyleDef = localStorage.getItem('potatoTextDef') || null; } catch (e) { }
+function myStylesSave() { try { localStorage.setItem('potatoTextStyles', JSON.stringify(myStyles)); if (myStyleDef) localStorage.setItem('potatoTextDef', myStyleDef); else localStorage.removeItem('potatoTextDef'); } catch (e) { } }
+function styleOf(o, name) { const p = {}; for (const k of TSTYLE_KEYS) if (o[k] !== undefined) p[k] = clone(o[k]); return { id: uid(), n: name, p, fs0: o.fs || 40 }; }
+function styleApply(o, S, keepBase) { // keepBase: 움짤 글자처럼 글꼴·색이 꼭 있어야 하는 곳
+  for (const k of TSTYLE_KEYS) { if (k in S.p) o[k] = clone(S.p[k]); else if (!(keepBase && (k === 'font' || k === 'color'))) delete o[k]; }
+  const r = (o.fs || S.fs0) / (S.fs0 || 1); for (const k of ['sw', 'sw2']) if (typeof o[k] === 'number') o[k] = Math.round(o[k] * r * 10) / 10;
+}
+const myStyleById = id => myStyles.find(x => x.id === id) || null;
+const stylePrevCache = new Map();
+function stylePreview(S) { // 단추에 보일 작은 그림
+  const key = S.id + JSON.stringify(S.p); if (stylePrevCache.has(key)) return stylePrevCache.get(key);
+  let url = '';
+  try {
+    const el = { id: 'stylepv', type: 'text', x: 0, y: 0, w: 10, h: 10, rot: 0, text: '가나다', seed: 1, fs: 30, ...clone(doc.defaults.text) };
+    el.fs = 30; styleApply(el, S); delete el.arc; delete el.vert; fitText(el);
+    const W = 116, H = 40, c = newCanvas(W * 2, H * 2), g = c.getContext('2d'), k = Math.min(1, (W - 6) / el.w, (H - 4) / el.h);
+    g.scale(2 * k, 2 * k); g.translate((W / k - el.w) / 2 - el.x, (H / k - el.h) / 2 - el.y); drawEl(g, el, { screen: false, rs: 2 * k, view: { x0: -1e5, y0: -1e5, x1: 1e5, y1: 1e5 } });
+    url = c.toDataURL();
+  } catch (e) { url = ''; }
+  stylePrevCache.set(key, url); return url;
+}
+function myStylesHtml(act) { // act: 편집기 'mystyle', 움짤 'ov-mystyle'
+  return `<div class="mystyles">${myStyles.map(S => { const pv = stylePreview(S); return `<span class="mys ${S.id === myStyleDef ? 'def' : ''}"><button class="btn" data-${act === 'mystyle' ? 'act' : 'g'}="${act}" data-v="${S.id}" title="${esc(S.n)}${S.id === myStyleDef ? ' · 새 글자 기본' : ''}">${pv ? `<img src="${pv}" alt="">` : ''}<span>${esc(S.n)}</span></button>${act === 'mystyle' ? `<button class="mysd" data-act="mystyle-def" data-v="${S.id}" title="${S.id === myStyleDef ? '새 글자 기본에서 빼기' : '새로 넣는 글자를 이 모양으로'}">${S.id === myStyleDef ? '★' : '☆'}</button><button class="mysx" data-act="mystyle-del" data-v="${S.id}" title="지우기">×</button>` : ''}</span>`; }).join('')}</div>`;
+}
 // 컷 효과 기본값 (없으면 이 값)
 const FX = {
   bright: 100, contrast: 100, saturate: 100, blur: 0, sepia: 0, hue: 0, gray: false,
@@ -728,9 +755,32 @@ function fitToPage(el, keys, lo, hi, mid) {
 }
 function makeText(cx, cy, preset) {
   const el = { id: uid(), type: 'text', x: cx - 5, y: cy - 5, w: 10, h: 10, rot: 0, text: '쾅!', seed: 1, ...clone(doc.defaults.text) };
+  const D = !preset && myStyleById(myStyleDef); if (D) styleApply(el, D); // 내 기본 스타일
   if (preset) { Object.assign(el, clone(preset.p)); el.text = preset.text; }
   fitToPage(el, ['fs', 'sw', 'sw2'], 0.06, 0.25, 0.14);
   fitText(el); return el;
+}
+async function myStyleSaveFrom(o) {
+  const n = await askText('스타일 이름', `내 스타일 ${myStyles.length + 1}`, '저장'); if (!n || !n.trim()) return;
+  const S = styleOf(o, n.trim().slice(0, 20)), old = myStyles.find(x => x.n === S.n);
+  if (old) { if (!confirm(`'${S.n}'이 이미 있어요. 지금 모양으로 바꿀까요?`)) return; S.id = old.id; myStyles[myStyles.indexOf(old)] = S; } else myStyles.push(S);
+  myStylesSave(); renderProps(); if (typeof gifOpen === 'function' && gifOpen()) gsRenderProps(); toast(`'${S.n}' 스타일을 저장했어요. 다른 글자를 고르고 누르면 같은 모양이 돼요.`, 3000);
+}
+function myStyleIO() {
+  const m = modal(`<h2>내 스타일 내보내기·불러오기</h2><p class="sub">다른 컴퓨터나 다른 사람과 스타일을 나눌 때 써요. 글꼴은 그 컴퓨터에도 있어야 같은 모양이 나와요.</p>
+    <div class="foot"><button class="btn" id="msIn">파일에서 불러오기</button><button class="btn" id="msOut">파일로 내보내기</button><button class="btn primary" data-close>닫기</button></div>`);
+  $('#msOut', m).addEventListener('click', () => { download(new Blob([JSON.stringify({ potatoTextStyles: 1, styles: myStyles }, null, 1)], { type: 'application/json' }), '감자편집기_내스타일.json'); });
+  $('#msIn', m).addEventListener('click', () => {
+    const f = document.createElement('input'); f.type = 'file'; f.accept = '.json,application/json';
+    f.onchange = async () => {
+      try {
+        const d = JSON.parse(await f.files[0].text()), arr = (d && d.styles) || [];
+        let n = 0; for (const S of arr) { if (!S || !S.p || !S.n) continue; const T = { id: uid(), n: String(S.n).slice(0, 20), p: {}, fs0: +S.fs0 || 40 }; for (const k of TSTYLE_KEYS) if (k in S.p) T.p[k] = S.p[k]; myStyles.push(T); n++; }
+        myStylesSave(); closeModal(); renderProps(); toast(n ? `스타일 ${n}개를 불러왔어요` : '불러올 스타일이 없어요');
+      } catch (e) { toast('스타일 파일을 읽지 못했어요'); }
+    };
+    f.click();
+  });
 }
 function makeStamp(id, cx, cy) {
   const r = images.get(id), pg = page();
@@ -1812,6 +1862,7 @@ function drawOverlay(dpr) {
       }
     }
   }
+  if (ss.length > 1 && !imageEditId && !inlEl && !mode) drawMultiBox();
   if (guides.length) {
     ctx.strokeStyle = GUIDE; ctx.lineWidth = 1;
     for (const g of guides) {
@@ -2151,7 +2202,7 @@ function scaleEl(el, k) { // 크기와 자리를 원점 기준으로 k배
   if (el.type === 'bubble') { el.tx *= k; el.ty *= k; mul(['fs', 'sw', 'tw', 'tsw']); }
   if (el.type === 'text') mul(['fs', 'sw', 'sw2']);
   if (el.type === 'stamp' || el.type === 'draw') mul(['ow']);
-  if (el.type === 'panel') mul(['bw', 'radius']);
+  if (el.type === 'panel') { mul(['bw', 'radius', 'ox', 'oy']); for (const L of el.layers || []) { if (typeof L.ox === 'number') L.ox *= k; if (typeof L.oy === 'number') L.oy *= k; } } // 안쪽 그림 위치도 같이
   if (el.type === 'fx') mul(['str', 'soft', 'pad']);
 }
 function copyToPages(idxs) { // 고른 것을 다른 그림에도 같은 자리에 (그림 크기에 맞춰서)
@@ -2160,12 +2211,14 @@ function copyToPages(idxs) { // 고른 것을 다른 그림에도 같은 자리�
   for (const i of idxs) {
     const p = doc.pages[i]; if (i === doc.cur || !p || p.ph) continue;
     const k = Math.min(p.w / p0.w, p.h / p0.h);
+    const cs = [];
     for (const src of els) {
       const c = clone(src); c.id = uid(); delete c.auto; delete c.inPanel;
       const cx = (src.x + src.w / 2) / p0.w * p.w, cy = (src.y + src.h / 2) / p0.h * p.h;
       scaleEl(c, k); if (c.type === 'text') fitText(c);
-      const nc = center(c); moveBy(c, cx - nc.x, cy - nc.y); p.els.push(c);
+      const nc = center(c); moveBy(c, cx - nc.x, cy - nc.y); p.els.push(c); cs.push(c);
     }
+    lyCopyGroups(cs, p, p0);
     n++;
   }
   if (!n) { toast('넣을 다른 그림이 없어요'); return; }
@@ -2251,6 +2304,7 @@ function updateHover(p) {
   if (spaceDown) cur = 'grab';
   else {
     if (sel.length === 1 && !imageEditId) { const el = findEl(sel[0]); const h = el && hitHandle(el, p); if (h) { scroller.style.cursor = cursorFor(h, el); if (hoverId) { hoverId = null; requestRender(); } return; } }
+    if (sel.length > 1 && !imageEditId) { const h = hitMulti(p); if (h) { scroller.style.cursor = h.kind === 'mrot' ? 'grab' : (h.u === h.v ? 'nwse-resize' : 'nesw-resize'); if (hoverId) { hoverId = null; requestRender(); } return; } }
     const hit = hitTest(p);
     if (hit && !hit.lock) { hid = hit.id; cur = imageEditId === hit.id ? 'grab' : 'move'; }
     else if (hit && hit.lock && xfBase === hit.id) cur = 'move';
@@ -2286,6 +2340,7 @@ function onDown(e) {
       scroller.setPointerCapture(e.pointerId); return;
     }
   }
+  if (sel.length > 1 && !imageEditId) { const h = hitMulti(p); if (h) { drag = multiDrag(h, p); scroller.setPointerCapture(e.pointerId); return; } }
   const hit = hitTest(p);
   if (imageEditId) {
     const el = findEl(imageEditId);
@@ -2309,10 +2364,11 @@ function onDown(e) {
   }
   if (hit) {
     if (hit.type === 'panel' && layerCount(hit) > 1) { const li = layerAt(hit, p); if (li >= 0) activeLayer.set(hit.id, li); }
-    if (e.shiftKey) { sel = sel.includes(hit.id) ? sel.filter(x => x !== hit.id) : [...sel, hit.id]; }
-    else if (!sel.includes(hit.id)) sel = [hit.id];
+    const grp = hit.gid && !e.altKey ? page().els.filter(x => x.gid === hit.gid).map(x => x.id) : [hit.id]; // 묶음은 통째로 (Alt+누르기 = 하나만)
+    if (e.shiftKey) { const on = grp.every(id => sel.includes(id)); sel = on ? sel.filter(x => !grp.includes(x)) : [...new Set([...sel, ...grp])]; }
+    else if (!sel.includes(hit.id)) sel = grp;
     const ss = selEls().filter(o => !o.lock), mv = ss.concat(czLinked(page().els, new Set(ss.filter(x => x.type === 'panel').map(x => x.id))).filter(x => !ss.includes(x)));
-    drag = { mode: 'move', sx: p.x, sy: p.y, start: mv.map(el => ({ el, x: el.x, y: el.y, tx: el.tx, ty: el.ty })), bb: unionBox(ss.map(aabb)), moved: false, clickId: hit.id, shift: e.shiftKey };
+    drag = { mode: 'move', sx: p.x, sy: p.y, start: mv.map(el => ({ el, x: el.x, y: el.y, tx: el.tx, ty: el.ty })), bb: unionBox(ss.map(aabb)), moved: false, clickId: hit.id, shift: e.shiftKey, alt: e.altKey };
   } else {
     if (!e.shiftKey) sel = [];
     drag = { mode: 'marquee', sx: p.x, sy: p.y, base: [...sel] };
@@ -2340,6 +2396,7 @@ function onMove(e) {
     if (snapOn && !e.altKey && d.bb) ({ dx, dy } = snapMove(d.bb, dx, dy));
     for (const s of d.start) { s.el.x = s.x + dx; s.el.y = s.y + dy; if (s.el.type === 'bubble') { s.el.tx = s.tx + dx; s.el.ty = s.ty + dy; } }
   } else if (d.mode === 'resize') doResize(d, p, e);
+  else if (d.mode === 'mscale' || d.mode === 'mrot') multiMove(d, p, e);
   else if (d.mode === 'rotate') {
     let ang = Math.atan2(p.y - d.c.y, p.x - d.c.x) / DEG + 90;
     if (e.shiftKey) ang = Math.round(ang / 15) * 15; else { const r9 = Math.round(ang / 90) * 90; if (Math.abs(ang - r9) < 4) ang = r9; }
@@ -2370,11 +2427,53 @@ function onUp() {
   const d = drag; drag = null; guides = []; marquee = null;
   if (!d) return;
   if (d.mode === 'pan') { scroller.style.cursor = spaceDown ? 'grab' : (mode ? 'crosshair' : 'default'); return; }
-  if (d.mode === 'move' && !d.moved && !d.shift && sel.length > 1) sel = [d.clickId];
+  if (d.mode === 'move' && !d.moved && !d.shift) { const h = findEl(d.clickId); if (h && h.gid && !d.alt) sel = page().els.filter(x => x.gid === h.gid).map(x => x.id); else if (sel.length > 1) sel = [d.clickId]; } // 그냥 누르면 묶음째, Alt+누르기는 하나만
   if (d.mode === 'marquee' && d.lockClick && !d.moved) sel = [d.lockClick];
-  if (d.mode !== 'marquee') { e2SetHint({ move: '옮기기', resize: '크기 바꾸기', rotate: '돌리기', tail: '말풍선 꼬리', panimg: '그림 위치' }[d.mode] || ''); commit(); }
+  if (d.mode !== 'marquee') { e2SetHint({ move: '옮기기', resize: '크기 바꾸기', rotate: '돌리기', tail: '말풍선 꼬리', panimg: '그림 위치', mscale: '여러 개 크기', mrot: '여러 개 돌리기' }[d.mode] || ''); commit(); }
   if (d.mode === 'panimg') scroller.style.cursor = 'grab';
   renderProps(); requestRender();
+}
+// 여러 개(묶음) 같이 크기 바꾸기·돌리기: 고른 것 전체를 감싸는 상자의 모서리와 위 동그라미
+const multiEls = () => { const ss = selEls().filter(o => !o.lock); return ss.concat(czLinked(page().els, new Set(ss.filter(x => x.type === 'panel').map(x => x.id))).filter(x => !ss.includes(x))); };
+function multiBox() { const ss = selEls().filter(o => !o.lock); return ss.length > 1 ? unionBox(ss.map(aabb)) : null; }
+function multiHandles() {
+  if (sel.length < 2 || imageEditId || inlEl || mode) return [];
+  const b = multiBox(); if (!b) return [];
+  const hs = [[0, 0], [1, 0], [1, 1], [0, 1]].map(([u, v]) => ({ kind: 'mscale', u, v, x: b.x + u * b.w, y: b.y + v * b.h, ax: b.x + (1 - u) * b.w, ay: b.y + (1 - v) * b.h }));
+  hs.push({ kind: 'mrot', x: b.x + b.w / 2, y: b.y - 28 / zoom });
+  return hs;
+}
+function hitMulti(p) { let best = null, bd = 11; for (const h of multiHandles()) { const d = Math.hypot(h.x - p.x, h.y - p.y) * zoom; if (d < bd) { best = h; bd = d; } } return best; }
+function multiDrag(h, p) {
+  const els = multiEls(), b = multiBox(), c = { x: b.x + b.w / 2, y: b.y + b.h / 2 };
+  return h.kind === 'mscale' ? { mode: 'mscale', h, els, o: els.map(clone), d0: Math.max(1e-3, Math.hypot(h.x - h.ax, h.y - h.ay)) }
+    : { mode: 'mrot', c, els, o: els.map(clone), a0: Math.atan2(p.y - c.y, p.x - c.x) };
+}
+function restoreEl(el, o) { for (const k of Object.keys(el)) if (!(k in o)) delete el[k]; Object.assign(el, clone(o)); }
+function multiMove(d, p, e) {
+  if (d.mode === 'mscale') {
+    const h = d.h, vx = h.x - h.ax, vy = h.y - h.ay, k = clamp(((p.x - h.ax) * vx + (p.y - h.ay) * vy) / (d.d0 * d.d0), 0.03, 40);
+    d.els.forEach((el, i) => { restoreEl(el, d.o[i]); moveBy(el, -h.ax, -h.ay); scaleEl(el, k); moveBy(el, h.ax, h.ay); });
+    return;
+  }
+  let a = (Math.atan2(p.y - d.c.y, p.x - d.c.x) - d.a0) / DEG;
+  if (e.shiftKey) a = Math.round(a / 15) * 15;
+  d.els.forEach((el, i) => {
+    const o = d.o[i]; restoreEl(el, o);
+    const c0 = center(o), r = rot(c0.x - d.c.x, c0.y - d.c.y, a * DEG); moveBy(el, d.c.x + r.x - c0.x, d.c.y + r.y - c0.y);
+    if (el.type === 'bubble') { const t = rot(o.tx - d.c.x, o.ty - d.c.y, a * DEG); el.tx = d.c.x + t.x; el.ty = d.c.y + t.y; }
+    if (el.type !== 'fx') { const g = (((o.rot || 0) + a + 180) % 360 + 360) % 360 - 180; el.rot = Math.round(g * 10) / 10; if (!el.rot) delete el.rot; }
+  });
+}
+function drawMultiBox() {
+  const hs = multiHandles(); if (!hs.length) return;
+  const b = multiBox(), a = S({ x: b.x, y: b.y }), c = S({ x: b.x + b.w, y: b.y + b.h }), r = hs[4], rs = S(r);
+  ctx.save(); ctx.strokeStyle = BLUE; ctx.setLineDash([5, 4]); ctx.lineWidth = 1.2; ctx.strokeRect(a.x, a.y, c.x - a.x, c.y - a.y); ctx.setLineDash([]);
+  ctx.beginPath(); ctx.moveTo((a.x + c.x) / 2, a.y); ctx.lineTo(rs.x, rs.y); ctx.lineWidth = 1; ctx.stroke();
+  ctx.beginPath(); ctx.arc(rs.x, rs.y, 6, 0, Math.PI * 2); ctx.fillStyle = '#fff'; ctx.fill(); ctx.lineWidth = 1.5; ctx.stroke();
+  ctx.beginPath(); ctx.arc(rs.x, rs.y, 2.6, -0.3, Math.PI * 1.4); ctx.lineWidth = 1.2; ctx.stroke();
+  for (const h of hs.slice(0, 4)) { const q = S(h); ctx.fillStyle = '#fff'; ctx.lineWidth = 1.5; ctx.fillRect(q.x - 4.5, q.y - 4.5, 9, 9); ctx.strokeRect(q.x - 4.5, q.y - 4.5, 9, 9); }
+  ctx.restore();
 }
 function doResize(d, p, e) {
   const o = d.o, el = d.el, a = (o.rot || 0) * DEG, c0 = center(o);
@@ -2718,6 +2817,9 @@ function textProps(el) {
     <p class="muted small">모서리를 끌면 글자 크기가 함께 바뀌어요.</p>
     <p class="muted small" style="margin:8px 0 4px">스타일 한 번에 바꾸기</p>
     <div class="sfxbtns">${TEXT_STYLES.map((t, i) => `<button class="btn" data-act="tstyle" data-v="${i}">${t.n}</button>`).join('')}</div>
+    <p class="muted small" style="margin:10px 0 4px">내 스타일 <span title="글꼴·색·테두리·후광·그림자·띠 같은 꾸밈을 저장해요(글자 크기는 빼고). 모든 작업과 움짤 글자에서 써요.">ⓘ</span></p>
+    ${myStylesHtml('mystyle')}
+    <div class="btnrow"><button class="btn sm" data-act="mystyle-save" title="지금 글자의 꾸밈을 이름 붙여 저장해요">+ 지금 모양 저장</button>${myStyles.length ? '<button class="btn sm" data-act="mystyle-io" title="내 스타일을 파일로 내보내거나 불러와요">내보내기·불러오기</button>' : ''}</div>
     <div class="btnrow"><button class="btn sm" data-act="e2-tsplit" title="글자마다 따로 옮기고 돌릴 수 있게 나눠요">한 글자씩 나누기</button></div></div>
   ${sec('tglow', '후광 (빛 번짐)', `
     ${row('크기', range('glow', 0, 100, 1))}
@@ -2797,8 +2899,11 @@ function fxProps(el) {
   </div>${commonSec()}`;
 }
 function multiProps() {
-  const ss = selEls(), n = ss.length, panels = ss.filter(e => e.type === 'panel').length;
-  return `<div class="sec"><h3>${n}개 선택됨</h3>
+  const ss = selEls(), n = ss.length, panels = ss.filter(e => e.type === 'panel').length, p = page();
+  const gids = [...new Set(ss.map(e => e.gid).filter(Boolean))], G = gids.length === 1 && ss.every(e => e.gid === gids[0]) && lyMembers(p, gids[0]).length === n ? lyGroupOf(p, gids[0]) : null;
+  return `<div class="sec"><h3>${G ? `${esc(G.name)} <span class="muted small">묶음 · ${n}개</span>` : `${n}개 선택됨`}</h3>
+    <div class="btnrow">${G ? '' : '<button class="btn sm" data-act="e2-group" title="Ctrl+G">묶기</button>'}${gids.length ? '<button class="btn sm" data-act="e2-ungroup" title="Ctrl+Shift+G">묶음 풀기</button>' : ''}${isImg() && ss.filter(e => !e.lock).length > 1 ? '<button class="btn sm" data-act="e2-merge" title="그림 레이어 하나로 합쳐요">합치기</button>' : ''}</div>
+    <p class="muted small">둘레 상자의 모서리를 끌면 같이 크기가 바뀌고, 위 동그라미로 같이 돌려요(<kbd>Shift</kbd> 15°씩).${G ? ' 하나만 고르려면 <kbd>Alt</kbd>+누르기.' : ''}</p>
     <p class="muted small">선택한 것들끼리 줄 맞추기</p>
     <div class="btnrow"><button class="btn sm" data-act="al-left">왼쪽</button><button class="btn sm" data-act="al-hc">가로 가운데</button><button class="btn sm" data-act="al-right">오른쪽</button></div>
     <div class="btnrow"><button class="btn sm" data-act="al-top">위</button><button class="btn sm" data-act="al-vc">세로 가운데</button><button class="btn sm" data-act="al-bottom">아래</button></div>
@@ -2964,6 +3069,11 @@ function doAct(act, v) {
     case 'unclip': if (el) delete el.clips; break;
     case 'sfx': if (el) { const p = SFX_PRESETS[+v]; Object.assign(el, clone(p.p)); fitText(el); } break;
     case 'tstyle': for (const o of ss) if (o.type === 'text') { Object.assign(o, clone(TEXT_STYLES[+v].p)); fitText(o); } break;
+    case 'mystyle': { const S = myStyleById(v); if (S) for (const o of ss) if (o.type === 'text') { styleApply(o, S); fitText(o); } break; }
+    case 'mystyle-save': { if (!el || el.type !== 'text') return; myStyleSaveFrom(el); return; }
+    case 'mystyle-del': { const S = myStyleById(v); if (S && confirm(`'${S.n}' 스타일을 지울까요?`)) { myStyles = myStyles.filter(x => x !== S); if (myStyleDef === S.id) myStyleDef = null; myStylesSave(); renderProps(); } return; }
+    case 'mystyle-def': { myStyleDef = myStyleDef === v ? null : v; myStylesSave(); renderProps(); toast(myStyleDef ? '새로 넣는 글자가 이 모양으로 나와요' : '새 글자 기본 모양을 원래대로 돌렸어요'); return; }
+    case 'mystyle-io': myStyleIO(); return;
     case 'tgrad': for (const o of ss) if (o.type === 'text') o.gradDir = v; break;
     case 'stamp-white': if (el) stampWhite(el); return;
     case 'stamp-var': if (el) switchPackVariant(el, v); break;
@@ -3038,14 +3148,14 @@ function distributeSel(vert) {
 function duplicateSel() {
   const ss = selEls().filter(o => !o.lock); if (!ss.length) return;
   const copies = ss.map(o => { const c = clone(o); c.id = uid(); moveBy(c, 24, 24); return c; });
-  page().els.push(...copies); sel = copies.map(c => c.id); e2SetHint('복제'); commit(); renderProps(); requestRender();
+  page().els.push(...copies); lyCopyGroups(copies, page()); sel = copies.map(c => c.id); e2SetHint('복제'); commit(); renderProps(); requestRender(); renderLayersSoon();
 }
 function deleteSel() {
   if (!sel.length) return;
   const ids = new Set(sel.filter(id => { const el = findEl(id); return el && !el.lock; }));
   if (!ids.size) { toast('바탕 그림은 지울 수 없어요. 목록에서 빼려면 왼쪽 그림의 ×를 누르세요.', 3200); return; }
   for (const f of czLinked(page().els, ids)) ids.add(f.id); // 지운 컷의 자동 흰칠도 같이
-  page().els = page().els.filter(e => !ids.has(e.id)); sel = []; imageEditId = null; e2SetHint('지우기'); commit(); renderProps(); requestRender();
+  page().els = page().els.filter(e => !ids.has(e.id)); lyFixGroups(page()); sel = []; imageEditId = null; e2SetHint('지우기'); commit(); renderProps(); requestRender();
 }
 
 /*@@ADV@@*/
@@ -4030,13 +4140,16 @@ function openHelp() {
       <li><b>그림·폴더 넣기</b>: 왼쪽 '+ 그림', '+ 폴더째' 또는 그림·폴더를 화면에 끌어오기. 폴더째 넣으면 폴더 이름 그대로 묶여요. '새 폴더'로 폴더를 만들고 그림을 폴더 이름 위로 끌어다 놓아 정리해요. 복사한 그림은 <kbd>Ctrl</kbd>+<kbd>V</kbd>.</li>
       <li><b>이미지 편집</b>: 왼쪽 목록에서 그림을 골라 고쳐요(<kbd>PageUp</kbd>/<kbd>PageDown</kbd>로 넘기기). 바탕 그림은 고정돼 있어요. 위쪽 '자르기', 오른쪽 '돌리기·뒤집기'를 쓸 수 있고, 글자를 고른 뒤 '다른 그림에도 넣기'로 서명을 한 번에 넣어요. <kbd>Ctrl</kbd>+<kbd>Z</kbd>는 지금 보고 있는 그림에서 한 일만 되돌려요(다른 그림으로 넘어가지 않아요).</li>
       <li><b>자유 변형</b> (이미지 편집): 다른 그림을 '레이어 ▾ → 그림 넣기…'로 넣거나 화면에 끌어와 '레이어로 넣기'를 고르면 그림 레이어가 돼요. 끌어서 옮기고, 모서리로 크기(비율 유지), 위 동그라미로 돌려요(<kbd>Shift</kbd> 15°씩). 바탕 그림은 <kbd>Ctrl</kbd>+<kbd>T</kbd>(또는 오른쪽 '자유 변형')로 풀어서 움직이고 <kbd>Enter</kbd>로 끝내요. 오른쪽에서 배율·각도를 숫자로 넣거나 '가운데로·캔버스에 맞추기·꽉 채우기·원래대로'를 써요.</li>
-      <li><b>레이어 합치기</b> (이미지 편집): 레이어 탭에서 여러 개를 골라 '고른 것 합치기'를 누르면 그림 레이어 하나가 돼요. 아무것도 안 고르고 '모두 합치기'를 누르면 보이는 것 전부를 바탕 그림 한 장으로 굳혀요. 둘 다 <kbd>Ctrl</kbd>+<kbd>Z</kbd>로 되돌릴 수 있어요.</li>
+      <li><b>레이어 합치기</b> (이미지 편집): 레이어 탭에서 여러 개를 골라 '고른 것 합치기'를 누르면 그림 레이어 하나가 돼요. 하나만 골라 '아래와 합치기'를 누르면 바로 아래 레이어와 합쳐지고, 아래가 바탕 그림이면 바탕에 굳혀요(보정 레이어·가리기도 돼요). 아무것도 안 고르고 '모두 합치기'를 누르면 보이는 것 전부를 바탕 그림 한 장으로 굳혀요. 모두 <kbd>Ctrl</kbd>+<kbd>Z</kbd>로 되돌릴 수 있어요.</li>
+      <li><b>레이어 묶기</b>: 여러 개를 골라 <kbd>Ctrl</kbd>+<kbd>G</kbd>(또는 레이어 탭 '묶기'). 화면에서 누르면 묶음째 골라지고 같이 움직여요. 하나만 고르려면 <kbd>Alt</kbd>+누르기나 레이어 탭에서 누르기. 묶음 줄의 ▾로 접고 펼치고, 눈·자물쇠로 한꺼번에 숨기거나 잠그고, 두 번 눌러 이름을 바꿔요. 레이어를 묶음 안으로 끌어 넣거나 밖으로 끌어 뺄 수 있고, <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd>로 풀어요.</li>
+      <li><b>여러 개 같이 바꾸기</b>: 여러 개(묶음)를 고르면 둘레 상자가 생겨요. 모서리를 끌면 같이 크기가 바뀌고, 위 동그라미로 같이 돌려요.</li>
       <li><b>컷 만들기</b>: 보관함 그림을 캔버스로 끌어다 놓기. 컷 위에 놓으면 그 컷 안으로 들어가요. 웹툰은 '세로로 자동 배치'가 가장 빨라요.</li>
       <li><b>컷 자르기</b>: 위쪽 '컷 나누기'에서 직선이나 곡선을 고르고, 컷을 가로질러 선을 그어요.</li>
       <li><b>컷 안에서 그림 옮기기</b>: 컷을 더블클릭한 뒤 끌기, 마우스 휠로 크기 조절. 투명한 그림은 레이어로 겹쳐져요(한 컷에 10장).</li>
       <li><b>분위기</b>: 컷이나 바탕 그림을 고르고 오른쪽에서 보정, 분위기, 스크린톤, 효과선을 넣어요.</li>
       <li><b>말풍선</b>: 모양을 골라 넣고, 더블클릭해서 대사를 고치고, 파란 동그라미로 꼬리 방향을 바꿔요. 글자 테두리와 기울임도 있어요.</li>
       <li><b>글자</b>: 오른쪽 '스타일 한 번에 바꾸기'로 네온, 그림자, 자막 띠, 금빛, 아치, 세로쓰기를 고르고, 후광(빛 번짐)·그림자·배경 띠를 따로 조절할 수 있어요.</li>
+      <li><b>내 스타일</b>: 꾸민 글자를 고르고 '+ 지금 모양 저장'을 누르면 글꼴·색·테두리·후광·그림자·띠가 저장돼요(크기는 빼고, 테두리는 글자 크기에 맞춰 바뀌어요). 다른 글자를 고르고 누르면 같은 모양이 되고, ☆을 누르면 새로 넣는 글자가 그 모양으로 나와요. 모든 작업과 움짤 글자('꾸밈')에서 쓰고, 파일로 내보내거나 불러올 수 있어요.</li>
       <li><b>효과음</b>: 왼쪽 '효과음' 탭에서 클릭하거나 끌어다 놓아요. 위쪽 '펜'으로 직접 그릴 수도 있어요(태블릿 필압 지원).</li>
       <li><b>가리기</b>: 위쪽 '가리기'에서 블러, 모자이크, 흰칠을 골라 칠해요. '지우개'(<kbd>E</kbd>)로 이미 가린 곳(자동 흰칠 포함)을 지울 수 있고, '칠하기'(<kbd>B</kbd>)로 돌아와요. 다 하면 <kbd>Enter</kbd>.</li>
       <li><b>자동 흰칠</b>: '자동 흰칠'에서 이 페이지(이미지 편집이면 모든 그림, 이 폴더)를 고르면 성기 모양을 따라 흰칠해요(유두는 그대로). '빠르게'와 '정밀하게'는 설정에서 바꿔요. 잘못 칠한 곳은 지우개로, 빠진 곳은 칠하기로 고쳐요. 모두 이 컴퓨터 안에서만 처리돼요.</li>
@@ -4131,6 +4244,7 @@ document.addEventListener('keydown', e => {
   if (mod && k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
   if (mod && k === 'y') { e.preventDefault(); redo(); return; }
   if (mod && k === 'd') { e.preventDefault(); duplicateSel(); return; }
+  if (mod && k === 'g') { e.preventDefault(); e.shiftKey ? lyUngroup() : lyGroup(); return; }
   if (mod && k === 'a') { e.preventDefault(); sel = page().els.filter(x => !x.lock).map(x => x.id); renderProps(); requestRender(); return; }
   if (mod && (k === '=' || k === '+')) { e.preventDefault(); zoomStep(1); return; }
   if (mod && k === '-') { e.preventDefault(); zoomStep(-1); return; }
@@ -4175,7 +4289,7 @@ document.addEventListener('paste', async e => {
   if (clip && clip.length) {
     e.preventDefault();
     for (const id of clipRefs(clip)) if (!images.has(id) && clipImgs.has(id)) { const { pj, k, ...r } = clipImgs.get(id); addImageRecord({ ...r, kind: isImg() ? 'stamp' : r.kind }, true); } // 다른 탭에서 복사한 그림
-    const copies = clip.map(o => { const c = clone(o); c.id = uid(); moveBy(c, 24, 24); return c; });
+    const copies = clip.map(o => { const c = clone(o); c.id = uid(); moveBy(c, 24, 24); return c; }); lyCopyGroups(copies, page());
     clip = copies.map(clone); page().els.push(...copies); sel = copies.map(c => c.id); commit(); renderProps(); requestRender();
   }
 });

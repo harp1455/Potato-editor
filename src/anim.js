@@ -536,7 +536,8 @@ function ovPropsHtml(o) {
       ${row('글자색', `<input type="color" data-gk="o.st.color" value="${st.color || '#ffffff'}"><label class="chk"><input type="checkbox" data-gk="o.st.bold" ${st.bold ? 'checked' : ''}> 굵게</label>`)}
       ${row('테두리', `<input type="color" data-gk="o.st.sc" value="${st.sc || '#111111'}">${rng('o.st.sw', st.sw ?? 0, 0, 30, 1)}`)}
       ${row('후광', `<input type="color" data-gk="o.st.glowColor" value="${st.glowColor || '#ffe25c'}">${rng('o.st.glow', st.glow ?? 0, 0, 80, 1)}`)}
-      ${row('꾸밈', `<select data-gk="o.style"><option value="">편집기 글자 꾸밈…</option>${TEXT_STYLES.map((s, i) => `<option value="${i}">${esc(s.n)}</option>`).join('')}</select>`)}</div>`;
+      ${row('꾸밈', `<select data-gk="o.style"><option value="">편집기 글자 꾸밈…</option>${TEXT_STYLES.map((s, i) => `<option value="${i}">${esc(s.n)}</option>`).join('')}${myStyles.length ? `<optgroup label="내 스타일">${myStyles.map(S => `<option value="m:${S.id}">${esc(S.n)}</option>`).join('')}</optgroup>` : ''}</select>`)}
+      <div class="btnrow"><button class="btn sm" data-g="ov-stsave" title="이 글자의 꾸밈을 '내 스타일'로 저장해요 (편집기 글자에서도 써요)">+ 내 스타일로 저장</button></div></div>`;
   else h += `<div class="sec"><h3>그림 스티커</h3>${row('크기', rng('o.size', o.size || 300, 30, 1200, 5))}</div>`;
   h += `<div class="sec"><h3>자리</h3>
       ${row('자리', `<div class="seg"><button class="btn sm" data-g="ov-pos" data-v="top">위</button><button class="btn sm" data-g="ov-pos" data-v="mid">가운데</button><button class="btn sm" data-g="ov-pos" data-v="bot">아래</button></div>`)}
@@ -584,7 +585,7 @@ function ovSetKey(k, t) {
   const tgt = k[0] === 'o' ? gs.ovs.find(x => x.id === gs.osel) : gs.fx.find(x => x.id === gs.fsel); if (!tgt) return false;
   const path = k.split('.').slice(1);
   let v = t.type === 'checkbox' ? t.checked : t.value;
-  if (path[0] === 'style') { const S = TEXT_STYLES[+v]; if (S) Object.assign(tgt.st, clone(S.p)); t.value = ''; return 'props'; }
+  if (path[0] === 'style') { if (String(v).startsWith('m:')) { const M = myStyleById(v.slice(2)); if (M) styleApply(tgt.st, M, true); } else { const S = TEXT_STYLES[+v]; if (S) Object.assign(tgt.st, clone(S.p)); } t.value = ''; return 'props'; }
   if (path[0] === 't1' && v === '') v = null;
   else if (t.type === 'number' || t.type === 'range') { v = parseFloat(v); if (!isFinite(v)) return false; }
   if (path[0] === 't0' || path[0] === 't1') { if (v != null) v = clamp(v, 0, Math.max(0, gsTotal())); }
@@ -641,6 +642,7 @@ function ovClick(a, b, at) {
   else if (a === 'ov-dup') { const x = { ...clone({ ...o, bmp: null }), id: uid(), bmp: o.bmp, x: Math.min(0.95, o.x + 0.03), y: Math.min(0.95, o.y + 0.03), lane: null }; x.lane = laneFor(gs.ovs, x); gs.ovs.push(x); laneFix(gs.ovs); gs.osel = x.id; done(); }
   else if (a === 'ov-front' || a === 'ov-back') { o.lane = a === 'ov-front' ? gs.ovs.reduce((m, x) => Math.max(m, x.lane ?? 0), 0) + 1 : -1; laneFix(gs.ovs); done(); }
   else if (a === 'ov-pre') { ovApplyPreset(o, OV_PRESETS[+b.dataset.v]); done(); gsPlayFrom(o.t0 || 0); }
+  else if (a === 'ov-stsave') { if (o.kind === 'text') myStyleSaveFrom(o.st); }
   else if (a === 'ov-pos') { o.y = { top: 0.15, mid: 0.5, bot: 0.84 }[b.dataset.v]; o.x = 0.5; done(); }
   else if (a === 'ov-now0') { o.t0 = now; if (o.t1 != null && o.t1 <= now) o.t1 = null; if (!laneFree(gs.ovs, o, o.lane)) o.lane = laneFor(gs.ovs, o); laneFix(gs.ovs); done(); }
   else if (a === 'ov-now1') { o.t1 = Math.max((o.t0 || 0) + 0.1, now); done(); }
