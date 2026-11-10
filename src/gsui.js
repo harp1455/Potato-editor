@@ -14,6 +14,11 @@ const gpI = (k, cls = '') => `<svg class="gpi ${cls}" viewBox="0 0 16 16" aria-h
 const fmtTC = t => { t = Math.max(0, t || 0); const m = Math.floor(t / 60), s = t - m * 60; return `${m}:${s.toFixed(2).padStart(5, '0')}`; };
 const FX_ICON = { snow: '❄️', rain: '🌧️', sakura: '🌸', hearts: '💗', sparkle: '✨', stars: '⭐', confetti: '🎊', bubbles: '🫧', embers: '🔥', bokeh: '🟡', focus: '✳️', speed: '💨', shake: '〰️', zoom: '🔍', flash: '⚡', invert: '◐', glitch: '📺', vhs: '📼', grain: '🎞️', leak: '☀️', vignette: '⭕', bw: '◑', 'cam-rec': '🔴', 'cam-phone': '📱', 'cam-vf': '🎯', 'cam-vhs': '📼', 'cam-cctv': '📹', 'cam-film': '🎞️', 'cam-letterbox': '🎬' };
 Object.assign(gs, { lib: 'media', tool: 'sel', snap: true, pps: 80, zoomFit: true, trSel: -1, preOpen: false });
+// 시간 막대 줄 종류: o = 글자·스티커, f = 효과, a = 소리
+const tlL = k => k === 'o' ? gs.ovs : k === 'f' ? gs.fx : (gs.au || (gs.au = []));
+const tlT1 = (k, x) => k === 'o' ? ovT1(x) : k === 'f' ? fxT1(x) : auT1(x);
+const tlSelId = k => k === 'o' ? gs.osel : k === 'f' ? gs.fsel : gs.asel;
+function tlSelect(k, x) { if (k === 'o') { gs.osel = x.id; gs.focus = 'ov'; } else if (k === 'f') { gs.fsel = x.id; gs.focus = 'fx'; } else { gs.asel = x.id; gs.focus = 'au'; } }
 
 /* ---- 화면 만들기 ---- */
 function buildGifStudio() {
@@ -45,7 +50,7 @@ function buildGifStudio() {
       <div class="gp-tbar" id="gpTbar"></div>
       <div class="gp-scroll" id="gpScroll"><div class="gp-rows" id="gpRows"></div></div>
     </section>
-    <input type="file" id="gsFile" accept="image/*,video/*" multiple hidden>`;
+    <input type="file" id="gsFile" accept="image/*,video/*,audio/*" multiple hidden>`;
   document.body.appendChild(d);
   d.addEventListener('click', gsClick);
   $('#gsProps').addEventListener('input', gsInput); $('#gsProps').addEventListener('change', gsInput);
@@ -86,11 +91,11 @@ function gsDraw() {
 function gsPlay() {
   if (!gs.slides.length) return; gs.playing = true; const b = $('#gsPlay'); b.innerHTML = gpI('pause'); b.classList.add('on');
   const T = gsTotal(); if (gs.t >= T - 0.01) gs.t = 0;
-  gs.start = performance.now() - gs.t * 1000;
-  const step = now => { if (!gs.playing) return; const T = gsTotal(); gs.t = ((now - gs.start) / 1000); if (gs.t >= T) { if (gs.set.loop) { gs.start = now; gs.t = 0; } else { gs.t = T; gsPause(); gsDraw(); return; } } gsDraw(); gs.raf = requestAnimationFrame(step); };
+  gs.start = performance.now() - gs.t * 1000; auPlayStart();
+  const step = now => { if (!gs.playing) return; const T = gsTotal(); gs.t = ((now - gs.start) / 1000); if (gs.t >= T) { if (gs.set.loop) { gs.start = now; gs.t = 0; auPlayStart(); } else { gs.t = T; gsPause(); gsDraw(); return; } } gsDraw(); gs.raf = requestAnimationFrame(step); };
   gs.raf = requestAnimationFrame(step);
 }
-function gsPause() { const was = gs.playing; gs.playing = false; cancelAnimationFrame(gs.raf); const b = $('#gsPlay'); if (b) { b.innerHTML = gpI('play'); b.classList.remove('on'); } if (was) gsDraw(); }
+function gsPause() { const was = gs.playing; gs.playing = false; cancelAnimationFrame(gs.raf); auPlayStop(); const b = $('#gsPlay'); if (b) { b.innerHTML = gpI('play'); b.classList.remove('on'); } if (was) gsDraw(); }
 function gpSeek(t) { gsPause(); gs.t = clamp(t, 0, gsTotal()); gsDraw(); }
 const gsStarts = () => { const a = []; let acc = 0; for (const s of gs.slides) { a.push(acc); acc += gsDur(s); } a.push(acc); return a; };
 const gsSceneAt = t => { const st = gsStarts(); for (let i = gs.slides.length - 1; i >= 0; i--) if (t >= st[i] - 1e-9) return i; return 0; };
@@ -205,7 +210,8 @@ function gsApplyTrans(i, v) {
 function gsRenderProps() {
   const el = $('#gsProps'); if (!el) return;
   const S = gs.slides, s = S[gs.sel], o = gs.ovs.find(x => x.id === gs.osel), f = gs.fx.find(x => x.id === gs.fsel), set = gs.set;
-  if ((gs.focus === 'ov' && !o) || (gs.focus === 'fx' && !f) || ((gs.focus === 'scene' || gs.focus === 'tr') && !s) || (gs.focus === 'tr' && gs.sel < 1)) gs.focus = 'set';
+  const au = (gs.au || []).find(x => x.id === gs.asel);
+  if ((gs.focus === 'ov' && !o) || (gs.focus === 'fx' && !f) || (gs.focus === 'au' && !au) || ((gs.focus === 'scene' || gs.focus === 'tr') && !s) || (gs.focus === 'tr' && gs.sel < 1)) gs.focus = 'set';
   const opt = (arr, cur) => arr.map(([v, l]) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${l}</option>`).join('');
   let k = '전체', head = '움짤 전체 설정', body = '';
   if (gs.focus === 'scene' && gs.pick.size > 1) { k = '장면'; head = `고른 장면 ${gs.pick.size}개`; body = gsBatchHtml() + (S[gs.sel] ? `<div class="sec">${gsXfHtml(S[gs.sel], 0)}</div>` : ''); }
@@ -218,6 +224,7 @@ function gsRenderProps() {
         ${row('맞추기', `<select data-gk="s.fit"><option value="">전체 설정 따름</option>${opt([['cover', '꽉 채우기'], ['contain', '전체 보이기']], s.fit ?? '')}</select>`)}
         <p class="gp-tip">시간 막대에서 장면 오른쪽 끝을 끌면 길이가 바뀌고, 가운데를 끌면 순서가 바뀌어요.</p>
         ${gsXfHtml(s, nClip)}
+        ${nClip > 1 ? `<div class="btnrow"><button class="btn sm" data-g="pick-clip" data-v="${s.clip}" title="이 GIF·영상 장면을 모두 고르면 오른쪽에 'AI로 부드럽게'가 나와요">AI로 부드럽게 (중간 장면)…</button></div>` : `<div class="btnrow"><button class="btn sm" data-g="ai-para" title="AI가 잰 거리대로 앞뒤를 나눠 카메라가 움직이는 것 같은 장면들로 바꿔요">입체 움직임 (AI 깊이)…</button></div>`}
         <div class="btnrow"><button class="btn sm" data-g="dup" title="Ctrl+D">복제</button><button class="btn sm" data-g="split" title="재생 위치에서 두 장면으로 (Ctrl+K)">재생 위치에서 나누기</button><button class="btn sm danger" data-g="del-sel">빼기</button></div>
         ${nClip > 1 ? `<div class="btnrow"><button class="btn sm" data-g="pick-clip" data-v="${s.clip}" title="같은 GIF·영상에서 나온 장면을 모두 골라 속도·거꾸로·부메랑을 한꺼번에">이 GIF·영상 장면 모두 고르기 (${nClip}장)</button></div>` : ''}</div>
       ${gs.sel > 0 ? `<div class="sec"><h3>들어올 때 넘김</h3>${row('넘김', gsTransSel('s.tr', s.tr ?? '', true))}${row('길이', `<input type="number" data-gk="s.trd" min="0.05" max="3" step="0.05" value="${s.trd ?? ''}" placeholder="${set.trDur}"> 초`)}</div>` : ''}`;
@@ -234,6 +241,8 @@ function gsRenderProps() {
     body = ovPropsHtml(o);
   } else if (gs.focus === 'fx') {
     k = '효과'; head = `${FX_ICON[f.kind] || ''} ${esc(FXK[f.kind][1])}`; body = fxPropsHtml(f);
+  } else if (gs.focus === 'au') {
+    k = '소리'; head = '♪ ' + esc(au.name || '소리'); body = auPropsHtml(au);
   } else {
     body = `<div class="sec"><h3>화면</h3>
         ${row('크기', `<select data-gk="size">${opt(GS_SIZES, set.size)}</select>`)}
@@ -260,9 +269,11 @@ function gsXfHtml(s, nClip) { // 장면 그림 위치·크기·회전
   return `<h4 class="advh">그림 위치·크기·회전</h4>
     <div class="grid2"><span>가로 위치</span><span class="gp-nu"><input type="number" data-gk="sx.tx" step="1" value="${n((s.tx || 0) * 100)}">%</span><span>세로 위치</span><span class="gp-nu"><input type="number" data-gk="sx.ty" step="1" value="${n((s.ty || 0) * 100)}">%</span>
       <span>크기</span><span class="gp-nu"><input type="number" data-gk="sx.tz" min="5" max="2000" step="1" value="${n((s.tz || 1) * 100)}">%</span><span>회전</span><span class="gp-nu"><input type="number" data-gk="sx.trot" min="-180" max="180" step="1" value="${n(s.trot || 0)}">°</span></div>
+    <div class="grid2"><span>불투명도</span><span class="gp-nu"><input type="number" data-gk="sx.op" min="0" max="100" step="5" value="${n((s.op ?? 1) * 100)}">%</span></div>
     ${row('뒤집기', `<label class="chk"><input type="checkbox" data-gk="sx.tflip" ${s.tflip ? 'checked' : ''}> 좌우 뒤집기</label>`)}
     <div class="btnrow"><button class="btn sm" data-g="xf-center">가운데로</button><button class="btn sm" data-g="xf-reset" ${xf ? '' : 'disabled'}>원래대로</button><button class="btn sm" data-g="xf-all" title="이 위치·크기·회전을 모든 장면에">모든 장면에 같게</button></div>
-    <p class="gp-tip">미리보기에서 그림을 끌면 옮겨지고, 모서리를 끌거나 휠을 돌리면 크기, 위쪽 동그라미로 돌려요(Shift = 15°씩).${nClip > 1 ? ' 같은 GIF·영상에서 나온 장면은 함께 움직여요.' : ''}</p>`;
+    <p class="gp-tip">미리보기에서 그림을 끌면 옮겨지고, 모서리를 끌거나 휠을 돌리면 크기, 위쪽 동그라미로 돌려요(Shift = 15°씩).${nClip > 1 ? ' 같은 GIF·영상에서 나온 장면은 함께 움직여요.' : ''}</p>
+    ${kfHtml((kfOwner(s) || s).kf, gsStarts()[gs.slides.indexOf(kfOwner(s) || s)] || 0)}`;
 }
 function gsSaveHtml() {
   const set = gs.set, opt = (arr, cur) => arr.map(([v, l]) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${l}</option>`).join('');
@@ -274,7 +285,8 @@ function gsSaveHtml() {
       ${row('용량 맞추기', `<input type="number" data-gk="target" min="0" max="500" step="0.5" value="${set.target || 0}" style="width:64px" title="0이면 안 맞춰요"> MB 이하`)}
       <div class="btnrow"><button class="btn sm" data-g="est">예상 용량 보기</button><span class="muted small" id="gsEst"></span></div>
       <div class="btnrow"><button class="btn primary" data-g="export" id="gsExport" ${gs.slides.length ? '' : 'disabled'}>${set.fmt === 'gif' ? 'GIF로 저장' : set.fmt === 'mp4' ? 'MP4로 저장' : 'WebP로 저장'}</button></div>
-      <p class="muted small">GIF는 256색이라 사진은 조금 거칠어질 수 있어요. 움직이는 WebP가 더 선명하고 가벼워요. MP4는 가장 가볍지만 소리 없는 영상이에요. 용량을 정하면 넘을 때 화질·색 수·크기를 줄여 다시 만들어요.</p></div>`;
+      ${(gs.au || []).some(a => !a.hidden) && set.fmt !== 'mp4' ? '<p class="gp-tip warn">넣은 소리는 MP4로 저장할 때만 들어가요.</p>' : ''}
+      <p class="muted small">GIF는 256색이라 사진은 조금 거칠어질 수 있어요. 움직이는 WebP가 더 선명하고 가벼워요. MP4는 가장 가볍고${(gs.au || []).some(a => !a.hidden) ? ' 넣은 소리도 같이 들어가요' : ' \'+ 소리\'로 음악을 넣을 수 있어요'}. 용량을 정하면 넘을 때 화질·색 수·크기를 줄여 다시 만들어요.</p></div>`;
 }
 function gsExportOpen() {
   if (!gs.slides.length) { toast('장면을 먼저 넣어 주세요'); return; }
@@ -296,7 +308,7 @@ function gpTbarRender() {
     <span class="gp-sep"></span>
     <button class="btn sm" data-g="split" title="고른 것을 재생 위치에서 둘로 (Ctrl+K)">나누기</button><button class="btn sm" data-g="dup" title="고른 것 복제 (Ctrl+D)">복제</button><button class="btn sm" data-g="del-sel" title="고른 것 지우기 (Delete)">지우기</button>
     <span class="gp-sep"></span>
-    <button class="btn sm" data-g="ov-add" title="재생 위치에 글자 넣기 (T)">+ 글자</button>
+    <button class="btn sm" data-g="ov-add" title="재생 위치에 글자 넣기 (T)">+ 글자</button><button class="btn sm" data-g="au-add" title="배경 음악·효과음 넣기 (MP3·WAV·M4A, 영상 파일이면 그 소리만). MP4로 저장할 때 들어가요">+ 소리</button>
     <span class="flex1"></span>
     <span class="muted small gp-hint">${gs.tool === 'razor' ? '자르기 도구: 장면이나 막대를 누르면 그 자리에서 나눠요' : 'Ctrl+휠: 확대·축소 · 위쪽 눈금을 끌면 재생 위치 이동'}</span>
     <button class="gp-ib sm" data-g="zoom-out" title="축소 (-)">−</button><input type="range" id="gpZoom" min="2" max="12" step="0.05" value="${z.toFixed(2)}" title="시간 막대 확대"><button class="gp-ib sm" data-g="zoom-in" title="확대 (+)">+</button><button class="btn sm ${gs.zoomFit ? 'on' : ''}" data-g="zoom-fit" title="전체가 보이게 (\\)">전체 보기</button>`;
@@ -322,25 +334,25 @@ function tlBuild() {
   const box = $('#gpRows'); if (!box) return;
   if (gs.zoomFit) gpFit();
   const S = gs.slides, T = gsTotal(), pps = gs.pps, X = t => (t * pps).toFixed(1), st = gsStarts();
-  laneFix(gs.ovs); laneFix(gs.fx);
-  const nO = gs.ovs.reduce((m, o) => Math.max(m, o.lane + 1), 0), nF = gs.fx.reduce((m, f) => Math.max(m, f.lane + 1), 0);
+  laneFix(gs.ovs); laneFix(gs.fx); laneFix(tlL('a'));
+  const nO = gs.ovs.reduce((m, o) => Math.max(m, o.lane + 1), 0), nF = gs.fx.reduce((m, f) => Math.max(m, f.lane + 1), 0), nA = gs.au.reduce((m, a) => Math.max(m, a.lane + 1), 0);
   // 눈금
   const steps = [0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120], maj = steps.find(v => v * pps >= 72) || 120, mn = maj / (maj * pps >= 160 ? 10 : 5);
   let ticks = ''; const tEnd = T + 160 / pps;
   for (let k = 0, t = 0; t <= tEnd; k++, t = k * mn) { const M = Math.abs(t / maj - Math.round(t / maj)) < 1e-6; ticks += `<i class="${M ? 'M' : ''}" style="left:${X(t)}px">${M ? `<b>${maj < 1 ? t.toFixed(maj < 0.1 ? 2 : 1) : Math.round(t * 10) / 10}초</b>` : ''}</i>`; }
   const rows = [`<div class="gp-row ruler"><div class="gp-h">시간</div><div class="gp-lane gp-ruler">${ticks}<span class="gp-end" style="left:${X(T)}px" title="끝"></span></div></div>`];
   const bar = (k, x) => {
-    const a = x.t0 || 0, b = k === 'o' ? ovT1(x) : fxT1(x), on = k === 'o' ? gs.focus === 'ov' && x.id === gs.osel : gs.focus === 'fx' && x.id === gs.fsel;
-    const lab = k === 'o' ? (x.kind === 'image' ? '🖼 ' + (x.name || '스티커') : (x.text || '').split('\n')[0] || '(빈 글자)') : (FX_ICON[x.kind] || '') + ' ' + FXK[x.kind][1];
+    const a = x.t0 || 0, b = tlT1(k, x), on = gs.focus === { o: 'ov', f: 'fx', a: 'au' }[k] && x.id === tlSelId(k);
+    const lab = k === 'o' ? (x.kind === 'image' ? '🖼 ' + (x.name || '스티커') : (x.text || '').split('\n')[0] || '(빈 글자)') : k === 'a' ? '♪ ' + (x.name || '소리') + (x.loop ? ' ⟳' : '') : (FX_ICON[x.kind] || '') + ' ' + FXK[x.kind][1];
     const an = k === 'o' && (x.ain.n || x.aloop.n || x.aout.n) ? '<em>✦</em>' : '';
-    return `<b class="gp-bar ${k} ${k === 'o' && x.kind === 'image' ? 'img' : ''} ${on ? 'on' : ''} ${x.hidden ? 'hid' : ''}" data-bk="${k}" data-id="${x.id}" style="left:${X(a)}px;width:${Math.max(4, (b - a) * pps).toFixed(1)}px" title="${esc(lab)} · ${fmtT(a)}~${fmtT(b)}초">${an}${esc(lab)}</b>`;
+    return `<b class="gp-bar ${k} ${k === 'o' && x.kind === 'image' ? 'img' : ''} ${on ? 'on' : ''} ${x.hidden ? 'hid' : ''}" data-bk="${k}" data-id="${x.id}" style="left:${X(a)}px;width:${Math.max(4, (b - a) * pps).toFixed(1)}px" title="${esc(lab)} · ${fmtT(a)}~${fmtT(b)}초">${an}${esc(lab)}${k === 'o' && x.kf ? x.kf.map(q => `<i class="gp-kf" style="left:${(q.t * pps).toFixed(1)}px"></i>`).join('') : ''}</b>`;
   };
   const lanes = (k, n, name, list) => {
     const out = [];
     if (n > 0) out.push(`<div class="gp-row new ${k}" data-lk="${k}" data-ln="${n}"><div class="gp-h"><span class="muted">+ 새 ${name} 줄</span></div><div class="gp-lane"></div></div>`);
     for (let L = Math.max(1, n) - 1; L >= 0; L--) {
       const items = list.filter(x => x.lane === L), allHid = items.length && items.every(x => x.hidden);
-      out.push(`<div class="gp-row ${k}" data-lk="${k}" data-ln="${L}"><div class="gp-h"><button class="gp-ib xs" data-g="lane-eye" data-lk="${k}" data-ln="${L}" title="${allHid ? '이 줄 보이기' : '이 줄 숨기기'}" ${items.length ? '' : 'disabled'}>${gpI(allHid ? 'eyeoff' : 'eye')}</button><span>${name} ${L + 1}</span></div><div class="gp-lane">${items.map(x => bar(k, x)).join('')}${!list.length ? `<span class="gp-ehint">${k === 'o' ? '왼쪽 \'글자\'에서 끌어다 놓거나 + 글자' : '왼쪽 \'효과\'에서 끌어다 놓아요'}</span>` : ''}</div></div>`);
+      out.push(`<div class="gp-row ${k}" data-lk="${k}" data-ln="${L}"><div class="gp-h"><button class="gp-ib xs" data-g="lane-eye" data-lk="${k}" data-ln="${L}" title="${allHid ? '이 줄 보이기' : '이 줄 숨기기'}" ${items.length ? '' : 'disabled'}>${gpI(allHid ? 'eyeoff' : 'eye')}</button><span>${name} ${L + 1}</span></div><div class="gp-lane">${items.map(x => bar(k, x)).join('')}${!list.length ? `<span class="gp-ehint">${k === 'o' ? '왼쪽 \'글자\'에서 끌어다 놓거나 + 글자' : k === 'a' ? '+ 소리로 배경 음악·효과음을 넣어요 (MP4에만 들어가요)' : '왼쪽 \'효과\'에서 끌어다 놓아요'}</span>` : ''}</div></div>`);
     }
     return out;
   };
@@ -356,7 +368,17 @@ function tlBuild() {
       else if (trOn || (w > 16 && gsDur(S[i - 1]) * pps > 16)) clips += `<b class="gp-cut ${trOn ? 'on' : ''}" data-ti="${i}" style="left:${X(st[i])}px" title="${i}번과 ${i + 1}번 사이: 누르면 넘김을 고를 수 있어요">◇</b>`;
     }
   });
-  rows.push(`<div class="gp-row v"><div class="gp-h"><span>장면</span></div><div class="gp-lane" id="gpV">${clips || '<span class="gp-ehint">사진·GIF·영상을 넣으면 여기에 이어 붙어요</span>'}</div></div>`);
+  S.forEach((s, i) => { if (s.kf && s.kf.length && kfOwner(s) === s) for (const q of s.kf) clips += `<i class="gp-kf sc" style="left:${X(st[i] + q.t)}px" title="키프레임 ${fmtT(st[i] + q.t)}초"></i>`; });
+  // 소리 줄: 장면 줄 바로 아래, 장면 줄처럼 아래에 붙어 있어요
+  const aRows = [];
+  if (S.length) {
+    for (let L = 0; L < Math.max(1, nA); L++) { const items = gs.au.filter(x => x.lane === L), allHid = items.length && items.every(x => x.hidden);
+      aRows.push([29, `<div class="gp-row a" data-lk="a" data-ln="${L}" style="BOT"><div class="gp-h"><button class="gp-ib xs" data-g="lane-eye" data-lk="a" data-ln="${L}" title="${allHid ? '이 줄 소리 켜기' : '이 줄 소리 끄기'}" ${items.length ? '' : 'disabled'}>${gpI(allHid ? 'eyeoff' : 'eye')}</button><span>소리 ${L + 1}</span></div><div class="gp-lane">${items.map(x => bar('a', x)).join('')}${!gs.au.length ? '<span class="gp-ehint">+ 소리로 배경 음악·효과음을 넣어요 (MP4로 저장할 때 들어가요)</span>' : ''}</div></div>`]); }
+    if (nA > 0) aRows.push([21, `<div class="gp-row new a" data-lk="a" data-ln="${nA}" style="BOT"><div class="gp-h"><span class="muted">+ 새 소리 줄</span></div><div class="gp-lane"></div></div>`]);
+  }
+  let below = aRows.reduce((m, r) => m + r[0], 0);
+  rows.push(`<div class="gp-row v" style="bottom:${below}px"><div class="gp-h"><span>장면</span></div><div class="gp-lane" id="gpV">${clips || '<span class="gp-ehint">사진·GIF·영상을 넣으면 여기에 이어 붙어요</span>'}</div></div>`);
+  for (const [h, html] of aRows) { below -= h; rows.push(html.replace('BOT', `bottom:${below}px`)); }
   box.style.width = (GP_HW + T * pps + 160) + 'px';
   box.innerHTML = rows.join('') + '<div class="gp-ph" id="gpPh"></div><div class="gp-mark" id="gpMark" hidden></div><div class="gp-tipf" id="gpTipF" hidden></div>';
   tlHead();
@@ -372,7 +394,7 @@ function tlDropMark(i) { for (const el of $$('#gpV .drop')) el.classList.remove(
 // 끌 때 붙을 자리 (자석)
 function tlSnap(t, skip) {
   if (!gs.snap) return [t, false];
-  const c = [0, gsTotal(), gs.t, ...gsStarts()]; for (const x of [...gs.ovs, ...gs.fx]) if (x !== skip) c.push(x.t0 || 0, x.t1 == null ? gsTotal() : x.t1);
+  const c = [0, gsTotal(), gs.t, ...gsStarts()]; for (const x of [...gs.ovs, ...gs.fx, ...(gs.au || [])]) if (x !== skip) c.push(x.t0 || 0, x.t1 == null ? gsTotal() : x.t1);
   let best = t, bd = 8 / gs.pps; for (const v of c) { const d = Math.abs(v - t); if (d < bd) { bd = d; best = v; } }
   return [best, best !== t];
 }
@@ -389,14 +411,15 @@ function gpSplitScene(i, t) {
   const s2 = { ...s, id: uid(), dur: Math.round((d - loc) * 1000) / 1000, tr: 'none', trd: null }; s.dur = loc; S.splice(i + 1, 0, s2); return true;
 }
 function gpSplitBar(k, x, t) {
-  const L = k === 'o' ? gs.ovs : gs.fx, a = x.t0 || 0, b = k === 'o' ? ovT1(x) : fxT1(x); t = Math.round(t * 100) / 100;
+  const L = tlL(k), a = x.t0 || 0, b = tlT1(k, x); t = Math.round(t * 100) / 100;
   if (t <= a + 0.03 || t >= b - 0.03) return false;
+  if (k === 'a') { const y = { ...x, id: uid(), t0: t, off: (x.off || 0) + (t - a), fin: 0 }; x.t1 = t; x.fout = 0; L.splice(L.indexOf(x) + 1, 0, y); return true; }
   const y = { ...clone(k === 'o' ? { ...x, bmp: null } : x), id: uid(), t0: t }; if (k === 'o') { y.bmp = x.bmp; y.ain = { n: '', d: x.ain.d }; x.aout = { n: '', d: x.aout.d }; }
   x.t1 = t; L.splice(L.indexOf(x) + 1, 0, y); return true;
 }
 function gpSplitAtHead() {
   const t = gs.t;
-  if (gs.focus === 'ov' || gs.focus === 'fx') { const k = gs.focus === 'ov' ? 'o' : 'f', x = (k === 'o' ? gs.ovs : gs.fx).find(z => z.id === (k === 'o' ? gs.osel : gs.fsel)); if (x && gpSplitBar(k, x, t)) { gsChanged(); return; } toast('재생 위치가 고른 막대 안에 있어야 나눌 수 있어요'); return; }
+  if (gs.focus === 'ov' || gs.focus === 'fx' || gs.focus === 'au') { const k = { ov: 'o', fx: 'f', au: 'a' }[gs.focus], x = tlL(k).find(z => z.id === tlSelId(k)); if (x && gpSplitBar(k, x, t)) { gsChanged(); return; } toast('재생 위치가 고른 막대 안에 있어야 나눌 수 있어요'); return; }
   if (!gs.slides.length) return;
   const i = gsSceneAt(t); if (gpSplitScene(i, t)) { gs.sel = i + 1; gs.pick.clear(); gs.focus = 'scene'; gsChanged(); } else toast('장면 경계와 너무 가까워서 나누지 않았어요');
 }
@@ -411,18 +434,18 @@ function tlBind() {
     const t = tAt(e), el = e.target, inV = !!el.closest('.gp-row.v'), clip = el.closest('.gp-clip'), trEl = el.closest('.gp-tr, .gp-cut'), bar = el.closest('.gp-bar');
     if (el.closest('.gp-row.ruler')) { D = { m: 'scrub' }; gs.tlDrag = true; gpSeek(t); sc.setPointerCapture(e.pointerId); e.preventDefault(); return; }
     if (gs.tool === 'razor') {
-      if (bar) { const k = bar.dataset.bk, x = (k === 'o' ? gs.ovs : gs.fx).find(z => z.id === bar.dataset.id); if (x && gpSplitBar(k, x, tlSnap(t, x)[0])) gsChanged(); }
+      if (bar) { const k = bar.dataset.bk, x = tlL(k).find(z => z.id === bar.dataset.id); if (x && gpSplitBar(k, x, tlSnap(t, x)[0])) gsChanged(); }
       else if (clip) { const i = +clip.dataset.ci; if (gpSplitScene(i, tlSnap(t)[0])) { gs.sel = i + 1; gs.focus = 'scene'; gs.pick.clear(); gsChanged(); } }
       return;
     }
     if (inV && gs.slides.length) { const bi = hitBoundary(e, t); if (bi >= 0) { D = { m: 'trim', i: bi, d0: gsDur(gs.slides[bi]), sx: e.clientX, start: gsStarts()[bi] }; gs.tlDrag = true; sc.setPointerCapture(e.pointerId); e.preventDefault(); return; } }
     if (trEl) { gpSelTr(+trEl.dataset.ti); return; }
     if (bar) {
-      const k = bar.dataset.bk, L = k === 'o' ? gs.ovs : gs.fx, x = L.find(z => z.id === bar.dataset.id); if (!x) return;
+      const k = bar.dataset.bk, L = tlL(k), x = L.find(z => z.id === bar.dataset.id); if (!x) return;
       const br = bar.getBoundingClientRect(), edge = Math.min(7, br.width / 3);
       const mode = e.clientX - br.left < edge ? 'l' : br.right - e.clientX < edge ? 'r' : 'm';
-      if (k === 'o') { gs.osel = x.id; gs.focus = 'ov'; } else { gs.fsel = x.id; gs.focus = 'fx'; }
-      D = { m: 'bar', k, L, x, mode, sx: e.clientX, t0: x.t0 || 0, t1: k === 'o' ? ovT1(x) : fxT1(x), open: x.t1 == null, lane0: x.lane, moved: false };
+      tlSelect(k, x);
+      D = { m: 'bar', k, L, x, mode, sx: e.clientX, t0: x.t0 || 0, t1: tlT1(k, x), open: x.t1 == null, lane0: x.lane, moved: false, off0: x.off || 0 };
       gs.tlDrag = true; gsPause(); gsRenderProps(); tlBuild(); gsDraw(); sc.setPointerCapture(e.pointerId); e.preventDefault(); return;
     }
     if (clip) {
@@ -466,8 +489,11 @@ function tlBind() {
         if (k1) { na = s1; sn = s1; } else if (k2) { na = s2 - len; sn = s2; } a = clamp(na, 0, Math.max(0, T - len)); b = a + len;
         const row = document.elementFromPoint(e.clientX, e.clientY), rw = row && row.closest('.gp-row');
         if (rw && rw.dataset.lk === D.k) { const ln = +rw.dataset.ln; if (ln !== x.lane && !D.L.some(y => y !== x && y.lane === ln && laneOver({ t0: a, t1: b }, y))) x.lane = ln; }
-      } else if (D.mode === 'l') { let na = clamp(a + dt, 0, b - 0.1); const [s1, k1] = tlSnap(na, x); if (k1 && s1 < b - 0.05) { na = s1; sn = s1; } a = Math.round(na * 100) / 100; }
-      else { let nb = clamp(b + dt, a + 0.1, T); const [s1, k1] = tlSnap(nb, x); if (k1 && s1 > a + 0.05) { nb = s1; sn = s1; } b = Math.round(nb * 100) / 100; }
+      } else if (D.mode === 'l') {
+        let na = clamp(a + dt, D.k === 'a' ? Math.max(0, a - D.off0) : 0, b - 0.1); const [s1, k1] = tlSnap(na, x); if (k1 && s1 < b - 0.05 && (D.k !== 'a' || s1 >= a - D.off0)) { na = s1; sn = s1; } a = Math.round(na * 100) / 100;
+        if (D.k === 'a') x.off = Math.max(0, Math.round((D.off0 + (a - D.t0)) * 100) / 100); // 소리: 왼쪽 끝을 끌면 소리 시작 위치도 같이
+      }
+      else { const mx = D.k === 'a' && !x.loop ? Math.min(T, a + Math.max(0.1, auLen(x) - (x.off || 0))) : T; let nb = clamp(b + dt, a + 0.1, mx); const [s1, k1] = tlSnap(nb, x); if (k1 && s1 > a + 0.05 && s1 <= mx) { nb = s1; sn = s1; } b = Math.round(nb * 100) / 100; }
       x.t0 = Math.round(a * 100) / 100; x.t1 = b >= T - 0.005 ? null : Math.round(b * 100) / 100;
       tlMark(sn, 'snap'); tlTip(e, `${fmtT(x.t0)} ~ ${x.t1 == null ? '끝' : fmtT(x.t1)}초`); tlBuildSoon(); gsDraw();
     }
@@ -501,7 +527,7 @@ function tlBind() {
     if (!gs.slides.length) { toast('장면을 먼저 넣어 주세요'); return; }
     const at = dropAt(e);
     if (P.tr) { const i = nearCut(at.t); if (i < 1) { toast('장면이 두 개 이상 있어야 넘김을 넣을 수 있어요'); return; } gsApplyTrans(i, P.v); gpSelTr(i); return; }
-    const want = P.a.startsWith('fx') ? 'f' : 'o', lane = at.lk === want ? at.lane : null;
+    const want = P.a.startsWith('fx') ? 'f' : P.a.startsWith('au') ? 'a' : 'o', lane = at.lk === want ? at.lane : null;
     ovClick(P.a, { dataset: { v: P.v } }, { t: at.t, lane });
   });
 }
@@ -518,8 +544,11 @@ function gsRenderAll() { gpLibRender(); gpTbarRender(); gsRenderList(); gsRender
 let gsSaveT = 0;
 function gsChanged(keepProps) { gsRenderList(); if (!keepProps) gsRenderProps(); gsFitCanvas(); clearTimeout(gsSaveT); gsSaveT = setTimeout(gsSave, 800); }
 function gsInput(e) {
-  const t = e.target, k = t.dataset.gk; if (!k) return;
+  const t = e.target;
+  if (t.hasAttribute('data-g-kfe')) { if (e.type === 'change') kfEase(t.value); return; }
+  const k = t.dataset.gk; if (!k) return;
   if (e.type === 'input' && (t.tagName === 'SELECT' || t.type === 'checkbox')) return;
+  if (k.startsWith('a.')) { if (auSetKey(k, t)) gsChanged(e.type === 'input' || !/\.(t0|t1)$/.test(k)); return; }
   if (k.startsWith('o.') || k.startsWith('f.')) { const r = ovSetKey(k, t); if (r) gsChanged(r !== 'props' && (e.type === 'input' || !/\.(t0|t1|text)$/.test(k))); return; } // 글자·스티커, 효과
   let v = t.type === 'checkbox' ? t.checked : t.value;
   if (k.startsWith('sx.')) { // 장면 그림 위치·크기·회전 (같은 영상·여럿 고른 장면도 함께)
@@ -528,9 +557,10 @@ function gsInput(e) {
       if (f === 'tflip') s.tflip = !!v || undefined;
       else if (f === 'tz') s.tz = clamp((+v || 100) / 100, 0.05, 20);
       else if (f === 'trot') s.trot = clamp(+v || 0, -180, 180);
+      else if (f === 'op') s.op = clamp((+v || 0) / 100, 0, 1);
       else s[f] = clamp((+v || 0) / 100, -2, 2);
     }
-    gsChanged(e.type === 'input'); return;
+    kfStoreScene(); gsChanged(e.type === 'input'); return;
   }
   if (k.startsWith('s.')) {
     const s = gs.slides[gs.sel]; if (!s) return; const f = k.slice(2);
@@ -550,8 +580,11 @@ async function gsClick(e) {
   const b = e.target.closest('[data-g]'); if (!b || b.disabled) return;
   const a = b.dataset.g, S = gs.slides, fps = +gs.set.fps || 12;
   if (a === 'tr-gal' || a.startsWith('ov-') || a.startsWith('fx-')) { ovClick(a, b); return; }
+  if (a.startsWith('kf-')) { kfAct(a, b.dataset.v); return; }
+  if (a.startsWith('au-')) { auClick(a); return; }
   if (a === 'close') pjBackToEditor();
   else if (a === 'export-open') gsExportOpen();
+  else if (a === 'ai-para') dpParaFromScene();
   else if (a === 'xf-center') { for (const s of scTargets()) { s.tx = 0; s.ty = 0; } gsChanged(); gsRenderProps(); }
   else if (a === 'xf-reset') { for (const s of scTargets()) { delete s.tx; delete s.ty; delete s.tz; delete s.trot; delete s.tflip; } gsChanged(); gsRenderProps(); }
   else if (a === 'xf-all') { const c = S[gs.sel]; if (c) { for (const s of S) { s.tx = c.tx; s.ty = c.ty; s.tz = c.tz; s.trot = c.trot; s.tflip = c.tflip; } gsChanged(); toast('모든 장면에 같은 위치·크기·회전을 넣었어요', 2000); } }
@@ -582,17 +615,19 @@ async function gsClick(e) {
   else if (a === 'tr-apply') { const v = b.dataset.v; if (gs.focus === 'tr' && gs.sel > 0) gsApplyTrans(gs.sel, v); else if (gs.focus === 'scene' && gs.pick.size > 1) { S.forEach((s, k) => { if (k > 0 && gs.pick.has(s.id)) s.tr = v; }); gsChanged(); } else { gsApplyTrans(-1, v); toast('모든 장면 사이에 넣었어요. 한 자리에만 넣으려면 아래 장면 줄에서 장면 사이(◇)를 먼저 골라요.', 4000); } gpTrMark(); }
   else if (a === 'tr-all') { const s = S[gs.sel]; if (s) { const v = gsTr(s), d = s.trd; gsApplyTrans(-1, v); if (d != null) gs.set.trDur = d; gsChanged(); toast('모든 장면 사이에 같은 넘김을 넣었어요'); } }
   else if (a === 'tr-none') { const s = S[gs.sel]; if (s) { s.tr = 'none'; gsChanged(); } }
-  else if (a === 'lane-eye') { const L = b.dataset.lk === 'o' ? gs.ovs : gs.fx, ln = +b.dataset.ln, it = L.filter(x => x.lane === ln), hide = !it.every(x => x.hidden); for (const x of it) x.hidden = hide; gsChanged(); }
+  else if (a === 'lane-eye') { const L = tlL(b.dataset.lk), ln = +b.dataset.ln, it = L.filter(x => x.lane === ln), hide = !it.every(x => x.hidden); for (const x of it) x.hidden = hide; gsChanged(); }
 }
 function gpDup() {
   if (gs.focus === 'ov') return ovClick('ov-dup', { dataset: {} });
   if (gs.focus === 'fx') return ovClick('fx-dup', { dataset: {} });
+  if (gs.focus === 'au') return auClick('au-dup');
   if (gs.pick.size > 1) return gsBatch('b-dup');
   const s = gs.slides[gs.sel]; if (s && (gs.focus === 'scene' || gs.focus === 'tr')) { gs.slides.splice(gs.sel + 1, 0, { ...s, id: uid() }); gs.sel++; gs.focus = 'scene'; gsChanged(); }
 }
 function gpDelete() {
   if (gs.focus === 'ov') return ovClick('ov-del', { dataset: {} });
   if (gs.focus === 'fx') return ovClick('fx-del', { dataset: {} });
+  if (gs.focus === 'au') return auClick('au-del');
   if (gs.focus === 'tr') { const s = gs.slides[gs.sel]; if (s) { s.tr = 'none'; gsChanged(); } return; }
   if (gs.focus !== 'scene') return;
   if (gs.pick.size > 1) return gsBatch('b-del');

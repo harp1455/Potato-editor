@@ -486,7 +486,8 @@ function xfSec(el) {
     ${el.lock ? `<div class="btnrow"><button class="btn sm ${on ? 'on' : ''}" data-act="e2-xf" title="Ctrl+T · 끝내려면 Enter">${on ? '변형 끝내기 (Enter)' : '자유 변형 (Ctrl+T)'}</button></div>` : ''}
     ${on ? `<div class="grid2"><span>크기</span><span><input type="number" data-e2x="sc" min="1" max="2000" step="1" value="${pct}"> %</span><span>회전</span><span><input type="number" data-e2x="rot" min="-180" max="180" step="1" value="${Math.round((el.rot || 0) * 10) / 10}"> °</span></div>
     <div class="btnrow"><button class="btn sm" data-act="e2-xf-center">가운데로</button><button class="btn sm" data-act="e2-xf-fit" title="캔버스 안에 다 보이게">캔버스에 맞추기</button><button class="btn sm" data-act="e2-xf-fill" title="빈 곳 없이 꽉 채우기">꽉 채우기</button><button class="btn sm" data-act="e2-xf-reset" title="원래 크기, 각도 0, 가운데">원래대로</button></div>
-    <p class="muted small">그림을 끌면 옮겨지고, 모서리를 끌면 비율 그대로 크기, 위쪽 동그라미로 돌려요(<kbd>Shift</kbd> = 15°씩). 방향키로 조금씩 옮겨요.</p>` : ''}</div>`;
+    <p class="muted small">그림을 끌면 옮겨지고, 모서리를 끌면 비율 그대로 크기, 위쪽 동그라미로 돌려요(<kbd>Shift</kbd> = 15°씩). 방향키로 조금씩 옮겨요.</p>` : ''}
+    <div class="btnrow"><button class="btn sm" data-act="liq" title="붓으로 밀고 부풀리고 오므려 모양을 고쳐요 (Ctrl+Shift+X)">뒤틀기 (모양 고치기)…</button></div></div>`;
 }
 function e2XfToggle() { // Ctrl+T: 그림 레이어를 골랐으면 그대로(손잡이 있음), 아니면 바탕 그림
   const ss = selEls(), pg = page(); if (!pg || pg.ph) return;

@@ -103,7 +103,7 @@ async function czBytes(id) { // 파일 안에 넣어 둔 압축 데이터를 원
 }
 /* ---- 팩 (exe판): 모델과 실행 도구는 처음 쓸 때 한 번 받아 두고 써요 ---- */
 // 팩 목록(packs.json)과 파일은 깃허브 Releases의 packs-N에 있어요. 팩이 바뀌면 N을 올리고 편집기도 같이 업데이트해요
-const CZ_PACK_TAG = 'packs-3';
+const CZ_PACK_TAG = 'packs-4';
 const CZ_PACK_URL = 'https://github.com/harp1455/Potato-editor/releases/download/' + CZ_PACK_TAG + '/';
 const czIsApp = () => !!(window.POTATO_BUILD && window.POTATO_BUILD.kind === 'app');
 const czTauri = () => (window.__TAURI__ && window.__TAURI__.fs && window.__TAURI__.upload) ? window.__TAURI__ : null;
@@ -223,8 +223,9 @@ async function czPacksReady(need) {
 function czPackAsk(miss) {
   return new Promise(resolve => {
     const man = czPk.man, size = miss.reduce((a, k) => a + man.packs[k].size, 0);
-    const m = modal(`<h2>${miss.some(k => k === 'bg' || k === 'sr') ? 'AI 팩 받기' : '자동 흰칠 팩 받기'}</h2>
-      <p class="sub">${miss.some(k => k === 'bg' || k === 'sr') ? '이 기능' : '자동 흰칠'}을 쓰려면 아래 팩을 한 번 받아야 해요. 받은 뒤에는 인터넷 없이 써요. 그림은 어디로도 보내지 않아요.</p>
+    const isAI = miss.some(k => k !== 'base' && k !== 'precise');
+    const m = modal(`<h2>${isAI ? 'AI 팩 받기' : '자동 흰칠 팩 받기'}</h2>
+      <p class="sub">${isAI ? '이 기능' : '자동 흰칠'}을 쓰려면 아래 팩을 한 번 받아야 해요. 받은 뒤에는 인터넷 없이 써요. 그림은 어디로도 보내지 않아요.</p>
       <div class="czpk-list">${miss.map(k => `<div class="czpk"><b>${man.packs[k].label}</b> <span class="muted small">${czMB(man.packs[k].size)} · ${man.packs[k].desc}</span></div>`).join('')}</div>
       <div class="czbar"><i id="czPkBar"></i></div><p class="muted small" id="czPkMsg">&nbsp;</p>
       <div class="foot"><button class="btn" id="czPkNo">나중에</button><button class="btn primary" id="czPkGo">받기 (${czMB(size)})</button></div>`);
@@ -939,7 +940,7 @@ async function czRunPage(onlySel) {
     if (tk.stop) throw new Error('stop');
     tk.done();
     for (const [P, els] of found) { pg.els.splice(pg.els.indexOf(P) + 1, 0, ...els); made.push(...els); } // 컷 바로 위에 (말풍선은 그 위로)
-    sel = made.map(e => e.id); commit(); renderProps(); requestRender();
+    sel = made.map(e => e.id); commit(); if (!onlySel && isImg()) bxNote({ op: 'cz' }); renderProps(); requestRender();
     if (made.length) toast(`${made.length}곳을 흰칠했어요. 잘못 칠한 곳은 '가리기'의 지우개로 지우고, 빠진 곳은 '가리기'로 칠하세요.`, 5200);
     else toast(old.length ? '이번에는 찾은 곳이 없어서 전에 칠한 자동 흰칠을 지웠어요.' : "가릴 곳을 찾지 못했어요. 놓친 것 같으면 '자동 흰칠 설정'에서 민감도를 올려 보세요.", 4800);
   } catch (e) {

@@ -136,6 +136,7 @@ function ovBox(o, W, H) { // 회전 전 반폭·반높이 (출력 px)
 }
 function ovDraw(g, o, t, W, H) {
   const t0 = o.t0 || 0, t1 = ovT1(o); if (t < t0 || t > t1 + 1e-6) return;
+  kfPoseOv(o, t);
   const lt = t - t0, left = t1 - t, base = Math.min(W, H) / 1000;
   const ain = o.ain && o.ain.n ? o.ain : null, aout = o.aout && o.aout.n ? o.aout : null, aloop = o.aloop && o.aloop.n ? o.aloop : null;
   const isText = o.kind !== 'image', per = isText && (o.per || (ain && ain.n === 'type')) && [...(o.text || '')].length > 1;
@@ -152,6 +153,7 @@ function ovDraw(g, o, t, W, H) {
   const gapIn = per ? (ain && ain.n === 'type' ? ain.d / N : (o.gap ?? 0.06)) : 0, gapOut = o.per && per ? (o.gap ?? 0.06) : 0;
   const whole = isText && !per ? parts[0] : !isText ? parts[0] : { w: Math.max(...parts.map(p => Math.abs(p.dx) * 2 + p.w)), h: Math.max(...parts.map(p => Math.abs(p.dy) * 2 + p.h)) };
   g.save(); g.translate(o.x * W, o.y * H); if (o.rot) g.rotate(o.rot * DEG); g.scale(o.sc || 1, o.sc || 1);
+  if (o.op != null && o.op < 1) g.globalAlpha *= clamp(o.op, 0, 1);
   if (aloop && ANIM_CSS[aloop.n] && !o.per) animApply(g, animAt(aloop.n, frac(lt / Math.max(0.1, aloop.d)), whole.w, whole.h, base));
   for (const P of parts) {
     let vis = true, filt = '', gl = 0;
@@ -543,7 +545,9 @@ function ovPropsHtml(o) {
       ${row('자리', `<div class="seg"><button class="btn sm" data-g="ov-pos" data-v="top">위</button><button class="btn sm" data-g="ov-pos" data-v="mid">가운데</button><button class="btn sm" data-g="ov-pos" data-v="bot">아래</button></div>`)}
       ${row('배율', rng('o.sc', o.sc ?? 1, 0.2, 4, 0.05))}
       ${row('기울기', rng('o.rot', o.rot || 0, -180, 180, 1, '°'))}
-      <p class="muted small" style="margin:2px 0 0">미리보기 화면에서 끌어 옮기고, 모서리를 끌거나 휠로 크기를 바꿔요.</p></div>
+      ${row('불투명도', rng('o.op', o.op ?? 1, 0, 1, 0.05))}
+      <p class="muted small" style="margin:2px 0 0">미리보기 화면에서 끌어 옮기고, 모서리를 끌거나 휠로 크기를 바꿔요.</p>
+      ${kfHtml(o.kf, (o.t0 || 0))}</div>
     <div class="sec"><h3>시간</h3>${ovTimeHtml(o, 'o')}</div>
     <div class="sec"><h3>움직임 <span class="muted small">Animate.css ${AN_ALL.length}가지 + 글자 효과</span></h3>
       ${row('나타날 때', anSel('o.ain.n', o.ain.n, [...(isT ? [['글자 전용', TX_IN]] : []), ['등장', toL(AN_IN)]]) + ` <input type="number" data-gk="o.ain.d" min="0.05" max="10" step="0.05" value="${o.ain.d}" style="width:56px" title="걸리는 시간(초)">`)}
@@ -594,6 +598,7 @@ function ovSetKey(k, t) {
   if (tgt.t1 != null && tgt.t1 < (tgt.t0 || 0) + 0.05) tgt.t1 = Math.min(gsTotal(), (tgt.t0 || 0) + 0.05);
   if (path[0] === 't0' || path[0] === 't1') { const L = k[0] === 'o' ? gs.ovs : gs.fx; if (!laneFree(L, tgt, tgt.lane)) tgt.lane = laneFor(L, tgt); laneFix(L); }
   const rv = t.nextElementSibling; if (t.type === 'range' && rv && rv.classList.contains('rv')) rv.textContent = t.value + (k === 'o.rot' ? '°' : '');
+  if (k[0] === 'o' && KF_OV[path[0]] !== undefined) kfStoreOv(tgt);
   return true;
 }
 function ovApplyPreset(o, P) { Object.assign(o.st, clone(P.st)); o.ain = { n: P.ain[0], d: P.ain[1] }; o.aloop = { n: P.aloop[0], d: P.aloop[1] }; o.aout = { n: P.aout[0], d: P.aout[1] }; o.per = P.per; if (P.gap) o.gap = P.gap; }
@@ -767,24 +772,24 @@ function ovBind() {
         else if (D.how === 'rot') q.s.trot = snapAng(q.trot + (Math.atan2(py - D.cy, px - D.cx) - D.a0) / DEG, e);
         else { let nx = q.tx + (px - D.sx) / W, ny = q.ty + (py - D.sy) / H; if (Math.abs(nx) < 0.012) nx = 0; if (Math.abs(ny) < 0.012) ny = 0; q.s.tx = clamp(nx, -2, 2); q.s.ty = clamp(ny, -2, 2); }
       }
-      gsDraw(); return;
+      kfStoreScene(); gsDraw(); return;
     }
     if (D.rot) D.o.rot = snapAng(D.r0 + (Math.atan2(py - D.oy * H, px - D.ox * W) - D.a0) / DEG, e);
     else if (D.corner) D.o.sc = clamp(D.sc * Math.hypot(px - D.ox * W, py - D.oy * H) / Math.max(1, D.d0), 0.1, 8);
     else { let nx = D.ox + (px - D.sx) / W, ny = D.oy + (py - D.sy) / H; if (Math.abs(nx - 0.5) < 0.012) nx = 0.5; if (Math.abs(ny - 0.5) < 0.012) ny = 0.5; D.o.x = clamp(nx, -0.2, 1.2); D.o.y = clamp(ny, -0.2, 1.2); }
-    gsDraw();
+    kfStoreOv(D.o); gsDraw();
   });
-  const end = () => { if (!D) return; const m = D.moved, sc = D.scene; D = null; if (m) { gsChanged(); if (sc) gsRenderProps(); } };
+  const end = () => { if (!D) return; const m = D.moved, sc = D.scene, o = D.o; D = null; if (m) { if (sc) kfStoreScene(); else if (o) kfStoreOv(o); gsChanged(); if (sc) gsRenderProps(); } };
   cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end);
   cv.addEventListener('wheel', e => {
     const [px, py] = pt(e), o = gs.ovs.find(x => x.id === gs.osel);
     if (o && gs.focus === 'ov' && ovHit(px, py, cv.width, cv.height) === o) {
-      e.preventDefault(); o.sc = clamp((o.sc || 1) * Math.pow(1.1, -e.deltaY / 100), 0.1, 8); gsDraw(); clearTimeout(gsSaveT); gsSaveT = setTimeout(() => gsChanged(), 400); return;
+      e.preventDefault(); o.sc = clamp((o.sc || 1) * Math.pow(1.1, -e.deltaY / 100), 0.1, 8); kfStoreOv(o); gsDraw(); clearTimeout(gsSaveT); gsSaveT = setTimeout(() => gsChanged(), 400); return;
     }
     if (gs.focus === 'scene' && gs.slides[gs.sel] && gsSceneAt(gs.t) === gs.sel && !ovHit(px, py, cv.width, cv.height)) { // 장면 그림 확대·축소
       e.preventDefault(); const f = Math.pow(1.1, -e.deltaY / 100);
       for (const s of scTargets()) s.tz = clamp((s.tz || 1) * f, 0.05, 20);
-      gsDraw(); clearTimeout(gsSaveT); gsSaveT = setTimeout(() => { gsChanged(); gsRenderProps(); }, 400);
+      kfStoreScene(); gsDraw(); clearTimeout(gsSaveT); gsSaveT = setTimeout(() => { gsChanged(); gsRenderProps(); }, 400);
     }
   }, { passive: false });
   cv.addEventListener('dblclick', () => { const ta = $('#gsProps textarea[data-gk="o.text"]'); if (ta) { ta.focus(); ta.select(); } });
@@ -792,3 +797,67 @@ function ovBind() {
 // 저장·불러오기
 const ovPlain = o => { const { bmp, ...r } = o; return clone(r); };
 async function ovRestore(list) { const out = (list || []).map(o => ({ ...o })); await Promise.all(out.map(ovImgLoad)); return out; }
+
+/* ---- 키프레임: 시간에 따라 위치·크기·회전·투명도 ---- */
+// 글자·스티커: o.kf = [{t(글자가 나온 뒤 초), x, y, sc, rot, op, e}], 장면: 같은 GIF·영상(clip)의 첫 장면에 kf = [{t(그 묶음 시작부터 초), tx, ty, tz, trot, op, e}]
+// 키프레임이 있으면 화면에서 끌거나 값을 바꿀 때 그 시간의 ◆에 기록돼요(없으면 새로)
+const KF_OV = { x: 0.5, y: 0.5, sc: 1, rot: 0, op: 1 }, KF_SC = { tx: 0, ty: 0, tz: 1, trot: 0, op: 1 };
+const KF_EASE = { ease: t => t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2, linear: t => t, in: t => t * t * t, out: t => 1 - Math.pow(1 - t, 3), hold: () => 0 };
+const KF_EASE_L = [['ease', '부드럽게 (천천히 시작·끝)'], ['linear', '일정하게'], ['in', '점점 빠르게'], ['out', '점점 느리게'], ['hold', '뚝 끊어서 (다음 ◆에서 바로)']];
+function kfVal(kf, t, F) {
+  const out = {}; let a = kf[0], b = null;
+  if (t <= kf[0].t) a = kf[0]; else if (t >= kf[kf.length - 1].t) a = kf[kf.length - 1];
+  else for (let i = 0; i < kf.length - 1; i++) if (t >= kf[i].t && t < kf[i + 1].t) { a = kf[i]; b = kf[i + 1]; break; }
+  const w = b ? (KF_EASE[a.e || 'ease'] || KF_EASE.ease)((t - a.t) / Math.max(1e-6, b.t - a.t)) : 0;
+  for (const k in F) { const va = a[k] ?? F[k]; out[k] = b ? va + ((b[k] ?? F[k]) - va) * w : va; }
+  return out;
+}
+function kfPoseOv(o, t) { if (o.kf && o.kf.length) Object.assign(o, kfVal(o.kf, t - (o.t0 || 0), KF_OV)); }
+const kfOwner = s => { if (!s || !s.clip) return s; return gs.slides.find(x => x.clip === s.clip) || s; };
+function kfClipOff(s) { const S = gs.slides; let off = 0; if (!s || !s.clip) return 0; for (let j = S.indexOf(s) - 1; j >= 0 && S[j].clip === s.clip; j--) off += gsDur(S[j]); return off; }
+function kfPoseScene(s, tau) { const own = kfOwner(s); if (own && own.kf && own.kf.length) Object.assign(s, kfVal(own.kf, kfClipOff(s) + tau, KF_SC)); }
+function kfPut(kf, t, vals) {
+  t = Math.round(t * 1000) / 1000;
+  let k = kf.find(x => Math.abs(x.t - t) < 0.02);
+  if (!k) { const prev = [...kf].reverse().find(x => x.t < t); k = { t, e: prev ? prev.e : 'ease' }; kf.push(k); kf.sort((x, y) => x.t - y.t); }
+  Object.assign(k, vals); return k;
+}
+const kfPick = (o, F) => { const v = {}; for (const k in F) v[k] = o[k] ?? F[k]; return v; };
+function kfStoreOv(o) { if (o && o.kf && o.kf.length) kfPut(o.kf, gs.t - (o.t0 || 0), kfPick(o, KF_OV)); }
+function kfSceneNow() { // 지금 재생 위치의 장면과 그 묶음 안 시간
+  const i = gsSceneAt(gs.t), s = gs.slides[i]; if (!s) return null;
+  const st = gsStarts(); return { s, own: kfOwner(s), ct: kfClipOff(s) + clamp(gs.t - st[i], 0, gsDur(s)) };
+}
+function kfStoreScene() { const n = kfSceneNow(); if (n && n.own.kf && n.own.kf.length && gs.slides[gs.sel] && kfOwner(gs.slides[gs.sel]) === n.own) kfPut(n.own.kf, n.ct, kfPick(n.s, KF_SC)); }
+function kfHtml(kf, base) { // 속성 칸: ◆ 목록과 단추
+  const list = kf || [], on = list.length > 0;
+  return `<h4 class="advh">키프레임 <span class="muted small">시간에 따라 움직이기</span></h4>
+    ${on ? `<div class="kfl">${list.map((k, i) => `<button class="btn sm kfb" data-g="kf-go" data-v="${i}" title="이 ◆로 재생 위치 옮기기">◆ ${(base + k.t).toFixed(2)}초</button><button class="btn sm kfx" data-g="kf-del" data-v="${i}" title="이 ◆ 지우기">×</button>`).join('')}</div>
+      ${row('이어지는 방식', `<select data-g-kfe>${KF_EASE_L.map(([v, l]) => `<option value="${v}" ${(list[0].e || 'ease') === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`)}` : ''}
+    <div class="btnrow"><button class="btn sm ${on ? '' : 'primary'}" data-g="kf-add" title="지금 재생 위치에 지금 위치·크기·회전·투명도를 ◆로 기록">◆ 지금 위치 기록</button>${on ? '<button class="btn sm danger" data-g="kf-clear">키프레임 모두 지우기</button>' : ''}</div>
+    <p class="gp-tip">${on ? '재생 위치를 옮긴 뒤 화면에서 끌거나 값을 바꾸면 그 시간에 ◆가 생겨요. ◆ 사이는 저절로 이어져요.' : '◆를 하나 기록하고, 재생 위치를 옮겨 화면에서 끌어 옮기면 그 사이를 저절로 움직여요.'}</p>`;
+}
+function kfAct(a, v) {
+  let kf, base, store, apply;
+  if (gs.focus === 'ov') {
+    const o = gs.ovs.find(x => x.id === gs.osel); if (!o) return;
+    if (!o.kf) o.kf = []; kf = o.kf; base = o.t0 || 0; store = () => kfPut(kf, gs.t - base, kfPick(o, KF_OV)); apply = () => kfPoseOv(o, gs.t);
+    if (a === 'kf-add' && (gs.t < base - 1e-6 || gs.t > ovT1(o) + 1e-6)) { toast('재생 위치가 이 글자가 보이는 시간 안에 있어야 해요'); return; }
+  } else {
+    const n = kfSceneNow(), cur = gs.slides[gs.sel]; if (!cur) return;
+    const own = kfOwner(cur); if (!own.kf) own.kf = []; kf = own.kf;
+    const st = gsStarts(), i0 = gs.slides.indexOf(own); base = st[i0];
+    if (!n || n.own !== own) { if (a === 'kf-add') { toast('재생 위치가 이 장면 안에 있어야 해요'); return; } }
+    store = () => kfPut(kf, n.ct, kfPick(n.s, KF_SC)); apply = () => {};
+  }
+  if (a === 'kf-add') store();
+  else if (a === 'kf-del') kf.splice(+v, 1);
+  else if (a === 'kf-clear') kf.length = 0;
+  else if (a === 'kf-go') { const k = kf[+v]; if (k) { gsPause(); gs.t = clamp(base + k.t, 0, Math.max(0, gsTotal() - 0.001)); apply(); } }
+  gsChanged(); gsDraw(); tlBuild();
+}
+function kfEase(v) { // 모든 ◆ 사이 이어지는 방식
+  const o = gs.focus === 'ov' ? gs.ovs.find(x => x.id === gs.osel) : kfOwner(gs.slides[gs.sel]);
+  if (o && o.kf) for (const k of o.kf) k.e = v;
+  gsChanged(true); gsDraw();
+}

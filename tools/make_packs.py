@@ -36,6 +36,14 @@ SRC = {  # 원본: 주소 + sha256 (주소 내용이 바뀌면 멈춰요)
                   'sha256': '14570bc70981c7cab28dbd06938b7b25f4b3e969476e816f99cc39ecd8a1c820'},
     'line_coarse': {'url': HF.format(repo='deepghs/imgutils-models', rev='35e0ed8f35ce0dbea674568161a48b31ba7d2a99', path='lineart/lineart_coarse.onnx'),
                     'sha256': 'e32fc7b9ffd219ac38f6bd770c5d537c92f1038f81a6a258db03f4d0d501a64c'},
+    # 움짤 중간 장면: RIFE v4.9(MIT, hzwer/Practical-RIFE, 애니용으로 다듬은 판) ONNX — 입력 [1,7,H,W] = 앞 장면·뒤 장면·시점
+    'rife49': {'url': HF.format(repo='FuryTMP/RIFE_v4.9', rev='d30537a6f5e71f1baac6c2d5a03e74b650f916fe', path='rife_v4.9.onnx'),
+               'sha256': 'b53f43b0853f73c055b1ba56dced48296d48a0ab76ce123bb7b492bf6c2ae57a'},
+    # 깊이: Depth Anything V2 Small(Apache-2.0) ONNX — 그래프와 가중치가 따로
+    'depth_g': {'url': HF.format(repo='onnx-community/depth-anything-v2-small-ONNX', rev='c3b67641fd837b2368757101311e5d21e511441e', path='onnx/model.onnx'),
+                'sha256': '345f249eda90f33e0548890f2fe1e89662c1dbb5a8b7c10a50492558f65e85a3'},
+    'depth_d': {'url': HF.format(repo='onnx-community/depth-anything-v2-small-ONNX', rev='c3b67641fd837b2368757101311e5d21e511441e', path='onnx/model.onnx_data'),
+                'sha256': 'c4fba31e921953367d8c5348b92296b2bf41f9cef9745ffaca01e2b1653e6d08'},
 }
 # 편집기 안 이름(id) ← 원본, 변환, 팩 파일 이름, 어느 팩
 FILES = [
@@ -52,13 +60,17 @@ FILES = [
     ('czM_lama', 'lama_onnx+lama_anime', 'lama_anime', 'lama-anime.onnx.gz', 'erase'),
     ('czM_lineF', 'line_fine', 'fp16w', 'lineart-fine.onnx.gz', 'line'),
     ('czM_lineC', 'line_coarse', 'fp16w', 'lineart-coarse.onnx.gz', 'line'),
+    ('czM_rife', 'rife49', 'fp16w', 'rife-v4.9.onnx.gz', 'interp'),
+    ('czM_depth', 'depth_g+depth_d', 'fp16w_ext', 'depth-anything-v2-small.onnx.gz', 'depth'),
 ]
 PACKS = {'base': {'label': '기본 팩', 'desc': "AI 실행 도구, 찾기 모델, '빠르게' 모양 모델, 윤곽 따기"},
          'precise': {'label': '정밀 팩', 'desc': "'정밀하게' 모양 모델"},
          'bg': {'label': 'AI 배경 지우기 팩', 'desc': '애니 캐릭터만 따내는 모델 (skytnt/anime-seg)'},
          'sr': {'label': 'AI 화질 키우기 팩', 'desc': 'Real-ESRGAN 애니 업스케일 모델 (빠르게·고화질)'},
          'erase': {'label': 'AI 지우개 팩', 'desc': '칠한 곳을 둘레에 맞게 메우는 LaMa 모델 (애니·만화용)'},
-         'line': {'label': 'AI 선화 추출 팩', 'desc': '그림에서 선만 뽑는 모델 (가는 선·굵은 선)'}}
+         'line': {'label': 'AI 선화 추출 팩', 'desc': '그림에서 선만 뽑는 모델 (가는 선·굵은 선)'},
+         'interp': {'label': 'AI 중간 장면 팩', 'desc': '움짤 장면 사이를 새로 그려 부드럽게 하는 RIFE 모델 (애니용 v4.9)'},
+         'depth': {'label': 'AI 깊이 팩', 'desc': '그림의 앞뒤 거리를 재는 Depth Anything V2 모델 (배경 흐림·입체 움짤)'}}
 sha = lambda b: hashlib.sha256(b).hexdigest()
 
 

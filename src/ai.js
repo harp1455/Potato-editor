@@ -1,6 +1,6 @@
 /* ================= AI 도구: 배경 지우기·화질 키우기 (설치판에서 팩을 받아 써요) ================= */
 // 자동 흰칠과 같은 일꾼(onnxruntime)을 써요. 그림은 이 컴퓨터 안에서만 처리해요
-let aiSr = { scale: 2, model: 'sr6' }, aiScope = 'one';
+let aiSr = { scale: 2, model: 'sr6' }, aiScope = 'one', aiForce = null; // aiForce: 일괄 처리에서 그림 하나만
 async function aiReady(pack) {
   if (!czIsApp()) { toast('AI 도구는 설치판(exe)에서 팩을 받아 쓸 수 있어요. HTML판에는 들어 있지 않아요.', 4600); return false; }
   return czPacksReady(['base', pack]);
@@ -63,6 +63,7 @@ async function aiRec(c, base, tag, alpha) { // 결과 캔버스 → 새 그림 �
 }
 // 범위: 지금 고른 그림 레이어, 또는 (이미지 편집) 폴더·모든 그림의 바탕 그림
 function aiTargets() {
+  if (aiForce) return aiForce;
   const el = selEls()[0], A = el && el.type === 'panel' ? activeObj(el) : null;
   if (!isImg() || aiScope === 'one') return A ? [{ p: page(), el, L: A }] : [];
   const fo = page().folder;
@@ -102,7 +103,7 @@ async function aiRun(kind, v) {
       done++;
     }
     if (tk.stop) throw new Error('stop');
-    tk.done(); commit(); layoutSpacer(); fitView(); renderProps(); renderLib(); requestRender();
+    tk.done(); commit(); if (done) bxNote({ op: 'ai', kind, v, scale: aiSr.scale, model: aiSr.model }); layoutSpacer(); fitView(); renderProps(); renderLib(); requestRender();
     toast(kind === 'bg' ? (done > 1 ? `${done}장의 배경을 지웠어요` : v === 'cut' ? '배경을 지웠어요. PNG로 저장하면 투명해요' : v === 'blur' ? '인물은 그대로 두고 배경만 흐렸어요. 바탕 그림 보정의 흐림으로 세기를 바꿔요' : '인물만 새 레이어로 올렸어요')
       : (done > 1 ? `${done}장의 화질을 키웠어요` : `화질을 키웠어요 (${page().w} × ${page().h})`), 4200);
   } catch (e) {
@@ -243,7 +244,7 @@ async function aiLineRun(v) {
 function aiSec() {
   const multi = isImg() && realIdx().length > 1, fo = isImg() && page().folder && folderById(page().folder);
   return sec('ai', 'AI 도구', `
-    <p class="muted small" style="margin:0 0 6px">처음 쓸 때 팩을 한 번 받아요 (배경 지우기 82MB, 화질 키우기 11MB). 그림은 이 컴퓨터 안에서만 처리해요.</p>
+    <p class="muted small" style="margin:0 0 6px">처음 쓸 때 기능마다 팩을 한 번 받아요. 그림은 이 컴퓨터 안에서만 처리해요.</p>
     ${multi ? `<div class="row"><span class="l">적용할 그림</span><div class="seg"><button class="btn sm ${aiScope === 'one' ? 'on' : ''}" data-act="ai-scope" data-v="one">이 그림</button>${fo ? `<button class="btn sm ${aiScope === 'fold' ? 'on' : ''}" data-act="ai-scope" data-v="fold">이 폴더</button>` : ''}<button class="btn sm ${aiScope === 'all' ? 'on' : ''}" data-act="ai-scope" data-v="all">모든 그림</button></div></div>` : ''}
     <h4 class="advh">배경 지우기</h4>
     <div class="btnrow"><button class="btn sm" data-act="ai-bg" data-v="cut" title="캐릭터만 남기고 배경을 투명하게">배경 지우기</button><button class="btn sm" data-act="ai-bg" data-v="layer" title="원래 그림은 두고, 캐릭터만 딴 것을 위에 새 레이어로">인물만 새 레이어로</button><button class="btn sm" data-act="ai-bg" data-v="blur" title="캐릭터는 또렷하게, 배경만 흐리게">배경만 흐리게</button></div>
@@ -256,6 +257,8 @@ function aiSec() {
     <div class="row"><span class="l">선</span><div class="seg"><button class="btn sm ${aiLine.model === 'F' ? 'on' : ''}" data-act="ai-lnm" data-v="F" title="가늘고 깔끔한 선, 음영 선도 조금">가는 선</button><button class="btn sm ${aiLine.model === 'C' ? 'on' : ''}" data-act="ai-lnm" data-v="C" title="굵은 윤곽 위주, 연필 느낌">굵은 선</button></div></div>
     <div class="row"><span class="l">진하기</span><input type="range" min="0.6" max="3" step="0.1" value="${aiLine.gain}" data-ailn="gain"><span class="muted small" style="min-width:28px">${aiLine.gain.toFixed(1)}</span></div>
     <div class="btnrow"><button class="btn sm" data-act="ai-line" data-v="layer" title="원래 그림은 두고, 투명 바탕 선화를 위에 새 레이어로">선화 레이어로</button><button class="btn sm" data-act="ai-line" data-v="replace" title="그림을 흰 바탕 선화로 바꿔요">그림을 선화로</button></div>
+    <h4 class="advh">깊이 효과</h4>
+    <div class="btnrow"><button class="btn sm" data-act="ai-dof" title="AI가 잰 거리대로, 멀수록 더 흐리게 (카메라 심도처럼)">거리에 따라 흐리게…</button><button class="btn sm" data-act="ai-para" title="그림 한 장을 앞뒤로 나눠 카메라가 움직이는 것 같은 움짤로">입체 움짤 만들기…</button></div>
     <h4 class="advh">AI 지우개</h4>
     <p class="muted small" style="margin:0">위쪽 '가리기' 붓의 'AI 지우개'로 지울 물건을 칠하거나, '선택'으로 고른 뒤 'AI로 지우기'를 누르면 둘레에 맞게 메워요. (지우개 95MB, 선화 16MB 팩)</p>`);
 }
@@ -263,6 +266,8 @@ function aiAct(act, v) {
   if (act === 'ai-scope') { aiScope = v; renderProps(); return; }
   if (act === 'ai-sc') { aiSr.scale = +v; renderProps(); return; }
   if (act === 'ai-md') { aiSr.model = v; renderProps(); return; }
+  if (act === 'ai-dof') { dpOpenDof(); return; }
+  if (act === 'ai-para') { dpParaFromImage(); return; }
   if (act === 'ai-bg') { aiRun('bg', v); return; }
   if (act === 'ai-sr') { aiRun('sr'); return; }
   if (act === 'ai-lnm') { aiLine.model = v; renderProps(); return; }

@@ -167,16 +167,79 @@ function renderLayers() {
 })();
 // 요소 하나를 따로 그려서 불투명도·섞는 법으로 얹기 (글자 테두리와 속이 겹쳐 비치지 않게)
 function drawElGroup(ctx, el, opt, inner) {
-  const m = ctx.getTransform(), b0 = elBounds(el), pd = Math.max(el.w, el.h) * 0.25 + 40, b = { x0: b0.x0 - pd, y0: b0.y0 - pd, x1: b0.x1 + pd, y1: b0.y1 + pd }, cw = ctx.canvas.width, ch = ctx.canvas.height;
+  const m = ctx.getTransform(), b0 = elBounds(el), pd = Math.max(el.w, el.h) * 0.25 + 40 + lfxPad(el), b = { x0: b0.x0 - pd, y0: b0.y0 - pd, x1: b0.x1 + pd, y1: b0.y1 + pd }, cw = ctx.canvas.width, ch = ctx.canvas.height;
   const xs = [], ys = [];
   for (const [x, y] of [[b.x0, b.y0], [b.x1, b.y0], [b.x0, b.y1], [b.x1, b.y1]]) { xs.push(m.a * x + m.c * y + m.e); ys.push(m.b * x + m.d * y + m.f); }
   const x0 = Math.max(0, Math.floor(Math.min(...xs))), y0 = Math.max(0, Math.floor(Math.min(...ys))), x1 = Math.min(cw, Math.ceil(Math.max(...xs))), y1 = Math.min(ch, Math.ceil(Math.max(...ys)));
   if (x1 <= x0 || y1 <= y0) return;
   const off = newCanvas(x1 - x0, y1 - y0), g = off.getContext('2d');
   g.setTransform(m.a, m.b, m.c, m.d, m.e - x0, m.f - y0); inner(g);
+  const fin = hasLfx(el) ? lfxCompose(off, el, Math.hypot(m.a, m.b)) : off;
   ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.globalAlpha *= (el.eop ?? 100) / 100; if (el.eblend) ctx.globalCompositeOperation = el.eblend;
-  ctx.drawImage(off, x0, y0); ctx.restore();
+  ctx.drawImage(fin, x0, y0); ctx.restore();
+}
+
+/* ================= 그림 레이어 효과 (외곽선·그림자·빛) ================= */
+// 그림의 모양(투명하지 않은 곳)을 따라 테두리·그림자·빛을 붙여요. 원본은 그대로라 언제든 끄고 켤 수 있어요.
+const LFX = { lfSc: '#ffffff', lfSw: 6, lfDc: '#000000', lfDa: 55, lfDang: 45, lfDd: 12, lfDb: 10, lfGc: '#fff1a0', lfGs: 18, lfGa: 85 };
+const LFX_KEYS = ['lfS', 'lfD', 'lfG', ...Object.keys(LFX)];
+const lfxOk = el => !el.lock && (el.type === 'stamp' || el.type === 'draw' || el.type === 'shape' || (imgLayerEl(el) && !!el.img));
+const hasLfx = el => !!(el.lfS || el.lfD || el.lfG);
+const lfxV = (el, k) => el[k] ?? LFX[k];
+function lfxPad(el) {
+  if (!hasLfx(el)) return 0;
+  let p = 0;
+  if (el.lfS) p += lfxV(el, 'lfSw');
+  if (el.lfD) p = Math.max(p, p + lfxV(el, 'lfDd') + lfxV(el, 'lfDb') * 1.5);
+  if (el.lfG) p = Math.max(p, p + lfxV(el, 'lfGs') * 2);
+  return p + 4;
+}
+// 모양만 색칠한 그림 (투명도 그대로)
+function lfxTint(src, col) {
+  const t = newCanvas(src.width, src.height), g = t.getContext('2d');
+  g.drawImage(src, 0, 0); g.globalCompositeOperation = 'source-in'; g.fillStyle = col; g.fillRect(0, 0, t.width, t.height);
+  return t;
+}
+// 그림자만 그리기 (그림은 화면 밖으로 보내고 그림자만 제자리에)
+function lfxShadow(g, src, dx, dy, blur, col) {
+  const far = src.width + 200;
+  g.save(); g.shadowColor = col; g.shadowBlur = blur; g.shadowOffsetX = dx + far; g.shadowOffsetY = dy;
+  g.drawImage(src, -far, 0); g.restore();
+}
+function lfxCompose(off, el, sx) {
+  const W = off.width, H = off.height;
+  let src = off;
+  if (el.lfS) { // 외곽선: 색칠한 모양을 둘레로 여러 번 찍어 두께를 만들어요
+    const r = Math.max(0.6, lfxV(el, 'lfSw') * sx), t = lfxTint(off, lfxV(el, 'lfSc')), o = newCanvas(W, H), og = o.getContext('2d');
+    const rings = r > 2.5 ? [r, r * 0.66, r * 0.33] : [r];
+    for (const rr of rings) { const n = clamp(Math.ceil(Math.PI * Math.sqrt(rr / 0.4)), 8, 64); for (let i = 0; i < n; i++) { const a = i / n * Math.PI * 2; og.drawImage(t, Math.cos(a) * rr, Math.sin(a) * rr); } }
+    og.drawImage(off, 0, 0); src = o;
+  }
+  if (!el.lfD && !el.lfG) return src;
+  const f = newCanvas(W, H), fg = f.getContext('2d');
+  if (el.lfG) { // 빛: 둘레로 번지는 색
+    const s = Math.max(1, lfxV(el, 'lfGs') * sx), col = rgba(lfxV(el, 'lfGc'), clamp(lfxV(el, 'lfGa'), 0, 100) / 100);
+    lfxShadow(fg, src, 0, 0, s * 2, col); lfxShadow(fg, src, 0, 0, s * 0.8, col);
+  }
+  if (el.lfD) { // 그림자
+    const a = lfxV(el, 'lfDang') * DEG, d = lfxV(el, 'lfDd') * sx;
+    lfxShadow(fg, src, Math.cos(a) * d, Math.sin(a) * d, Math.max(0, lfxV(el, 'lfDb') * sx * 2), rgba(lfxV(el, 'lfDc'), clamp(lfxV(el, 'lfDa'), 0, 100) / 100));
+  }
+  fg.drawImage(src, 0, 0);
+  return f;
+}
+function lfxSec(el) {
+  if (!lfxOk(el)) return '';
+  const n = (el.lfS ? 1 : 0) + (el.lfD ? 1 : 0) + (el.lfG ? 1 : 0);
+  return sec('lfx', '레이어 효과', `<p class="muted small" style="margin:0 0 6px">그림의 모양을 따라 외곽선·그림자·빛을 붙여요. 그림은 그대로라 언제든 끌 수 있어요.</p>
+    ${check('lfS', '외곽선')}
+    ${el.lfS ? row('색', color('lfSc')) + row('두께', range('lfSw', 1, 40, 1)) : ''}
+    ${check('lfD', '그림자')}
+    ${el.lfD ? row('색', color('lfDc')) + row('진하기', range('lfDa', 0, 100, 1)) + row('방향', range('lfDang', -180, 180, 1)) + row('거리', range('lfDd', 0, 120, 1)) + row('흐림', range('lfDb', 0, 60, 1)) : ''}
+    ${check('lfG', '빛 (바깥 광채)')}
+    ${el.lfG ? row('색', color('lfGc')) + row('크기', range('lfGs', 1, 80, 1)) + row('세기', range('lfGa', 0, 100, 1)) : ''}
+    ${n ? '<div class="btnrow"><button class="btn sm" data-act="lfx-off">효과 모두 끄기</button></div>' : ''}`, n ? String(n) : '');
 }
 
 /* ================= 그림 크기·캔버스 크기 (이미지 편집) ================= */
@@ -235,12 +298,12 @@ function sizeAct(act, v) {
   const fin = () => { layoutSpacer(); fitView(); commit(); renderProps(); renderLib(); requestRender(); toast(n > 1 ? `${n}장의 크기를 바꿨어요` : `${p0.w} × ${p0.h}로 바꿨어요`); };
   if (act === 'sz-pct' || act === 'sz-long' || act === 'sz-wid') {
     for (const p of ts) { const k = act === 'sz-pct' ? +v : act === 'sz-long' ? +v / Math.max(p.w, p.h) : +v / p.w; if (Math.abs(k - 1) > 1e-4) { resizePage(p, k); n++; } }
-    return fin();
+    bxNote({ op: 'size', act, v: +v }); return fin();
   }
   if (act === 'sz-ratio') {
     const [a, b] = v.split(':').map(Number);
     for (const p of ts) { const W = Math.max(p.w, Math.round(p.h * a / b)), H = Math.max(p.h, Math.round(p.w * b / a)); if (W !== p.w || H !== p.h) { canvasPage(p, W, H, 0.5, 0.5, szTrans); n++; } }
-    return fin();
+    bxNote({ op: 'size', act, v, trans: szTrans }); return fin();
   }
   if (act === 'sz-go') {
     const w = Math.round(+$('#szW').value), h = Math.round(+$('#szH').value);
@@ -248,9 +311,11 @@ function sizeAct(act, v) {
     if (szMode === 'img') {
       const k = w !== p0.w ? w / p0.w : h / p0.h;
       for (const p of ts) { resizePage(p, k); n++; }
+      bxNote({ op: 'size', act: 'sz-wid', v: w });
     } else {
       const ax = (szAnchor % 3) / 2, ay = Math.floor(szAnchor / 3) / 2;
       for (const p of ts) { canvasPage(p, ts.length > 1 ? p.w + (w - p0.w) : w, ts.length > 1 ? p.h + (h - p0.h) : h, ax, ay, szTrans); n++; }
+      bxNote({ op: 'size', act: 'cv', w, h, ax, ay, trans: szTrans });
     }
     return fin();
   }

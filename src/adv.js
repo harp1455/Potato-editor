@@ -19,6 +19,7 @@ function advKey(L, force) {
   const p = [];
   for (const k of ADV_KEYS) { if (k === 'stSh' || k === 'stHi' || k === 'stBal' || k === 'stA') continue; const v = L[k]; if (v !== undefined && v !== ADV[k]) p.push(k + v); }
   if (L.stOn) p.push(L.stSh || ADV.stSh, L.stHi || ADV.stHi, L.stBal ?? 0, L.stA ?? ADV.stA);
+  if (L.cm && (L.cmA ?? 100) > 0) p.push('m' + L.cm.map(x => (+x).toFixed(3)).join('/') + '@' + (L.cmA ?? 100));
   if (!p.length && !curvesOn(L) && !hslOn(L)) return '';
   if (curvesOn(L)) p.push('c' + JSON.stringify(L.curves));
   if (hslOn(L)) p.push('h' + JSON.stringify(L.hsl));
@@ -130,7 +131,21 @@ uniform float uExp, uHl, uSh, uWh, uBl, uTemp, uTint, uVib, uFade;
 uniform float uIn0, uIn1, uGam, uOut0, uOut1;
 uniform int uHslOn; uniform vec3 uHsl[8]; uniform vec2 uBand[8];
 uniform int uSt; uniform vec3 uStSh, uStHi; uniform float uStBal, uStA;
+uniform float uCmA; uniform vec3 uCmK, uCmO;
 float luma(vec3 c){ return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+vec3 s2l(vec3 c){ return mix(c / 12.92, pow((max(c, 0.0) + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)); }
+vec3 l2s(vec3 c){ return mix(c * 12.92, 1.055 * pow(max(c, 0.0), vec3(1.0/2.4)) - 0.055, step(0.0031308, c)); }
+const vec3 WP = vec3(0.95047, 1.0, 1.08883);
+vec3 rgb2lab(vec3 c){
+  vec3 x = s2l(clamp(c, 0.0, 1.0)) * mat3(0.4124564, 0.3575761, 0.1804375, 0.2126729, 0.7151522, 0.0721750, 0.0193339, 0.1191920, 0.9503041) / WP;
+  vec3 f = mix(x * 7.787 + 16.0/116.0, pow(max(x, 0.0), vec3(1.0/3.0)), step(0.008856, x));
+  return vec3(116.0 * f.y - 16.0, 500.0 * (f.x - f.y), 200.0 * (f.y - f.z));
+}
+vec3 lab2rgb(vec3 L){
+  float fy = (L.x + 16.0) / 116.0; vec3 f = vec3(fy + L.y / 500.0, fy, fy - L.z / 200.0);
+  vec3 x = mix((f - 16.0/116.0) / 7.787, f * f * f, step(0.206893, f)) * WP;
+  return l2s(clamp(x * mat3(3.2404542, -1.5371385, -0.4985314, -0.9692660, 1.8760108, 0.0415560, 0.0556434, -0.2040259, 1.0572252), 0.0, 1.0));
+}
 vec3 rgb2hsl(vec3 c){
   float mx = max(c.r, max(c.g, c.b)), mn = min(c.r, min(c.g, c.b)), l = (mx + mn) * 0.5, d = mx - mn;
   if (d < 1e-5) return vec3(0.0, 0.0, l);
@@ -143,6 +158,8 @@ vec3 hsl2rgb(vec3 h){ if (h.y < 1e-5) return vec3(h.z); float q = h.z < 0.5 ? h.
 vec3 softl(vec3 b, vec3 t){ return mix(2.0*b*t + b*b*(1.0 - 2.0*t), sqrt(max(b, 0.0))*(2.0*t - 1.0) + 2.0*b*(1.0 - t), step(0.5, t)); }
 void main(){
   vec4 s = texture(tex, uv); vec3 c = s.rgb;
+  // 색감 맞추기 (기준 그림의 밝기·색 분위기로, Lab 공간에서)
+  if (uCmA > 0.0) c = mix(c, lab2rgb(rgb2lab(c) * uCmK + uCmO), uCmA);
   // 노출·화이트밸런스 (선형 공간에서)
   vec3 l = pow(max(c, 0.0), vec3(2.2)) * exp2(uExp);
   vec3 m = vec3(1.0 + 0.32*uTemp, 1.0 + 0.02*uTemp, 1.0 - 0.32*uTemp) * vec3(1.0 + 0.12*uTint, 1.0 - 0.22*uTint, 1.0 + 0.12*uTint);
@@ -299,6 +316,8 @@ function advProcess(id, im, W, H, L, lv) {
   const cube = L.cube ? lutGet(L.cube) : null;
   gl.uniform1f(u.uCubeA, cube ? clamp(v('cubeA') / 100, 0, 1) : 0); gl.uniform1f(u.uCubeN, cube ? cube.n : 2);
   gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_3D, cube ? lutTex(gl, L.cube, cube) : null); gl.uniform1i(u.lut3, 2); gl.activeTexture(gl.TEXTURE0);
+  const cm = L.cm && L.cm.length === 6 ? L.cm : null; gl.uniform1f(u.uCmA, cm ? clamp((L.cmA ?? 100) / 100, 0, 1) : 0);
+  if (cm) { gl.uniform3f(u.uCmK, cm[0], cm[2], cm[4]); gl.uniform3f(u.uCmO, cm[1], cm[3], cm[5]); }
   gl.uniform1i(u.uSt, v('stOn') ? 1 : 0);
   if (v('stOn')) { gl.uniform3fv(u.uStSh, hexRgb(v('stSh'))); gl.uniform3fv(u.uStHi, hexRgb(v('stHi'))); gl.uniform1f(u.uStBal, v('stBal') / 100); gl.uniform1f(u.uStA, v('stA') / 100); }
   gl.bindFramebuffer(gl.FRAMEBUFFER, advG.fb); gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, advG.t1, 0);
@@ -388,26 +407,32 @@ function advSec(el, A) {
     ${row('필터', `<select data-advlut="1"><option value="">없음</option>${lutList().map(x => `<option value="${esc(x.name)}" ${A.cube === x.name ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>`)}
     ${A.cube ? LS(row('세기', range('cubeA', 0, 100, 1))) : ''}
     <div class="btnrow"><button class="btn sm" data-act="adv-lut-load">.cube 파일 불러오기</button>${A.cube ? '<button class="btn sm danger" data-act="adv-lut-del" title="이 필터를 목록에서 지워요">목록에서 지우기</button>' : ''}</div>`)}
+    ${A.img ? ssec('adv-cm', '색감 맞추기', cmHtml(A)) : ''}
     <h4 class="advh">보정 프리셋</h4>
     <div class="advlooks">${ADV_LOOKS.map(([n], i) => `<button class="btn sm" data-act="adv-look" data-v="b${i}">${n}</button>`).join('')}${mine.map((x, i) => `<span class="advmine"><button class="btn sm" data-act="adv-look" data-v="u${i}">${esc(x.name)}</button><button class="btn sm" data-act="adv-look-del" data-v="${i}" title="이 프리셋 지우기">×</button></span>`).join('')}</div>
     <div class="btnrow"><button class="btn sm" data-act="adv-save">지금 보정을 프리셋으로 저장</button></div>
     ${multi ? `<div class="btnrow">${fo ? `<button class="btn sm" data-act="adv-apply" data-v="fold">'${esc(fo.name)}' 폴더 전체에 같은 보정</button>` : ''}<button class="btn sm" data-act="adv-apply" data-v="all">모든 그림에 같은 보정</button></div>` : ''}
     ${advG.gl === false ? '<p class="muted small">이 컴퓨터에서는 고급 보정을 쓸 수 없어요 (WebGL2가 꺼져 있어요).</p>' : ''}`, on ? '켜짐' : '');
 }
+function advAuto(A) { // 자동 보정: 가장 어두운 곳·밝은 곳으로 레벨 맞추기 (그림마다 따로 계산)
+  const H = advHist(A.img); if (!H) return false;
+  const pct = q => { let s = 0; for (let i = 0; i < 256; i++) { s += H.l[i]; if (s >= H.n * q) return i; } return 255; };
+  const lo = pct(0.004), hi = pct(0.996);
+  A.lvIn0 = Math.min(lo, 60); A.lvIn1 = Math.max(hi, 195); if (A.lvIn1 - A.lvIn0 < 40) { A.lvIn0 = 0; A.lvIn1 = 255; }
+  const mid = pct(0.5), want = 0.48, cur = clamp((mid - A.lvIn0) / Math.max(1, A.lvIn1 - A.lvIn0), 0.05, 0.95);
+  A.lvGam = clamp(Math.round(Math.log(cur) / Math.log(want) * 100) / 100, 0.6, 1.6);
+  if (A.vib === undefined) A.vib = 8;
+  return true;
+}
 const advLayer = () => { const el = selEls()[0]; return el && el.type === 'panel' ? activeObj(el) : null; };
 function advAct(act, v) {
   const el = selEls()[0], A = advLayer(); if (!A) return;
   const keepCurve = () => { A.curves = A.curves || {}; for (const c of ['rgb', 'r', 'g', 'b']) if (!A.curves[c]) A.curves[c] = [[0, 0], [255, 255]]; };
   switch (act) {
-    case 'adv-reset': advClear(A); break;
+    case 'adv-reset': advClear(A); delete A.cm; delete A.cmA; delete A.cmRef; break;
     case 'adv-auto': {
-      const H = advHist(A.img); if (!H) return;
-      const pct = q => { let s = 0; for (let i = 0; i < 256; i++) { s += H.l[i]; if (s >= H.n * q) return i; } return 255; };
-      const lo = pct(0.004), hi = pct(0.996);
-      A.lvIn0 = Math.min(lo, 60); A.lvIn1 = Math.max(hi, 195); if (A.lvIn1 - A.lvIn0 < 40) { A.lvIn0 = 0; A.lvIn1 = 255; }
-      const mid = pct(0.5), want = 0.48, cur = clamp((mid - A.lvIn0) / Math.max(1, A.lvIn1 - A.lvIn0), 0.05, 0.95);
-      A.lvGam = clamp(Math.round(Math.log(cur) / Math.log(want) * 100) / 100, 0.6, 1.6);
-      if (A.vib === undefined) A.vib = 8;
+      if (!advAuto(A)) return;
+      if (el && el.lock) bxNote({ op: 'auto' });
       toast('자동으로 맞췄어요. 레벨과 생동감 값을 바꿔서 더 다듬을 수 있어요'); break;
     }
     case 'adv-ch': advCh = v; renderProps(); return;
@@ -422,6 +447,11 @@ function advAct(act, v) {
       const L = v[0] === 'b' ? ADV_LOOKS[+v.slice(1)] : advLooksUser()[+v.slice(1)];
       if (!L) return; advSetState(A, v[0] === 'b' ? L[1] : L.v); toast(`'${v[0] === 'b' ? L[0] : L.name}' 보정을 넣었어요`); break;
     }
+    case 'cm-ref': cmRefSel = v; renderProps(); return;
+    case 'cm-file': cmPickFile(); return;
+    case 'cm-this': cmApplyThis(A); return;
+    case 'cm-all': cmApplyAll(A, v); return;
+    case 'cm-del': delete A.cm; delete A.cmA; delete A.cmRef; toast('색감 맞추기를 없앴어요'); break;
     case 'adv-look-del': { const a = advLooksUser(); a.splice(+v, 1); advLooksSave(a); renderProps(); return; }
     case 'adv-save': {
       const st = advState(A); if (!Object.keys(st).length) { toast('저장할 보정이 없어요. 먼저 보정을 바꿔 주세요'); return; }
@@ -507,3 +537,91 @@ function advDrawCurve(cv, A) {
   propsEl.addEventListener('input', e => { const k = e.target.dataset && e.target.dataset.k; if (k === 'lvIn0' || k === 'lvIn1') advMount(); });
   new MutationObserver(() => advMount()).observe(propsEl, { childList: true });
 })();
+
+/* ---- 여러 컷 색감 맞추기 ---- */
+// 기준 그림의 밝기·색 분위기(Lab 색 공간의 평균과 퍼짐)를 다른 그림에 옮겨요 (Reinhard 방식).
+// 그림 자체는 그대로고, 보정값(cm: 6개 숫자)만 붙어서 세기를 바꾸거나 언제든 없앨 수 있어요.
+let cmRefSel = '', cmExt = null;
+function cmLab(r, g, b) {
+  const f = v => { v /= 255; return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+  const R = f(r), G = f(g), B = f(b);
+  const x = (0.4124564 * R + 0.3575761 * G + 0.1804375 * B) / 0.95047, y = 0.2126729 * R + 0.7151522 * G + 0.0721750 * B, z = (0.0193339 * R + 0.1191920 * G + 0.9503041 * B) / 1.08883;
+  const h = t => t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116, fx = h(x), fy = h(y), fz = h(z);
+  return [116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)];
+}
+function cmStatsOf(c) { // 캔버스 → Lab 평균·표준편차 (투명한 곳은 빼요)
+  const d = c.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, c.width, c.height).data, m = [0, 0, 0], q = [0, 0, 0];
+  let n = 0;
+  for (let i = 0; i < d.length; i += 4) { if (d[i + 3] < 128) continue; const L = cmLab(d[i], d[i + 1], d[i + 2]); for (let k = 0; k < 3; k++) { m[k] += L[k]; q[k] += L[k] * L[k]; } n++; }
+  if (n < 16) return null;
+  for (let k = 0; k < 3; k++) { m[k] /= n; q[k] = Math.sqrt(Math.max(0, q[k] / n - m[k] * m[k])); }
+  return { m, s: q };
+}
+async function cmImg(id) { const im = imgCache.get(id); if (!im) return null; if (!im.complete || !im.naturalWidth) { try { await im.decode(); } catch (_) { return null; } } return im; }
+// 레이어 그림의 색 통계. look = 그 그림에 붙은 보정까지 반영 (기준 그림은 보이는 그대로)
+async function cmStatsL(L, look) {
+  const im = await cmImg(L.img); if (!im) return null;
+  const k = Math.min(1, 256 / Math.max(im.naturalWidth, im.naturalHeight)), W = Math.max(2, Math.round(im.naturalWidth * k)), H = Math.max(2, Math.round(im.naturalHeight * k));
+  let c = look && advKey(L, true) ? advProcess(L.img, im, W, H, L, 1 / k) : null;
+  if (!c) { c = newCanvas(W, H); const g = c.getContext('2d'); g.imageSmoothingQuality = 'high'; g.drawImage(im, 0, 0, W, H); }
+  return cmStatsOf(c);
+}
+function cmMake(ref, tgt) { // Lab 채널마다 (값 - 평균)·배율 + 기준 평균
+  const lim = [[0.45, 2.2], [0.3, 3], [0.3, 3]], out = [];
+  for (let k = 0; k < 3; k++) { const a = clamp(ref.s[k] / Math.max(0.5, tgt.s[k]), lim[k][0], lim[k][1]); out.push(Math.round(a * 1e4) / 1e4, Math.round((ref.m[k] - a * tgt.m[k]) * 100) / 100); }
+  return out;
+}
+function cmCands(A) { // 기준으로 고를 수 있는 그림들
+  const out = [];
+  if (isImg()) { for (const i of realIdx()) { const P = doc.pages[i], B = baseEl(P); if (B && B.img && B !== A) out.push(['p:' + P.id, P.name, B]); } }
+  else doc.pages.forEach((P, pi) => { let n = 0; for (const e of P.els) if (e.type === 'panel') { n++; for (const { o, i } of layerList(e)) if (o !== A && o.img) out.push([`e:${e.id}:${i}`, `${P.name || '페이지 ' + (pi + 1)} · 컷 ${n}${i ? ` (레이어 ${i})` : ''}`, o]); } });
+  return out;
+}
+function cmHtml(A) {
+  const cs = cmCands(A), multi = isImg() ? realIdx().length > 1 : doc.pages.some(P => P.els.filter(e => e.type === 'panel' && (e.img || (e.layers || []).length)).length > 1);
+  const fo = isImg() && page().folder && folderById(page().folder);
+  const opts = `<option value="">기준 그림 고르기…</option>${cs.map(([v, n]) => `<option value="${esc(v)}" ${cmRefSel === v ? 'selected' : ''}>${esc(n)}</option>`).join('')}${cmExt ? `<option value="f" ${cmRefSel === 'f' ? 'selected' : ''}>파일: ${esc(cmExt.name)}</option>` : ''}`;
+  return `<p class="muted small" style="margin:0 0 6px">다른 그림의 밝기·색 분위기를 옮겨 와요. 컷마다 색감이 달라 보일 때 맞춰요.</p>
+    ${row('기준', `<select data-cmref="1">${opts}</select>`)}
+    <div class="btnrow"><button class="btn sm primary" data-act="cm-this" ${(cmRefSel === 'f' ? cmExt : cs.some(x => x[0] === cmRefSel)) ? '' : 'disabled'}>이 그림을 기준에 맞추기</button><button class="btn sm" data-act="cm-file" title="컴퓨터에 있는 그림을 기준으로 써요">파일에서 기준 고르기</button></div>
+    ${A.cm ? LS(row('세기', range('cmA', 0, 100, 1))) + `<p class="muted small" style="margin:0 0 6px">기준: ${esc(A.cmRef || '')}</p><div class="btnrow"><button class="btn sm" data-act="cm-del">색감 맞추기 없애기</button></div>` : ''}
+    ${multi ? `<p class="muted small" style="margin:8px 0 4px">이 그림이 마음에 들면 다른 그림을 이 그림에 맞춰요.</p><div class="btnrow">${isImg() ? `${fo ? `<button class="btn sm" data-act="cm-all" data-v="fold">'${esc(fo.name)}' 폴더 전체를 이 그림에</button>` : ''}<button class="btn sm" data-act="cm-all" data-v="all">모든 그림을 이 그림에</button>` : `<button class="btn sm" data-act="cm-all" data-v="page">이 페이지의 다른 컷을 이 컷에</button><button class="btn sm" data-act="cm-all" data-v="doc">모든 컷을 이 컷에</button>`}</div>` : ''}`;
+}
+function cmRefObj() { const c = cmCands(null).find(x => x[0] === cmRefSel); return c ? { name: c[1], L: c[2] } : null; }
+async function cmApplyThis(A) {
+  let st, name;
+  if (cmRefSel === 'f') { if (!cmExt) return; st = cmExt.st; name = cmExt.name; }
+  else { const R = cmRefObj(); if (!R) { toast('기준 그림을 찾지 못했어요'); return; } if (R.L === A) { toast('자기 자신과는 맞출 수 없어요'); return; } st = await cmStatsL(R.L, true); name = R.name; }
+  const t = await cmStatsL(A, false); if (!st || !t) { toast('그림의 색을 읽지 못했어요'); return; }
+  A.cm = cmMake(st, t); if (A.cmA === undefined) A.cmA = 100; A.cmRef = name;
+  commit(); renderProps(); requestRender(); toast('색감을 맞췄어요. 세기로 정도를 바꿀 수 있어요', 2600);
+}
+async function cmApplyAll(A, v) {
+  const st = await cmStatsL(A, true); if (!st) { toast('그림의 색을 읽지 못했어요'); return; }
+  const me = isImg() ? page().name : ((cmCands(null).find(x => x[2] === A) || [])[1] || '고른 컷'), ts = [];
+  if (isImg()) { const fo = page().folder; for (const i of realIdx()) { const P = doc.pages[i]; if (v === 'fold' && !inFolder(P.folder, fo)) continue; const B = baseEl(P); if (B && B.img && B !== A) ts.push(B); } }
+  else for (const P of (v === 'page' ? [page()] : doc.pages)) for (const e of P.els) if (e.type === 'panel') for (const { o } of layerList(e)) if (o !== A && o.img) ts.push(o);
+  if (!ts.length) { toast('맞출 다른 그림이 없어요'); return; }
+  const tk = ts.length > 6 ? czProgress('색감 맞추는 중') : null; let n = 0;
+  for (const L of ts) {
+    if (tk && tk.stop) break;
+    const t = await cmStatsL(L, false); if (t) { L.cm = cmMake(st, t); if (L.cmA === undefined) L.cmA = 100; L.cmRef = me; n++; }
+    if (tk) tk.set(`${n} / ${ts.length}`, n / ts.length);
+  }
+  if (tk) tk.done();
+  commit(); renderProps(); renderLib(); requestRender(); toast(`${n}장의 색감을 이 그림에 맞췄어요`, 2600);
+}
+function cmPickFile() {
+  const f = document.createElement('input'); f.type = 'file'; f.accept = 'image/*';
+  f.onchange = async () => {
+    const file = f.files && f.files[0]; if (!file) return;
+    try {
+      const url = URL.createObjectURL(file), im = await loadImg(url), k = Math.min(1, 256 / Math.max(im.naturalWidth, im.naturalHeight)), c = newCanvas(Math.max(2, Math.round(im.naturalWidth * k)), Math.max(2, Math.round(im.naturalHeight * k)));
+      c.getContext('2d').drawImage(im, 0, 0, c.width, c.height); URL.revokeObjectURL(url);
+      const st = cmStatsOf(c); if (!st) throw new Error('empty');
+      cmExt = { name: file.name.slice(0, 40), st }; cmRefSel = 'f'; renderProps(); toast(`'${cmExt.name}'을 기준으로 골랐어요. '이 그림을 기준에 맞추기'를 누르세요`, 3200);
+    } catch (e) { toast('그림 파일을 읽지 못했어요'); }
+  };
+  f.click();
+}
+propsEl.addEventListener('change', e => { if (!e.target.dataset || !e.target.dataset.cmref) return; cmRefSel = e.target.value; renderProps(); });

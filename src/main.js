@@ -299,8 +299,8 @@ function restoreHist(h) {
   sel = sel.filter(id => findEl(id)); imageEditId = null; xfBase = null; closeInline(true);
   layoutSpacer(); renderAll(); afterChange();
 }
-function undo() { if (isImg()) { imgUndo(); return; } if (hi <= 0) return; hi--; restoreHist(hist[hi]); }
-function redo() { if (isImg()) { imgRedoDo(); return; } if (hi >= hist.length - 1) return; hi++; restoreHist(hist[hi]); }
+function undo() { if (isImg()) { bxUndoHook(true); imgUndo(); return; } if (hi <= 0) return; hi--; restoreHist(hist[hi]); }
+function redo() { if (isImg()) { imgRedoDo(); bxUndoHook(false); return; } if (hi >= hist.length - 1) return; hi++; restoreHist(hist[hi]); }
 function imgUndoAt(P) { // 지금 그림에서 되돌릴 기록 번호 (없으면 -1)
   if (!P) return -1;
   for (let k = hi; k >= 1; k--) {
@@ -1683,7 +1683,7 @@ function drawPanelBorderAA(ctx, el, soft) {
 }
 function drawEl(ctx, el, opt) {
   if (el.hidden) return; // 레이어 목록에서 숨긴 것
-  if ((el.eop ?? 100) < 100 || (el.eblend && el.eblend !== 'source-over') || el.lmask) { drawElGroup(ctx, el, opt, g => { drawElInner(g, el, { ...opt, backdrop: ctx }); if (el.lmask) lmApply(g, el); }); return; }
+  if ((el.eop ?? 100) < 100 || (el.eblend && el.eblend !== 'source-over') || el.lmask || hasLfx(el)) { drawElGroup(ctx, el, opt, g => { drawElInner(g, el, { ...opt, backdrop: ctx }); if (el.lmask) lmApply(g, el); }); return; }
   drawElInner(ctx, el, opt);
 }
 function drawElInner(ctx, el, opt) {
@@ -1707,6 +1707,7 @@ function elBounds(el) {
   if (el.type === 'bubble' && el.tail) { x0 = Math.min(x0, el.tx); y0 = Math.min(y0, el.ty); x1 = Math.max(x1, el.tx); y1 = Math.max(y1, el.ty); m += el.sw * 2 + el.w * 0.15; }
   if (el.type === 'fx') m += (el.str || 0) * 3 + (el.kind === 'paint' ? (el.soft || 0) * 5 : 0) + (el.pad || 0);
   if (el.mo) m += Math.max(el.w, el.h) * 0.3;
+  if (el.lfS || el.lfD || el.lfG) m += lfxPad(el);
   return { x0: x0 - m, y0: y0 - m, x1: x1 + m, y1: y1 + m };
 }
 const inView = (b, v) => !v || !(b.x1 < v.x0 || b.x0 > v.x1 || b.y1 < v.y0 || b.y0 > v.y1);
@@ -2170,8 +2171,9 @@ function applyCrop() {
   const x = Math.round(r.x), y = Math.round(r.y), w = Math.round(r.w), h = Math.round(r.h);
   if (w < 8 || h < 8) { toast('남길 곳이 너무 작아요. 화면을 끌어서 다시 골라 주세요.'); return; }
   if (x === 0 && y === 0 && w === p.w && h === p.h) { setMode(null); return; }
+  const W0 = p.w, H0 = p.h;
   for (const el of p.els) moveBy(el, -x, -y);
-  e2BakeStraight(p); p.w = w; p.h = h; setMode(null); e2SetHint('자르기'); commit(); fitView(); renderAll(); toast(`${w} × ${h} 크기로 잘랐어요. 되돌리기(Ctrl+Z)로 돌릴 수 있어요.`, 3200);
+  e2BakeStraight(p); p.w = w; p.h = h; setMode(null); e2SetHint('자르기'); commit(); bxNote({ op: 'crop', r: { x: x / W0, y: y / H0, w: w / W0, h: h / H0 } }); fitView(); renderAll(); toast(`${w} × ${h} 크기로 잘랐어요. 되돌리기(Ctrl+Z)로 돌릴 수 있어요.`, 3200);
 }
 function drawCropOverlay() {
   const r = cropSt.r, a = S({ x: r.x, y: r.y }), w = r.w * zoom, h = r.h * zoom;
@@ -2204,6 +2206,7 @@ function scaleEl(el, k) { // 크기와 자리를 원점 기준으로 k배
   if (el.type === 'stamp' || el.type === 'draw') mul(['ow']);
   if (el.type === 'panel') { mul(['bw', 'radius', 'ox', 'oy']); for (const L of el.layers || []) { if (typeof L.ox === 'number') L.ox *= k; if (typeof L.oy === 'number') L.oy *= k; } } // 안쪽 그림 위치도 같이
   if (el.type === 'fx') mul(['str', 'soft', 'pad']);
+  if (el.lfS || el.lfD || el.lfG) for (const q of ['lfSw', 'lfDd', 'lfDb', 'lfGs']) el[q] = lfxV(el, q) * k; // 레이어 효과 두께·거리도 같이
 }
 function copyToPages(idxs) { // 고른 것을 다른 그림에도 같은 자리에 (그림 크기에 맞춰서)
   const p0 = page(), els = selEls().filter(o => !o.lock && !o.inPanel); if (!els.length) return;
@@ -2634,7 +2637,7 @@ const TEXT_FIT = new Set(['text', 'font', 'fs', 'bold', 'italic', 'sw', 'sw2', '
 const BUBBLE_FIT = new Set(['text', 'font', 'fs', 'bold', 'italic', 'lh', 'shape', 'auto']);
 function getProp(o, k) {
   if (VIRT[k]) return VIRT[k].get(o);
-  if (o[k] === undefined) { if ((o.type === 'panel' || !o.type) && k in LDEF) return LDEF[k]; if ((o.type === 'panel' || !o.type) && k in FX) return FX[k]; if ((o.type === 'panel' || !o.type) && k in ADV) return ADV[k]; }
+  if (o[k] === undefined) { if (k in LFX) return LFX[k]; if ((o.type === 'panel' || !o.type) && k in LDEF) return LDEF[k]; if ((o.type === 'panel' || !o.type) && k in FX) return FX[k]; if ((o.type === 'panel' || !o.type) && k in ADV) return ADV[k]; }
   return o[k];
 }
 function setProp(o, k, v) {
@@ -2873,7 +2876,7 @@ function stampProps(el) {
     ${row('', range('ow', 0, 40, 0.5))}
     ${row('불투명도', range('op', 5, 100, 1))}
     <div class="btnrow">${check('flip', '좌우 뒤집기')}</div>
-    <div class="btnrow"><button class="btn sm" data-act="stamp-white">흰 배경 지우기</button></div>
+    <div class="btnrow"><button class="btn sm" data-act="stamp-white">흰 배경 지우기</button>${isImg() ? '<button class="btn sm" data-act="liq" title="붓으로 밀고 부풀리고 오므려 모양을 고쳐요">뒤틀기</button>' : ''}</div>
     <p class="muted small">흰 테두리를 넣으면 웹툰 효과음처럼 그림 위에서 잘 보여요.</p>
   </div>${geomSec(el)}${commonSec()}`;
 }
@@ -2925,13 +2928,14 @@ function imgPageProps() {
   return `<div class="sec"><h3>이 그림</h3>
     <div class="imginfo"><span>이름</span><span title="${esc(p.name)}">${esc(p.name)}</span><span>크기</span><span>${p.w} × ${p.h}${rec && (rec.w !== p.w || rec.h !== p.h) ? ` (원본 ${rec.w} × ${rec.h})` : ''}</span></div>
     ${row('폴더', `<select data-act="pg-folder"><option value="">폴더 없음</option>${folderOptions(p.folder)}</select>`)}
-    <div class="btnrow"><button class="btn sm" data-act="crop">자르기</button><button class="btn sm" data-act="rot-l">왼쪽으로 돌리기</button><button class="btn sm" data-act="rot-r">오른쪽으로 돌리기</button>${B ? '<button class="btn sm" data-act="flip-img">좌우 뒤집기</button>' : ''}</div>
+    <div class="btnrow"><button class="btn sm" data-act="crop">자르기</button><button class="btn sm" data-act="rot-l">왼쪽으로 돌리기</button><button class="btn sm" data-act="rot-r">오른쪽으로 돌리기</button>${B ? '<button class="btn sm" data-act="flip-img">좌우 뒤집기</button><button class="btn sm" data-act="liq" title="붓으로 밀고 부풀리고 오므려 모양을 고쳐요 (Ctrl+Shift+X)">뒤틀기</button>' : ''}</div>
     ${B ? row('수평', `<input type="range" data-e2s="1" min="-30" max="30" step="0.1" value="${B.straight || 0}"><input type="number" data-e2s="1" min="-30" max="30" step="0.1" value="${B.straight || 0}"> °`) + `<div class="btnrow"><button class="btn sm" data-act="e2-level" title="수평이어야 할 선을 따라 그으면 그만큼 돌려요">선을 그어 수평 맞추기</button>${B.straight ? '<button class="btn sm" data-act="e2-level0">수평 되돌리기</button>' : ''}</div><p class="muted small" style="margin:0 0 6px">기울인 만큼 생기는 빈 곳이 없도록 조금 확대해요.</p>` : ''}
     <div class="btnrow">${p.els.filter(e => !e.hidden).length > 1 ? '<button class="btn sm" data-act="e2-flatten" title="글자·도형·그림 레이어를 바탕 그림 한 장으로 합쳐요">레이어 모두 합치기</button>' : ''}<button class="btn sm" data-act="img-reset" ${changed ? '' : 'disabled'}>처음 상태로</button><button class="btn sm danger" data-act="img-del">목록에서 빼기</button></div>
     ${row('바탕색', `<input type="color" data-k="bg" data-scope="page">`)}
     <p class="muted small">바탕색은 투명한 그림 뒤나 늘린 캔버스에 깔리는 색이에요.</p>
   </div>
   ${sizeSec()}
+  ${bxSec()}
   ${aaSec()}
   <div class="sec"><h3>이렇게 써요</h3><ol class="tips">
     <li>왼쪽 목록에서 고칠 그림을 눌러요. <kbd>PageUp</kbd>/<kbd>PageDown</kbd>으로 앞뒤 그림을 넘겨요.</li>
@@ -2978,7 +2982,7 @@ function renderProps() {
   if (!ss.length) html = isImg() ? imgPageProps() : pageProps();
   else if (ss.length > 1) html = multiProps();
   else html = ss[0].lock ? lockProps(ss[0]) : ({ panel: panelProps, bubble: bubbleProps, text: textProps, stamp: stampProps, draw: drawProps, fx: fxProps, shape: shapeProps, tmpl: tmplProps })[ss[0].type](ss[0]);
-  if (ss.length === 1 && !ss[0].lock) html = (imgLayerEl(ss[0]) && ss[0].img ? xfSec(ss[0]) : '') + html.replace('<div class="sec"><h3>순서</h3>', lmSec(ss[0]) + '<div class="sec"><h3>순서</h3>');
+  if (ss.length === 1 && !ss[0].lock) html = (imgLayerEl(ss[0]) && ss[0].img ? xfSec(ss[0]) : '') + html.replace('<div class="sec"><h3>순서</h3>', lfxSec(ss[0]) + lmSec(ss[0]) + '<div class="sec"><h3>순서</h3>');
   if (isImg() && ss.some(o => !o.lock && !o.inPanel) && realIdx().length > 1) html += copySec();
   const st = $('#right').scrollTop;
   propsEl.innerHTML = html;
@@ -3031,7 +3035,8 @@ async function stampWhite(el) {
 }
 function doAct(act, v) {
   const ss = selEls(), el = ss[0], pg = page();
-  if (act.startsWith('adv-')) { advAct(act, v); return; }
+  if (act.startsWith('adv-') || act.startsWith('cm-')) { advAct(act, v); return; }
+  if (act.startsWith('bx-')) { bxAct(act, v); return; }
   if (act.startsWith('sz-')) { sizeAct(act, v); return; }
   if (act.startsWith('ai-')) { aiAct(act, v); return; }
   if (act.startsWith('e2-')) { e2Act(act, v); return; }
@@ -3080,8 +3085,8 @@ function doAct(act, v) {
     case 'fx-kind': if (el) { el.kind = v; if (v === 'mosaic' && el.str < 6) el.str = 10; } break;
     case 'fx-continue': if (el) setMode('brush', el.id); return;
     case 'crop': setMode('crop'); return;
-    case 'rot-l': case 'rot-r': rotatePage(act === 'rot-r' ? 1 : -1); sel = []; commit(); fitView(); renderAll(); return;
-    case 'flip-img': { const B = baseEl(pg); if (B) { B.flip = !B.flip; B.rot = -(B.rot || 0); } break; }
+    case 'rot-l': case 'rot-r': rotatePage(act === 'rot-r' ? 1 : -1); sel = []; commit(); bxNote({ op: 'rot', dir: act === 'rot-r' ? 1 : -1 }); fitView(); renderAll(); return;
+    case 'flip-img': { const B = baseEl(pg); if (B) { B.flip = !B.flip; B.rot = -(B.rot || 0); bxNote({ op: 'flip' }); } break; }
     case 'img-reset': {
       const r = pg.img && images.get(pg.img); if (!r) return;
       if (!confirm('이 그림에 한 것(글자, 가리기, 자르기 등)을 모두 지우고 처음 상태로 돌릴까요?')) return;
@@ -3090,7 +3095,9 @@ function doAct(act, v) {
     case 'img-del': deleteImagePage(doc.cur); return;
     case 'copy-all': copyToPages(realIdx()); return;
     case 'copy-fold': copyToPages(realIdx().filter(i => inFolder(doc.pages[i].folder, pg.folder))); return;
+    case 'liq': lqOpen(); return;
     case 'rot0': if (el) el.rot = 0; break;
+    case 'lfx-off': if (el) { delete el.lfS; delete el.lfD; delete el.lfG; } break;
     case 'front': case 'back': case 'forward': case 'backward': layer(act); break;
     case 'dup': duplicateSel(); return;
     case 'del': deleteSel(); return;
@@ -3463,7 +3470,7 @@ const GS_SET0 = clone(gs.set);
 const gifOpen = () => gs.built && !$('#gifStudio').hidden;
 function gsReset() { // 다른 움짤 탭으로 바꿀 때 비우기
   if (gs.playing) gsPause(); clearTimeout(gsSaveT);
-  Object.assign(gs, { slides: [], sel: -1, t: 0, ovs: [], fx: [], osel: null, fsel: null, focus: 'set', pick: new Set(), trSel: -1, loaded: false, set: clone(GS_SET0) });
+  Object.assign(gs, { slides: [], sel: -1, t: 0, ovs: [], fx: [], au: [], osel: null, fsel: null, asel: null, focus: 'set', pick: new Set(), trSel: -1, loaded: false, set: clone(GS_SET0) });
 }
 const gsDur = s => (s.dur ?? gs.set.dur);
 const gsMo = s => s.motion ?? gs.set.motion;
@@ -3490,8 +3497,10 @@ function gsDrawSlide(g, s, p, W, H, ms) {
   else if (mo === 'pan') { z = 1.14; dx = (0.5 - p) * W * 0.12; }
   else if (mo === 'shake') { const a = Math.min(W, H) * 0.025 * (1 - p * 0.7); z = 1.06; dx = Math.sin(ms * 0.09) * a; dy = Math.cos(ms * 0.127) * a * 0.8; }
   else if (mo === 'pulse') z = 1 + 0.04 * Math.max(0, Math.sin(ms / 1000 * Math.PI * 4));
+  kfPoseScene(s, ms / 1000); // 키프레임이 있으면 그 시간의 위치·크기·회전·투명도
   const k = sc * z * (s.tz || 1); // 장면 그림 위치·크기·회전 (미리보기에서 끌어서)
-  g.save(); g.translate(W / 2 + dx + (s.tx || 0) * W, H / 2 + dy + (s.ty || 0) * H); if (s.trot) g.rotate(s.trot * DEG); g.scale(s.tflip ? -k : k, k); g.imageSmoothingQuality = 'high'; g.drawImage(s.bmp, -iw / 2, -ih / 2); g.restore();
+  g.save(); if (s.op != null && s.op < 1) g.globalAlpha *= clamp(s.op, 0, 1);
+  g.translate(W / 2 + dx + (s.tx || 0) * W, H / 2 + dy + (s.ty || 0) * H); if (s.trot) g.rotate(s.trot * DEG); g.scale(s.tflip ? -k : k, k); g.imageSmoothingQuality = 'high'; g.drawImage(s.bmp, -iw / 2, -ih / 2); g.restore();
 }
 function gsRenderAt(g, t, W, H) {
   g.fillStyle = gs.set.bg; g.fillRect(0, 0, W, H);
@@ -3629,7 +3638,7 @@ async function encodeWebp(W, H, frames, renderFrame, progress, q) {
     while (p + 8 <= u.length) { const id = String.fromCharCode(u[p], u[p + 1], u[p + 2], u[p + 3]), sz = u[p + 4] | (u[p + 5] << 8) | (u[p + 6] << 16) | (u[p + 7] << 24); if (id === 'ALPH') alpha = true; if (id === 'VP8 ' || id === 'VP8L' || id === 'ALPH') sub.push(u.subarray(p, p + 8 + sz + (sz & 1))); p += 8 + sz + (sz & 1); }
     const end = Math.round(f.s + f.dur), ms = Math.max(20, end - tc); tc += ms;
     const head = new Uint8Array([...le(0, 3), ...le(0, 3), ...le(W - 1, 3), ...le(H - 1, 3), ...le(ms, 3), 0x02]);
-    const body = new Uint8Array(head.length + sub.reduce((a, s) => a + s.length, 0)); body.set(head, 0); let q = head.length; for (const s of sub) { body.set(s, q); q += s.length; }
+    const body = new Uint8Array(head.length + sub.reduce((a, s) => a + s.length, 0)); body.set(head, 0); let at = head.length; for (const s of sub) { body.set(s, at); at += s.length; } // (예전엔 이름이 화질 값 q와 겹쳐서 WebP 저장이 늘 실패했어요)
     parts.push(chunk('ANMF', body));
     progress(++done, frames.length); await new Promise(r => setTimeout(r, 0));
   }
@@ -3673,7 +3682,10 @@ async function decodeAnimated(file, onFrame) {
   } catch (e) { try { dec && dec.close(); } catch (_) { } return -1; }
 }
 async function gsAddFiles(files) {
-  files = files.filter(f => isImageFile(f) || isVideoFile(f)); if (!files.length) return;
+  const auds = files.filter(f => isAudioFile(f) && !isVideoFile(f));
+  files = files.filter(f => isImageFile(f) || isVideoFile(f));
+  if (auds.length) { if (files.length) await gsAddFiles(files); await auAddFiles(auds); return; }
+  if (!files.length) return;
   files.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ko', { numeric: true }));
   toast('장면을 넣는 중…', 1500); let n = 0, full = false;
   for (const f of files) {
@@ -3716,9 +3728,10 @@ async function gsExport() {
   const prog = (i, n, tries) => { btn.textContent = (tries ? `용량 맞추는 중 (${tries + 1}번째) ` : '만드는 중 ') + `${i} / ${n}`; };
   try {
     const { blob, W, H } = await gsEncodeTarget(fmt, prog), [W0] = gsSize();
-    if (await download(blob, `${safeName(gifName())}.${fmt}`)) toast(`${fmt === 'gif' ? 'GIF' : fmt === 'mp4' ? 'MP4' : 'WebP'}로 저장했어요 (${(blob.size / 1048576).toFixed(1)}MB${W !== W0 ? `, 용량에 맞춰 ${W}×${H}로 줄였어요` : ''})`, 4500);
+    const auNote = (gs.au || []).some(a => !a.hidden) ? (fmt === 'mp4' ? (blob.noAudio ? ' · 이 컴퓨터에서는 소리를 넣지 못했어요' : ' · 소리 포함') : ' · GIF·WebP에는 소리가 들어가지 않아요') : '';
+    if (await download(blob, `${safeName(gifName())}.${fmt}`)) toast(`${fmt === 'gif' ? 'GIF' : fmt === 'mp4' ? 'MP4' : 'WebP'}로 저장했어요 (${(blob.size / 1048576).toFixed(1)}MB${W !== W0 ? `, 용량에 맞춰 ${W}×${H}로 줄였어요` : ''})${auNote}`, 4500);
   } catch (e) {
-    const m = e && e.message;
+    const m = e && e.message; console.warn('움짤 저장 실패', e);
     toast(m === 'nowebp' ? '이 브라우저는 WebP 저장을 못 해요. 크롬이나 엣지에서 해 보세요.' : m === 'nomp4' ? '이 컴퓨터에서는 MP4로 저장할 수 없어요. GIF나 WebP로 저장해 주세요.' : '저장하지 못했어요. 크기를 줄여 다시 해 보세요.', 4500);
   }
   gs.busy = false; btn.disabled = false; gsExpRender();
@@ -3729,9 +3742,9 @@ async function gsSave() {
 
   for (const s of gs.slides) {
     if (!s.blob || s.blobOf !== s.bmp) { s.blob = await new Promise(r => s.bmp.toBlob ? s.bmp.toBlob(r, 'image/webp', 0.95) : r(null)); s.blobOf = s.bmp; }
-    slides.push({ id: s.id, name: s.name, blob: s.blob, w: s.w, h: s.h, dur: s.dur, motion: s.motion, fit: s.fit, tr: s.tr, trd: s.trd, clip: s.clip, tx: s.tx, ty: s.ty, tz: s.tz, trot: s.trot, tflip: s.tflip });
+    slides.push({ id: s.id, name: s.name, blob: s.blob, w: s.w, h: s.h, dur: s.dur, motion: s.motion, fit: s.fit, tr: s.tr, trd: s.trd, clip: s.clip, tx: s.tx, ty: s.ty, tz: s.tz, trot: s.trot, tflip: s.tflip, op: s.op, kf: s.kf && s.kf.length ? clone(s.kf) : undefined });
   }
-  await idb.set(key, { slides, set: gs.set, ovs: gs.ovs.map(ovPlain), fx: clone(gs.fx) });
+  await idb.set(key, { slides, set: gs.set, ovs: gs.ovs.map(ovPlain), fx: clone(gs.fx), ...auPlain() });
   pjTouch(key.slice(4));
 }
 async function gsLoad() {
@@ -3741,7 +3754,7 @@ async function gsLoad() {
   for (const s of d.slides || []) {
     try { const bm = await createImageBitmap(s.blob), c = newCanvas(bm.width, bm.height); c.getContext('2d').drawImage(bm, 0, 0); gs.slides.push({ ...s, bmp: c, blobOf: c }); } catch (e) { }
   }
-  gs.ovs = await ovRestore(d.ovs); gs.fx = Array.isArray(d.fx) ? d.fx : [];
+  gs.ovs = await ovRestore(d.ovs); gs.fx = Array.isArray(d.fx) ? d.fx : []; await auRestore(d);
   laneFix(gs.ovs); laneFix(gs.fx);
   gs.sel = gs.slides.length ? 0 : -1;
 }
@@ -3750,6 +3763,10 @@ async function gsLoad() {
 /*@@PRESETS@@*/
 /*@@ANIM@@*/
 /*@@GSUI@@*/
+/*@@AUDIO@@*/
+/*@@DEPTH@@*/
+/*@@LIQUIFY@@*/
+/*@@BATCH@@*/
 /*@@CZ@@*/
 /* ================= 모달 ================= */
 function modal(html, opts = {}) {
@@ -4167,6 +4184,14 @@ function openHelp() {
       <li><b>레이어</b>: 왼쪽 '레이어' 탭에서 숨기기·잠그기·끌어서 순서 바꾸기·불투명도·섞는 법을 바꿔요. 두 번 누르면 이름을 바꿔요.</li>
       <li><b>움짤</b>: 위쪽 '움짤'을 누르면 프리미어 프로처럼 왼쪽 재료(장면·글자·효과·넘김), 가운데 미리보기, 오른쪽 속성, 아래 시간 막대로 나뉜 화면이 열려요. 시간 막대에서 장면 오른쪽 끝을 끌면 길이, 가운데를 끌면 순서가 바뀌어요. 글자·효과 막대는 끌어서 시간과 줄을 옮기고 양끝으로 늘여요. 장면 사이 ◇를 누르면 넘김을 골라요. 미리보기 빈 곳을 누르면 그 장면이 골라져 끌어서 옮기고, 모서리로 크기, 위 동그라미로 돌리고, 휠로 확대해요(오른쪽 '그림 위치·크기·회전'에서 숫자로도). 단축키: <kbd>Space</kbd> 재생, <kbd>←</kbd><kbd>→</kbd> 한 장씩, <kbd>↑</kbd><kbd>↓</kbd> 장면 경계로, <kbd>C</kbd> 자르기 도구, <kbd>V</kbd> 고르기 도구, <kbd>Ctrl</kbd>+<kbd>K</kbd> 재생 위치에서 나누기, <kbd>T</kbd> 글자 넣기, <kbd>Ctrl</kbd>+휠 확대, <kbd>Ctrl</kbd>+<kbd>M</kbd> 내보내기.</li>
       <li><b>크기</b>: 이미지 편집에서 아무것도 안 고르면 오른쪽 '크기 바꾸기'로 그림 크기, 캔버스 크기, 정사각형·4:5 여백을 바꿔요.</li>
+      <li><b>움짤 키프레임</b>: 글자·스티커나 장면을 고르고 오른쪽 '키프레임'에서 '◆ 지금 위치 기록'을 눌러요. 재생 위치를 옮겨 위치·크기·회전·투명도를 바꾸면 그 사이가 저절로 이어져요(빠르기 곡선도 골라요).</li>
+      <li><b>AI 중간 장면</b> (설치판): GIF·영상 장면을 모두 고르고 'AI로 부드럽게'(2배·4배)를 누르면 장면 사이에 새 장면을 그려 넣어 더 매끄럽게 움직여요. 장면이 확 바뀌는 곳은 건너뛰어요.</li>
+      <li><b>깊이 효과</b> (설치판): 바탕 그림의 'AI 도구 → 깊이 효과'에서 '거리에 따라 흐리게'(인물은 또렷하게, 먼 곳일수록 흐리게)와 '입체 움짤'(그림 한 장을 살짝 움직이는 움짤로)을 만들어요.</li>
+      <li><b>뒤틀기</b> (이미지 편집): 그림을 고르고 '뒤틀기'(<kbd>Ctrl+Shift+X</kbd>)를 눌러 붓으로 밀기·부풀리기·오므리기·돌리기를 해요. <kbd>[</kbd> <kbd>]</kbd>로 붓 크기, '되돌리기' 붓으로 칠한 곳만 원래대로.</li>
+      <li><b>레이어 효과</b>: 그림 레이어·효과음 그림·도형을 고르고 오른쪽 '레이어 효과'에서 외곽선·그림자·빛을 켜요. 그림 모양을 따라 붙고 언제든 끌 수 있어요.</li>
+      <li><b>색감 맞추기</b>: 그림(컷)을 고르고 '고급 보정 → 색감 맞추기'에서 기준 그림을 골라 밝기·색 분위기를 맞춰요. 마음에 드는 그림에서 '모든 그림을 이 그림에'를 누르면 한 번에 맞춰요.</li>
+      <li><b>배경 음악·효과음</b> (움짤): 시간 막대 위 '+ 소리'로 MP3·WAV·M4A(영상 파일이면 그 소리만)를 넣어요. 막대를 끌어 자리·길이를 바꾸고 크기·서서히 커지기/작아지기·반복을 골라요. MP4로 저장할 때 들어가요.</li>
+      <li><b>일괄 처리</b> (이미지 편집): 아무것도 안 고르고 오른쪽 '일괄 처리'에서 '● 기록 시작'을 누른 뒤 한 그림을 고쳐요. '기록 끝내기'를 누르면 한 일(돌리기·자르기·크기·보정·AI 배경 지우기·자동 흰칠·글자 넣기)이 동작으로 저장되고, 폴더나 모든 그림에 똑같이 할 수 있어요.</li>
     </ol>
     <p class="muted small" style="margin-top:12px">되돌리기 <kbd>Ctrl+Z</kbd>, 다시 하기 <kbd>Ctrl+Y</kbd>, 복제 <kbd>Ctrl+D</kbd>, 복사와 붙여넣기 <kbd>Ctrl+C</kbd>/<kbd>V</kbd>, 삭제 <kbd>Delete</kbd>, 조금씩 옮기기 방향키(<kbd>Shift</kbd>와 함께 10칸), 화면 끌기 <kbd>Space</kbd>+드래그, 확대 <kbd>Ctrl</kbd>+휠, 비율 유지 <kbd>Shift</kbd>+모서리, 자석 잠시 끄기 <kbd>Alt</kbd></p>
     <div class="foot">${window.POTATO_BUILD ? `<span class="muted small" style="margin-right:auto;align-self:center">감자 편집기 ${esc(window.POTATO_BUILD.version)}</span>` : ''}${appApi() ? '<button class="btn" id="helpUpd">업데이트 확인</button>' : ''}<button class="btn primary" data-close>알겠어요</button></div>`, { wide: true });
@@ -4238,6 +4263,7 @@ document.addEventListener('keydown', e => {
   }
   if ((mode === 'select' || mode === 'shape' || mode === 'mask' || mode === 'level') && (e.key === 'Enter' || e.key === 'Escape')) { e.preventDefault(); setMode(null); return; }
   if (!mode && mod && k === 't' && isImg()) { e.preventDefault(); e2XfToggle(); return; }
+  if (!mode && mod && e.shiftKey && k === 'x' && isImg()) { e.preventDefault(); lqOpen(); return; }
   if (!mode && xfBase && (e.key === 'Enter' || e.key === 'Escape')) { e.preventDefault(); xfBase = null; renderProps(); requestRender(); return; }
   if (mode === 'mask' && !mod && k === 'x') { e.preventDefault(); mkOpt.hide = !mkOpt.hide; renderModebar(); requestRender(); return; }
   if ((mode === 'pen' || mode === 'brush') && e.key === 'Enter') { e.preventDefault(); setMode(null); return; }
