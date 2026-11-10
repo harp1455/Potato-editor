@@ -2795,7 +2795,7 @@ function panelProps(el) {
 function bubbleProps(el) {
   return `<div class="sec"><h3>대사</h3><textarea class="big" data-k="text" rows="3" spellcheck="false"></textarea>
     <p class="muted small">Enter로 줄을 바꿔요. 캔버스에서 말풍선을 더블클릭해도 고칠 수 있어요.</p>
-    <div class="btnrow"><button class="btn sm" data-act="tx-ai" title="제미나이로 번역하거나 자연스럽게·짧게 고쳐요">AI로 번역·다듬기…</button></div></div>
+    <div class="btnrow"><button class="btn sm" data-act="tx-ai" title="제미나이로 번역하거나 자연스럽게·짧게 고쳐요">AI로 번역·다듬기…</button><button class="btn sm" data-act="tx-dub" title="이 대사를 AI 더빙 창으로 보내 목소리로 만들어요">AI 더빙…</button></div></div>
   <div class="sec"><h3>모양</h3>
     ${segBtns('shape', el.shape, [['round', '둥근'], ['box', '네모'], ['rect', '나레이션'], ['thought', '생각'], ['shout', '외침']])}
     <div class="btnrow" style="margin-top:9px">${check('tail', '꼬리')}&nbsp;&nbsp;${check('dash', '점선 (속삭임)')}</div>
@@ -2819,7 +2819,7 @@ function bubbleProps(el) {
 function textProps(el) {
   return `<div class="sec"><h3>글자</h3><textarea class="big" data-k="text" rows="2" spellcheck="false"></textarea>
     <p class="muted small">모서리를 끌면 글자 크기가 함께 바뀌어요.</p>
-    <div class="btnrow"><button class="btn sm" data-act="tx-ai" title="제미나이로 번역하거나 자연스럽게·짧게 고쳐요">AI로 번역·다듬기…</button></div>
+    <div class="btnrow"><button class="btn sm" data-act="tx-ai" title="제미나이로 번역하거나 자연스럽게·짧게 고쳐요">AI로 번역·다듬기…</button><button class="btn sm" data-act="tx-dub" title="이 대사를 AI 더빙 창으로 보내 목소리로 만들어요">AI 더빙…</button></div>
     <p class="muted small" style="margin:8px 0 4px">스타일 한 번에 바꾸기</p>
     <div class="sfxbtns">${TEXT_STYLES.map((t, i) => `<button class="btn" data-act="tstyle" data-v="${i}">${t.n}</button>`).join('')}</div>
     <p class="muted small" style="margin:10px 0 4px">내 스타일 <span title="글꼴·색·테두리·후광·그림자·띠 같은 꾸밈을 저장해요(글자 크기는 빼고). 모든 작업과 움짤 글자에서 써요.">ⓘ</span></p>
@@ -3042,6 +3042,7 @@ function doAct(act, v) {
   if (act.startsWith('bx-')) { bxAct(act, v); return; }
   if (act.startsWith('tr-')) { trAct(act, v); return; }
   if (act === 'tx-ai') { aiTxEl(); return; }
+  if (act === 'tx-dub') { dbFromEl(); return; }
   if (act === 'tx-page' || act === 'tx-all') { aiTxPages(act === 'tx-all'); return; }
   if (act.startsWith('sz-')) { sizeAct(act, v); return; }
   if (act.startsWith('ai-')) { aiAct(act, v); return; }
@@ -3775,6 +3776,7 @@ async function gsLoad() {
 /*@@BATCH@@*/
 /*@@TRANS@@*/
 /*@@VIDGEN@@*/
+/*@@DUB@@*/
 /*@@CZ@@*/
 /* ================= 모달 ================= */
 function modal(html, opts = {}) {
@@ -3806,7 +3808,7 @@ function openNewModal(first) {
       <div class="btnrow"><button class="btn" id="nPickF">그림 파일 고르기</button><button class="btn" id="nPickD">폴더 통째로 고르기</button></div></div>
       <p class="muted small" style="margin-top:8px">그림 없이 '만들기'를 눌러도 돼요. 나중에 왼쪽 위에서 불러올 수 있어요.</p></div>
     <div id="nGif" hidden><div class="dropzone" id="nGDrop"><b>쓸 사진·GIF·영상을 여기로 끌어오세요</b><br><span class="small">넣은 순서대로 장면이 돼요. 그냥 '만들기'를 눌러 빈 움짤로 시작해도 돼요.</span></div></div>
-    <div class="foot">${first ? '<button class="btn" id="nOpen">저장해 둔 파일 열기</button>' : '<button class="btn" data-close>취소</button>'}<button class="btn primary" id="nGo">만들기</button></div>`, { wide: true });
+    <div class="foot">${first ? '<button class="btn" id="nDub" title="그림 없이 목소리만 만들어요">AI 더빙만 쓰기</button><button class="btn" id="nOpen">저장해 둔 파일 열기</button>' : '<button class="btn" data-close>취소</button>'}<button class="btn primary" id="nGo">만들기</button></div>`, { wide: true });
   const nm = $('#nName', m), autoNm = new Set(['새 작품']), gifNm = pjGifName();
   $$('[data-kind]', m).forEach(b => b.addEventListener('click', () => {
     kind = b.dataset.kind; $$('[data-kind]', m).forEach(x => x.classList.toggle('on', x === b)); $('#nCut', m).hidden = kind !== 'cut'; $('#nImg', m).hidden = kind !== 'image'; $('#nGif', m).hidden = kind !== 'gif';
@@ -3814,6 +3816,7 @@ function openNewModal(first) {
   }));
   $$('#nCut .preset', m).forEach(b => b.addEventListener('click', () => { pick = +b.dataset.i; $$('#nCut .preset', m).forEach(x => x.classList.toggle('on', x === b)); }));
   if (first) $('#nOpen', m).addEventListener('click', () => { closeModal(); $('#fileProj').click(); });
+  if (first) $('#nDub', m).addEventListener('click', () => dbOpen());
   let busy = false;
   const start = async items => {
     if (busy) return; busy = true;
@@ -4202,6 +4205,7 @@ function openHelp() {
       <li><b>페이지 번역</b> (이미지 편집, 제미나이 API 키 필요): 아무것도 안 고르고 오른쪽 '페이지 번역 (AI)' → '번역하기…'. 그림 속 글자를 찾아 번역하고, 원래 글자만 지운 뒤(말풍선은 바탕색, 그림 위는 글자 획만 AI 지우개로) 원래 방향(세로·가로)·자리·색 그대로 고칠 수 있는 글자로 다시 써요. 오른쪽 목록에서 번역문을 고치고, '원문 보기'로 비교해요. 용어집·말투 메모를 적어 두면 이름·신조어를 늘 같게 옮겨요. '원문 그대로'를 고르면 번역 없이 글자만 깔끔한 글꼴로 다시 써요. 제미나이가 그림을 거절하면 글자 자리만 찾아 그 부분만 보내요('그림 보내기', 설치판 AI 글자 찾기 팩).</li>
       <li><b>AI로 번역·다듬기</b> (제미나이): 말풍선·글자(움짤 글자도)를 고르고 'AI로 번역·다듬기…'에서 다른 말로 번역, 자연스럽게, 짧게, 반말·존댓말, 직접 요청을 골라요. 후보 3개 중 누르면 바뀌어요. 컷 편집에서 아무것도 안 고르면 '말풍선·글자 번역'으로 페이지 전체를 한 번에 번역해요(다른 나라 말 판 만들기).</li>
       <li><b>AI 영상 만들기</b> (제미나이, 유료 키): 이미지 편집 'AI 도구 → AI 영상 만들기…' 또는 움짤 장면의 'AI 영상으로…'. 그림 한 장과 '어떻게 움직일지' 적은 글로 몇 초짜리 영상(소리 포함)을 만들어 MP4로 저장하거나 움짤 탭에 넣어요. 가로 16:9·세로 9:16만 되고, 노출·성인 그림은 거절돼요.</li>
+      <li><b>AI 더빙</b> (제미나이): 맨 위 'AI 더빙'(움짤 화면에도 있어요). 그림이 없어도 돼요. 대사를 줄마다 적고 목소리와 말투·감정을 고르면 읽어 줘요. ▶로 한 줄씩 듣고 '다시'로 다른 연기를 받아요. '캐릭터 목소리'에 캐릭터별 목소리·기본 말투를 저장해 두고, '말풍선에서 가져오기'로 대사를 한꺼번에 불러와요. 다 되면 '이어 붙여 저장'·'따로 저장'(WAV) 또는 '움짤에 넣기'로 소리 줄에 얹어요.</li>
       <li><b>일괄 처리</b> (이미지 편집): 아무것도 안 고르고 오른쪽 '일괄 처리'에서 '● 기록 시작'을 누른 뒤 한 그림을 고쳐요. '기록 끝내기'를 누르면 한 일(돌리기·자르기·크기·보정·AI 배경 지우기·자동 흰칠·글자 넣기)이 동작으로 저장되고, 폴더나 모든 그림에 똑같이 할 수 있어요.</li>
     </ol>
     <p class="muted small" style="margin-top:12px">되돌리기 <kbd>Ctrl+Z</kbd>, 다시 하기 <kbd>Ctrl+Y</kbd>, 복제 <kbd>Ctrl+D</kbd>, 복사와 붙여넣기 <kbd>Ctrl+C</kbd>/<kbd>V</kbd>, 삭제 <kbd>Delete</kbd>, 조금씩 옮기기 방향키(<kbd>Shift</kbd>와 함께 10칸), 화면 끌기 <kbd>Space</kbd>+드래그, 확대 <kbd>Ctrl</kbd>+휠, 비율 유지 <kbd>Shift</kbd>+모서리, 자석 잠시 끄기 <kbd>Alt</kbd></p>
@@ -4213,7 +4217,7 @@ const CMDS = {
   'add-panel': addPanel, 'bubble-menu': () => openMenu('#menuBubble', '#bBubble'), 'layer-menu': () => openMenu('#menuLayer', '#bLayerAdd'), shape: () => setMode(mode === 'shape' ? null : 'shape'), 'split-menu': () => openMenu('#menuSplit', '#bSplit'), 'cz-menu': openCzMenu,
   'add-text': () => addText(), pen: () => setMode(mode === 'pen' ? null : 'pen'), brush: () => setMode(mode === 'brush' ? null : 'brush'),
   'zoom-in': () => zoomStep(1), 'zoom-out': () => zoomStep(-1), 'zoom-fit': fitView,
-  export: openExportModal, help: openHelp, theme: () => setTheme(isDark() ? 'light' : 'dark'), gif: pjOpenGif, import: () => pickFiles(false), 'import-dir': () => pickFiles(true), 'new-folder': () => newFolder(null),
+  export: openExportModal, help: openHelp, theme: () => setTheme(isDark() ? 'light' : 'dark'), gif: pjOpenGif, dub: () => dbOpen(), import: () => pickFiles(false), 'import-dir': () => pickFiles(true), 'new-folder': () => newFolder(null),
   'img-prev': () => navImg(-1), 'img-next': () => navImg(1), crop: () => setMode(mode === 'crop' ? null : 'crop'), select: () => setMode(mode === 'select' ? null : 'select'), autolayout: openAutoLayout,
   'import-stamp': () => $('#fileStamp').click(), 'import-pack': () => $('#filePack').click(),
   'page-add': () => pageCmd('page-add'), 'page-dup': () => pageCmd('page-dup'), 'page-up': () => pageCmd('page-up'), 'page-down': () => pageCmd('page-down'), 'page-del': () => pageCmd('page-del'),

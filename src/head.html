@@ -562,6 +562,25 @@ input.gp-wide{height:30px;border:1px solid var(--line2);border-radius:7px;paddin
 .vgside{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}
 .vgside textarea{width:100%;box-sizing:border-box;resize:vertical;font-size:13px}
 .vgideas{display:flex;flex-wrap:wrap;gap:4px}
+.dbtop{display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;margin-bottom:10px}
+.dbtop label{display:inline-flex;align-items:center;gap:6px;color:var(--ink2);font-size:13px}
+.dbchars{background:var(--well,var(--side));border-radius:10px;padding:10px;margin-bottom:10px}
+.dbc{display:flex;gap:6px;align-items:center;margin-bottom:6px}
+.dbc input[data-dbc="style"]{flex:1;min-width:0}
+.dbc select,.dbl-h select{max-width:170px}
+.dblines{display:flex;flex-direction:column;gap:8px;max-height:min(46vh,440px);overflow:auto;padding:2px}
+.dbl{border:1px solid var(--line);border-radius:10px;padding:8px;background:var(--paper)}
+.dbl.focus{border-color:var(--blue);box-shadow:0 0 0 1px var(--blue)}
+.dbl-h{display:flex;gap:5px;align-items:center;margin-bottom:6px}
+.dbl-h input[data-dbk="style"]{flex:1;min-width:80px}
+.dbno{width:20px;text-align:center;color:var(--ink2);flex:none}
+.dbl textarea{width:100%;box-sizing:border-box;resize:vertical;font-size:14px;line-height:1.5}
+.dbst{font-size:12px;color:var(--ink2);white-space:nowrap;max-width:150px;overflow:hidden;text-overflow:ellipsis}
+.dbst.ok{color:var(--blue);font-weight:600}.dbst.err{color:#d43c3c;font-weight:600}.dbst.old{color:#b9770e}
+.dbchips{display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin-top:6px}
+.dbchips > span:first-child{width:28px}
+.dbfoot{flex-wrap:wrap;align-items:center}
+.dbinto{display:inline-flex;gap:4px;align-items:center}
 .txsrc{padding:8px 10px;border-radius:8px;background:var(--side);white-space:pre-wrap;font-size:13px;margin-bottom:8px}
 .txacts{display:flex;flex-wrap:wrap;gap:4px}
 .txout{display:flex;flex-direction:column;gap:6px;margin-top:10px;min-height:20px}
@@ -746,6 +765,7 @@ body.imgmode .onlycut{display:none !important}
       <button class="btn" data-cmd="zoom-fit" id="zoomLbl" title="화면에 맞추기">100%</button>
       <button class="btn icon" data-cmd="zoom-in" title="확대" aria-label="확대">+</button>
     </div>
+    <button class="btn" data-cmd="dub" title="대사를 적으면 고른 목소리와 감정으로 읽어 줘요 (제미나이). 그림이 없어도 쓸 수 있어요"><svg width="15" height="15" viewBox="0 0 16 16"><rect x="5.5" y="1.5" width="5" height="8" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M3 7.5a5 5 0 0010 0M8 12.5v2M5.5 14.5h5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>AI 더빙</button>
     <button class="btn" data-cmd="gif" title="사진 여러 장을 이어 붙여 GIF, 움직이는 WebP 만들기"><svg width="15" height="15" viewBox="0 0 16 16"><rect x="1.5" y="3" width="13" height="10" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M6.5 6v4l3.5-2z" fill="currentColor"/></svg>움짤</button>
     <button class="btn primary" data-cmd="export"><span class="lg">이미지로&nbsp;</span>내보내기</button>
     <button class="btn icon themebtn" data-cmd="theme" id="bTheme" title="어두운 화면 / 밝은 화면" aria-label="화면 밝기 바꾸기"></button>

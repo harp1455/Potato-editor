@@ -532,7 +532,7 @@ function ovPropsHtml(o) {
   let h = '';
   if (isT) h += `<div class="sec"><h3>글자</h3>
       <textarea data-gk="o.text" rows="2" style="width:100%;resize:vertical">${esc(o.text)}</textarea>
-      <div class="btnrow"><button class="btn sm" data-g="ov-ai" title="제미나이로 번역하거나 자연스럽게·짧게 고쳐요">AI로 번역·다듬기…</button></div>
+      <div class="btnrow"><button class="btn sm" data-g="ov-ai" title="제미나이로 번역하거나 자연스럽게·짧게 고쳐요">AI로 번역·다듬기…</button><button class="btn sm" data-g="ov-dub" title="이 글자를 AI 더빙 창으로 보내 목소리로 만들어요">AI 더빙…</button></div>
       <details class="subsec" ${gs.preOpen ? 'open' : ''} data-k="pre"><summary>빠른 꾸미기 ${OV_PRESETS.length}가지</summary><div class="ov-pre">${OV_PRESETS.map((p, i) => `<button class="btn sm" data-g="ov-pre" data-v="${i}" title="모양과 움직임을 한 번에">${esc(p.n)}</button>`).join('')}</div></details>
       ${row('글꼴', `<select data-gk="o.st.font">${fontsL.map(n => `<option value="${esc(n)}" ${n === st.font ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>`)}
       ${row('크기', rng('o.st.fs', st.fs ?? 80, 16, 320, 1))}
