@@ -121,7 +121,7 @@ function apiSeen(job, model, j) {
 }
 // 답에 사용량이 없을 때 대신 넣는 추정치 (더빙 길이·영상 길이로)
 function apiGuess(job, model, u) { if (!job) return; job.parts['g' + (++apiCallN)] = Object.assign({ m: model, g: 1 }, u); apiSum(job); apiPersist(); }
-function apiEnd(job, st) { if (!job) return null; apiSum(job); job.st = st || 'ok'; job.end = Date.now(); if (!job.calls && st !== 'ok') job.usd = 0; apiPersist(); if (typeof apiRefresh === 'function') apiRefresh(); return job; }
+function apiEnd(job, st) { if (!job) return null; apiSum(job); job.st = st || 'ok'; job.end = Date.now(); if (!job.calls && st !== 'ok') job.usd = 0; apiPersist(); if (typeof apiRefresh === 'function') apiRefresh(); try { uiBudgetCheck(); } catch (_) { } return job; }
 const apiUsed = j => j && j.calls ? ` · 이번에 쓴 금액 ${apiFmt(j.usd)}${j.guess ? '(추정)' : ''}` : '';
 // 작업에 쓸 tk (멈추기·진행 표시는 원래 tk 것을 그대로)
 const apiTk = (tk, job) => ({ get stop() { return !!(tk && tk.stop); }, set stop(v) { if (tk) tk.stop = v; }, set: (...a) => tk && tk.set && tk.set(...a), done: () => tk && tk.done && tk.done(), job });

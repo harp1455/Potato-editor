@@ -3463,21 +3463,26 @@ function updateHint() {
 }
 
 /* ================= 움짤 만들기 (슬라이드 → GIF / 움직이는 WebP) ================= */
-const GS_SIZES = [
-  ['first800', '첫 장면 비율 (긴 쪽 800)'], ['first1080', '첫 장면 비율 (긴 쪽 1080)'],
-  ['800x800', '정사각형 800'], ['1080x1080', '정사각형 1080'], ['864x1080', '세로 4:5'], ['720x1280', '세로 9:16'], ['1280x720', '가로 16:9'], ['custom', '직접 입력'],
+const GS_SIZES = [ // 영상 해상도 (예전 값도 남겨 둬요: 저장한 작업이 그대로 열리게)
+  ['first720', '첫 장면 비율 · 긴 쪽 720'], ['first1080', '첫 장면 비율 · 긴 쪽 1080'], ['first1440', '첫 장면 비율 · 긴 쪽 1440'], ['first2160', '첫 장면 비율 · 긴 쪽 2160 (4K)'],
+  ['1280x720', '720p HD · 1280×720'], ['1920x1080', '1080p 풀HD · 1920×1080'], ['2560x1440', '1440p QHD · 2560×1440'], ['3840x2160', '4K UHD · 3840×2160'],
+  ['720x1280', '세로 720×1280'], ['1080x1920', '세로 1080×1920 (쇼츠·릴스)'], ['1440x2560', '세로 1440×2560'], ['2160x3840', '세로 4K 2160×3840'],
+  ['1080x1080', '정사각형 1080'], ['2160x2160', '정사각형 2160'], ['1080x1350', '세로 4:5 · 1080×1350'],
+  ['first800', '첫 장면 비율 · 긴 쪽 800 (예전)'], ['800x800', '정사각형 800 (예전)'], ['864x1080', '세로 4:5 · 864×1080 (예전)'], ['custom', '직접 입력 (최대 4096)'],
 ];
+const GS_FPS = [8, 10, 12, 15, 20, 24, 25, 30, 48, 50, 60];
+const GS_OUTMAX = 4096; // 영상 해상도 최대 (한 변)
 const GS_MOTIONS = [['none', '없음'], ['zin', '천천히 확대'], ['zout', '천천히 축소'], ['pan', '옆으로 흐르기'], ['shake', '흔들림'], ['pulse', '두근두근']];
 const GS_TRANS = [['none', '바로 넘기기'], ['fade', '서서히 바뀌기'], ['push', '옆으로 밀기'], ['up', '위로 밀기'], ['flash', '번쩍']];
 const gs = {
   slides: [], sel: -1, playing: false, t: 0, raf: 0, start: 0, busy: false, built: false,
-  set: { size: 'first800', cw: 800, ch: 800, bg: '#ffffff', fit: 'cover', dur: 1.5, motion: 'none', trans: 'fade', trDur: 0.4, fps: 12, loop: true, fmt: 'gif', dither: true, q: 88 },
+  set: { size: 'first1080', cw: 1920, ch: 1080, bg: '#000000', fit: 'cover', dur: 1.5, motion: 'none', trans: 'fade', trDur: 0.4, fps: 30, loop: true, fmt: 'mp4', dither: true, q: 88, mq: 75, gfps: 0, gscale: 'l800' },
 };
 const GS_SET0 = clone(gs.set);
 const gifOpen = () => gs.built && !$('#gifStudio').hidden;
 function gsReset() { // 다른 움짤 탭으로 바꿀 때 비우기
   if (gs.playing) gsPause(); clearTimeout(gsSaveT);
-  Object.assign(gs, { slides: [], sel: -1, t: 0, ovs: [], fx: [], au: [], osel: null, fsel: null, asel: null, focus: 'set', pick: new Set(), trSel: -1, loaded: false, set: clone(GS_SET0) });
+  Object.assign(gs, { slides: [], sel: -1, t: 0, ovs: [], fx: [], au: [], osel: null, fsel: null, asel: null, focus: 'set', pick: new Set(), trSel: -1, loaded: false, set: Object.assign(clone(GS_SET0), uiVidDefaults()) });
 }
 const gsDur = s => (s.dur ?? gs.set.dur);
 const gsMo = s => s.motion ?? gs.set.motion;
@@ -3488,9 +3493,9 @@ const gsTotal = () => gs.slides.reduce((a, s) => a + gsDur(s), 0);
 const gsTrD = s => s.trd ?? gs.set.trDur; // 넘김 길이 (장면마다 따로 정할 수 있어요)
 function gsSize() {
   const v = gs.set.size, f = gs.slides[0];
-  if (v === 'custom') return [clamp(gs.set.cw | 0, 16, 2400), clamp(gs.set.ch | 0, 16, 2400)];
+  if (v === 'custom') return [clamp(gs.set.cw | 0, 16, GS_OUTMAX) & ~1, clamp(gs.set.ch | 0, 16, GS_OUTMAX) & ~1];
   if (v.startsWith('first')) {
-    const L = v === 'first1080' ? 1080 : 800; if (!f) return [L, L];
+    const L = +v.slice(5) || 1080; if (!f) return [L, L];
     return f.w >= f.h ? [L, Math.max(16, Math.round(L * f.h / f.w / 2) * 2)] : [Math.max(16, Math.round(L * f.w / f.h / 2) * 2), L];
   }
   return v.split('x').map(Number);
@@ -3657,9 +3662,11 @@ async function encodeWebp(W, H, frames, renderFrame, progress, q) {
 }
 
 /* ---- 화면: gsui.js ---- */
-const GS_MAXSIDE = 1600, GS_BUDGET = 160e6; // 장면 한 장 긴 쪽 최대, 전체 픽셀 한도(약 640MB)
+const GS_MAXSIDE = 1600, GS_BUDGET = 480e6; // 장면 한 장 긴 쪽 최소 기준, 전체 픽셀 한도(약 1.9GB)
+// 장면 그림을 얼마나 크게 둘지: 영상 해상도의 긴 쪽만큼 (작아도 1600, 커도 3840) — 4K로 내보낼 때 흐리지 않게
+function gsInMax() { const v = String(gs.set.size || ''); let L = 1600; if (v.startsWith('first')) L = +v.slice(5) || 1080; else if (v === 'custom') L = Math.max(gs.set.cw | 0, gs.set.ch | 0); else { const [a, b] = v.split('x').map(Number); L = Math.max(a || 0, b || 0); } return clamp(L, 1920, 3840); }
 const gsPixels = () => gs.slides.reduce((a, s) => a + s.w * s.h, 0);
-function gsAddBitmap(src, name, extra, maxSide = GS_MAXSIDE) {
+function gsAddBitmap(src, name, extra, maxSide = gsInMax()) {
   const sw = src.naturalWidth || src.displayWidth || src.width, sh = src.naturalHeight || src.displayHeight || src.height;
   const k = Math.min(1, maxSide / Math.max(sw, sh)), w = Math.max(1, Math.round(sw * k)), h = Math.max(1, Math.round(sh * k));
   if (gsPixels() + w * h > GS_BUDGET) return null;
@@ -3729,17 +3736,17 @@ function gsAddPage() {
 }
 async function gsExport() {
   if (gs.busy || !gs.slides.length) return; gsPause();
-  const fmt = gs.set.fmt, btn = $('#gsExport'), frames = gsFramePlan(+gs.set.fps);
-  if (fmt !== 'mp4' && frames.length > 900) { toast('장면이 너무 많아요. 초당 장 수를 줄이거나 길이를 줄여 주세요.', 4000); return; }
+  const fmt = gs.set.fmt, btn = $('#gsExport');
+  if (fmt !== 'mp4' && gsFramePlan(gsOutFps(fmt)).length > (fmt === 'gif' ? 1200 : 2400)) { toast('움짤로 만들기엔 장 수가 너무 많아요. 내보내기 창의 \'움짤 프레임\'을 낮추거나 길이를 줄여 주세요. 길면 MP4가 좋아요.', 5000); return; }
   gs.busy = true; btn.disabled = true;
   const prog = (i, n, tries) => { btn.textContent = (tries ? `용량 맞추는 중 (${tries + 1}번째) ` : '만드는 중 ') + `${i} / ${n}`; };
   try {
-    const { blob, W, H } = await gsEncodeTarget(fmt, prog), [W0] = gsSize();
+    const { blob, W, H } = await gsEncodeTarget(fmt, prog), [W0] = fmt === 'mp4' ? gsSize() : gsOutSize(fmt);
     const auNote = (gs.au || []).some(a => !a.hidden) ? (fmt === 'mp4' ? (blob.noAudio ? ' · 이 컴퓨터에서는 소리를 넣지 못했어요' : ' · 소리 포함') : ' · GIF·WebP에는 소리가 들어가지 않아요') : '';
     if (await download(blob, `${safeName(gifName())}.${fmt}`)) toast(`${fmt === 'gif' ? 'GIF' : fmt === 'mp4' ? 'MP4' : 'WebP'}로 저장했어요 (${(blob.size / 1048576).toFixed(1)}MB${W !== W0 ? `, 용량에 맞춰 ${W}×${H}로 줄였어요` : ''})${auNote}`, 4500);
   } catch (e) {
     const m = e && e.message; console.warn('움짤 저장 실패', e);
-    toast(m === 'nowebp' ? '이 브라우저는 WebP 저장을 못 해요. 크롬이나 엣지에서 해 보세요.' : m === 'nomp4' ? '이 컴퓨터에서는 MP4로 저장할 수 없어요. GIF나 WebP로 저장해 주세요.' : '저장하지 못했어요. 크기를 줄여 다시 해 보세요.', 4500);
+    toast(m === 'nowebp' ? '이 브라우저는 WebP 저장을 못 해요. 크롬이나 엣지에서 해 보세요.' : m === 'nomp4' ? `이 컴퓨터는 ${gsSize().join('×')} · ${gs.set.fps}fps 영상을 만들지 못해요. 해상도나 프레임을 낮춰 보세요(설정 → 영상에서 하드웨어 가속을 바꿔 봐도 돼요).` : '저장하지 못했어요. 크기를 줄여 다시 해 보세요.', 4500);
   }
   gs.busy = false; btn.disabled = false; gsExpRender();
 }
@@ -3800,7 +3807,7 @@ function openNewModal(first) {
     <div class="modechoose">
       <button class="preset on" data-kind="cut"><b>컷 편집</b><span>웹툰·만화처럼 여러 그림을 칸에 나눠 담고 말풍선과 효과음을 올려요.</span></button>
       <button class="preset" data-kind="image"><b>이미지 편집</b><span>그림을 한 장씩 그대로 열어 글자, 가리기, 자동 흰칠을 하고 원래 이름으로 저장해요. 폴더째 열 수 있어요.</span></button>
-      <button class="preset" data-kind="gif"><b>움짤</b><span>사진·GIF·영상을 이어 붙이고 글자와 효과를 얹어 GIF, 움직이는 WebP, MP4로 저장해요.</span></button>
+      <button class="preset" data-kind="gif"><b>영상·움짤</b><span>영상 편집기처럼 사진·GIF·영상을 시간 막대에 이어 붙이고 글자·효과·소리를 얹어요. MP4(최대 4K·60fps)로 내보내고 GIF·WebP 움짤로도 저장해요.</span></button>
     </div>
     ${row('작품 이름', `<input type="text" id="nName" value="${esc(first ? doc.name : '새 작품')}" spellcheck="false">`)}
     <div id="nCut"><div class="presets" style="margin-top:12px">${PRESETS.map((p, i) => { const s = 46 / Math.max(p.w, p.h * 0.5); return `<button class="preset ${i === 0 ? 'on' : ''}" data-i="${i}"><div class="shape" style="width:${Math.round(p.w * s)}px;height:${Math.round(Math.min(p.h * s, 70))}px"></div><b>${p.name}</b><span>${p.w} × ${p.h}<br>${p.desc}</span></button>`; }).join('')}
@@ -4207,7 +4214,9 @@ function openHelp() {
       <li><b>AI로 번역·다듬기</b> (제미나이): 말풍선·글자(움짤 글자도)를 고르고 'AI로 번역·다듬기…'에서 다른 말로 번역, 자연스럽게, 짧게, 반말·존댓말, 직접 요청을 골라요. 후보 3개 중 누르면 바뀌어요. 컷 편집에서 아무것도 안 고르면 '말풍선·글자 번역'으로 페이지 전체를 한 번에 번역해요(다른 나라 말 판 만들기).</li>
       <li><b>AI 영상 만들기</b> (제미나이, 유료 키): 이미지 편집 'AI 도구 → AI 영상 만들기…' 또는 움짤 장면의 'AI 영상으로…'. 그림 한 장과 '어떻게 움직일지' 적은 글로 몇 초짜리 영상(소리 포함)을 만들어 MP4로 저장하거나 움짤 탭에 넣어요. 가로 16:9·세로 9:16만 되고, 노출·성인 그림은 거절돼요.</li>
       <li><b>AI 더빙</b> (제미나이): 맨 위 'AI 더빙'(움짤 화면에도 있어요). 그림이 없어도 돼요. 대사를 줄마다 적고 목소리와 말투·감정을 고르면 읽어 줘요. ▶로 한 줄씩 듣고 '다시'로 다른 연기를 받아요. '캐릭터 목소리'에 캐릭터별 목소리·기본 말투를 저장해 두고, '말풍선에서 가져오기'로 대사를 한꺼번에 불러와요. 다 되면 '이어 붙여 저장'·'따로 저장'(WAV) 또는 '움짤에 넣기'로 소리 줄에 얹어요.</li>
-      <li><b>API 사용 내역</b>: 맨 위 '$' 단추(움짤 화면은 'API 사용'). 제미나이를 쓰는 창(페이지 번역·AI 번역·다듬기·AI 더빙·AI 영상)에는 시작 전에 예상 금액이 나오고, 끝나면 실제로 쓴 토큰과 금액이 작업 탭별로 기록돼요. 오늘·이번 달·전체 합계, 작업 탭별 합계, CSV 저장, 원화 환율 바꾸기가 돼요. 금액은 구글 표준 요금으로 계산한 값이라 무료 사용량 안이면 실제 청구는 0원이에요.</li>
+      <li><b>API 사용 내역</b>: 메뉴 AI → API 사용 내역(아래 상태 줄의 'API' 금액을 눌러도 돼요). 제미나이를 쓰는 창(페이지 번역·AI 번역·다듬기·AI 더빙·AI 영상)에는 시작 전에 예상 금액이 나오고, 끝나면 실제로 쓴 토큰과 금액이 작업 탭별로 기록돼요. 오늘·이번 달·전체 합계, 작업 탭별 합계, CSV 저장, 원화 환율 바꾸기가 돼요. 금액은 구글 표준 요금으로 계산한 값이라 무료 사용량 안이면 실제 청구는 0원이에요.</li>
+      <li><b>메뉴·우클릭·설정</b>: 맨 위 메뉴 막대(파일·편집·보기·넣기·도구·AI·영상·도움말)에 모든 기능이 있어요. 그림판·그림 목록·레이어·페이지·작업 탭·영상 시간 막대·미리보기에서 <b>우클릭</b>하면 그 자리에서 할 수 있는 일이 나와요. 설정(<kbd>Ctrl</kbd>+<kbd>,</kbd>)에서 화면 밝기·패널·영상 기본값·미리보기 화질·하드웨어 가속·API 키와 모델·이번 달 예산·AI 팩·단축키·업데이트를 한곳에서 바꿔요. 오른쪽 속성 칸 제목을 누르면 접혀요.</li>
+      <li><b>영상·움짤 (영상 편집기)</b>: 시퀀스 설정(해상도 720p~4K, 가로·세로·정사각형, 8~60fps)을 기준으로 편집하고 MP4로 내보내요. 같은 창에서 GIF·WebP 움짤로도 저장하는데, 움짤은 크기(기본 긴 쪽 800)와 프레임(GIF 50fps까지, WebP 60fps까지)을 따로 줄여요. 큰 해상도는 미리보기만 줄여 그려 가벼워요.</li>
       <li><b>일괄 처리</b> (이미지 편집): 아무것도 안 고르고 오른쪽 '일괄 처리'에서 '● 기록 시작'을 누른 뒤 한 그림을 고쳐요. '기록 끝내기'를 누르면 한 일(돌리기·자르기·크기·보정·AI 배경 지우기·자동 흰칠·글자 넣기)이 동작으로 저장되고, 폴더나 모든 그림에 똑같이 할 수 있어요.</li>
     </ol>
     <p class="muted small" style="margin-top:12px">되돌리기 <kbd>Ctrl+Z</kbd>, 다시 하기 <kbd>Ctrl+Y</kbd>, 복제 <kbd>Ctrl+D</kbd>, 복사와 붙여넣기 <kbd>Ctrl+C</kbd>/<kbd>V</kbd>, 삭제 <kbd>Delete</kbd>, 조금씩 옮기기 방향키(<kbd>Shift</kbd>와 함께 10칸), 화면 끌기 <kbd>Space</kbd>+드래그, 확대 <kbd>Ctrl</kbd>+휠, 비율 유지 <kbd>Shift</kbd>+모서리, 자석 잠시 끄기 <kbd>Alt</kbd></p>
@@ -4215,6 +4224,7 @@ function openHelp() {
   const u = document.getElementById('helpUpd'); if (u) u.addEventListener('click', () => { closeModal(); checkUpdate(true); });
 }
 const CMDS = {
+  settings: () => uiSettings(), changelog: () => uiChangelog(),
   new: () => openNewModal(false), open: () => $('#fileProj').click(), save: saveProject, undo, redo,
   'add-panel': addPanel, 'bubble-menu': () => openMenu('#menuBubble', '#bBubble'), 'layer-menu': () => openMenu('#menuLayer', '#bLayerAdd'), shape: () => setMode(mode === 'shape' ? null : 'shape'), 'split-menu': () => openMenu('#menuSplit', '#bSplit'), 'cz-menu': openCzMenu,
   'add-text': () => addText(), pen: () => setMode(mode === 'pen' ? null : 'pen'), brush: () => setMode(mode === 'brush' ? null : 'brush'),
@@ -4376,7 +4386,7 @@ async function checkUpdate(manual) {
     bar.remove();
     const m = modal(`<h2>새 버전 ${esc(up.version)}으로 업데이트</h2>
       <p class="sub">받아서 설치한 뒤 감자 편집기가 잠깐 닫혔다가 새 버전으로 다시 열려요. 지금 작업은 자동 저장한 뒤 진행해요.</p>
-      ${up.body ? `<div class="muted small" style="white-space:pre-wrap;max-height:180px;overflow:auto;margin:8px 0">${esc(up.body)}</div>` : ''}
+      ${up.body ? uiNotesHtml(up.body) : ''}
       <div class="czbar"><i id="updBarI"></i></div><p class="muted small" id="updMsg">&nbsp;</p>
       <div class="foot"><button class="btn" data-close>나중에</button><button class="btn primary" id="updNow">지금 업데이트</button></div>`);
     $('#updNow', m).addEventListener('click', async () => {
@@ -4411,7 +4421,8 @@ async function boot() {
   else if (restored) { $('#saveState').textContent = '지난 작업 열림'; toast(projects.filter(p => p.open).length > 1 ? '지난번 작업을 이어서 열었어요. 다른 작업은 위쪽 탭에 있어요.' : '지난번 작업을 이어서 열었어요'); }
   if (!restored && !actGif) openNewModal(true);
 }
+/*@@UI@@*/
 boot();
-if (appApi()) setTimeout(() => checkUpdate(false), 4000);
+if (appApi() && uiSet.autoUpd !== false) setTimeout(() => checkUpdate(false), 4000);
 })();
 </script>

@@ -12,7 +12,7 @@ async function gsAddVideo(file) {
   catch (e) { URL.revokeObjectURL(url); toast(`${file.name}을 열지 못했어요. MP4(H.264)나 WebM 영상을 넣어 주세요`, 4500); return 0; }
   const opt = await gsVideoAsk(v, file.name);
   if (!opt) { URL.revokeObjectURL(url); return 0; }
-  const n = Math.max(1, Math.min(400, Math.round((opt.end - opt.start) * opt.fps))), clip = 'c' + uid();
+  const n = Math.max(1, Math.min(900, Math.round((opt.end - opt.start) * opt.fps))), clip = 'c' + uid();
   const k = Math.min(1, opt.max / Math.max(v.videoWidth, v.videoHeight)), w = Math.max(2, Math.round(v.videoWidth * k)), h = Math.max(2, Math.round(v.videoHeight * k));
   let got = 0;
   for (let i = 0; i < n; i++) {
@@ -30,12 +30,12 @@ function gsVideoAsk(v, name) {
       <div id="gvBox" style="display:flex;justify-content:center;background:#000;border-radius:8px;overflow:hidden;max-height:40vh"></div>
       <div class="grid2" style="margin-top:10px"><span>시작 (초)</span><span><input type="number" id="gvS" min="0" max="${D}" step="0.05" value="0"> <button class="btn sm" id="gvSNow">지금 위치</button></span>
         <span>끝 (초)</span><span><input type="number" id="gvE" min="0" max="${D}" step="0.05" value="${fmt(Math.min(D, 6))}"> <button class="btn sm" id="gvENow">지금 위치</button></span></div>
-      ${row('초당 장 수', `<select id="gvF">${[6, 8, 10, 12, 15, 20, 24, 30].map(f => `<option value="${f}" ${f === 12 ? 'selected' : ''}>${f}장</option>`).join('')}</select>`)}
-      ${row('크기 (긴 쪽)', `<select id="gvM">${[360, 480, 640, 800, 1080].map(f => `<option value="${f}" ${f === 640 ? 'selected' : ''}>${f}px</option>`).join('')}</select>`)}
+      ${row('초당 장 수', `<select id="gvF">${[6, 8, 10, 12, 15, 20, 24, 25, 30, 50, 60].map(f => `<option value="${f}" ${f === Math.min(60, +gs.set.fps || 12) ? 'selected' : ''}>${f}장${f === +gs.set.fps ? ' (시퀀스와 같게)' : ''}</option>`).join('')}</select>`)}
+      ${row('크기 (긴 쪽)', `<select id="gvM">${[360, 480, 640, 800, 1080, 1440, 2160].map(f => `<option value="${f}" ${f === (gsInMax() >= 1920 ? 1080 : gsInMax() >= 1080 ? 800 : 640) ? 'selected' : ''}>${f}px</option>`).join('')}</select>`)}
       <p class="muted small" id="gvN"></p>
       <div class="foot"><button class="btn" data-close>취소</button><button class="btn primary" id="gvGo">불러오기</button></div>`, { wide: true });
     v.controls = true; v.style.maxWidth = '100%'; v.style.maxHeight = '40vh'; $('#gvBox', m).appendChild(v);
-    const upd = () => { const s = +$('#gvS', m).value || 0, e = +$('#gvE', m).value || 0, n = Math.round(Math.max(0, e - s) * +$('#gvF', m).value); $('#gvN', m).textContent = n > 400 ? `${n}장이 돼요. 한 번에 400장까지라 앞에서부터 400장만 넣어요.` : `${n}장이 장면으로 들어가요.`; };
+    const upd = () => { const s = +$('#gvS', m).value || 0, e = +$('#gvE', m).value || 0, n = Math.round(Math.max(0, e - s) * +$('#gvF', m).value); $('#gvN', m).textContent = n > 900 ? `${n}장이 돼요. 한 번에 900장까지라 앞에서부터 900장만 넣어요.` : `${n}장이 장면으로 들어가요.`; };
     $$('input,select', m).forEach(x => x.addEventListener('input', upd)); upd();
     $('#gvSNow', m).addEventListener('click', () => { $('#gvS', m).value = fmt(v.currentTime); upd(); });
     $('#gvENow', m).addEventListener('click', () => { $('#gvE', m).value = fmt(v.currentTime); upd(); });
@@ -83,19 +83,24 @@ function gsPickClick(i, e) { // 장면 목록 클릭: Shift = 범위, Ctrl = 하
 }
 
 /* ---- 저장: MP4(H.264), 용량 맞추기, 예상 용량 ---- */
+// H.264가 먼저 (어디서나 열려요). 이 크기·프레임을 못 하면 HEVC → VP9 → AV1 순서로 (모두 MP4 안에 넣어요)
+const GS_CODECS = [['avc', 'avc1.640034'], ['avc', 'avc1.640033'], ['avc', 'avc1.4d0034'], ['avc', 'avc1.640028'], ['avc', 'avc1.42001f'], ['hevc', 'hvc1.1.6.L153.B0'], ['hevc', 'hvc1.1.6.L156.B0'], ['vp9', 'vp09.00.51.08'], ['av1', 'av01.0.12M.08']];
 async function gsMp4Codec(W, H, fps, bitrate) {
   if (typeof VideoEncoder === 'undefined' || typeof Mp4Muxer === 'undefined') return null;
-  for (const codec of ['avc1.640033', 'avc1.4d0033', 'avc1.42003e', 'avc1.42001f']) {
-    const cfg = { codec, width: W, height: H, bitrate, framerate: fps, avc: { format: 'avc' } };
-    try { const r = await VideoEncoder.isConfigSupported(cfg); if (r.supported) return cfg; } catch (_) { }
+  const hw = uiSet.hw || 'no-preference', tries = hw === 'no-preference' ? [hw] : [hw, 'no-preference'];
+  for (const [mux, codec] of GS_CODECS) for (const acc of tries) {
+    const cfg = { codec, width: W, height: H, bitrate, framerate: fps, hardwareAcceleration: acc, latencyMode: 'quality' };
+    if (mux === 'avc') cfg.avc = { format: 'avc' }; if (mux === 'hevc') cfg.hevc = { format: 'hevc' };
+    try { const r = await VideoEncoder.isConfigSupported(cfg); if (r.supported) { cfg.mux = mux; return cfg; } } catch (_) { }
   }
   return null;
 }
 async function encodeMp4(W, H, fps, total, renderFrame, progress, bitrate, audio) {
   W -= W % 2; H -= H % 2;
   const cfg = await gsMp4Codec(W, H, fps, bitrate); if (!cfg) throw new Error('nomp4');
+  const vmux = cfg.mux; delete cfg.mux;
   const ac = audio ? await auEncoderCfg(audio.sampleRate, audio.numberOfChannels) : null; // 소리 (배경 음악·효과음)
-  const muxer = new Mp4Muxer.Muxer({ target: new Mp4Muxer.ArrayBufferTarget(), video: { codec: 'avc', width: W, height: H, frameRate: fps }, ...(ac ? { audio: { codec: ac.mux, numberOfChannels: audio.numberOfChannels, sampleRate: audio.sampleRate } } : {}), fastStart: 'in-memory' });
+  const muxer = new Mp4Muxer.Muxer({ target: new Mp4Muxer.ArrayBufferTarget(), video: { codec: vmux, width: W, height: H, frameRate: fps }, ...(ac ? { audio: { codec: ac.mux, numberOfChannels: audio.numberOfChannels, sampleRate: audio.sampleRate } } : {}), fastStart: 'in-memory' });
   let err = null;
   const enc = new VideoEncoder({ output: (chunk, meta) => muxer.addVideoChunk(chunk, meta), error: e => { err = e; } });
   enc.configure(cfg);
@@ -104,28 +109,38 @@ async function encodeMp4(W, H, fps, total, renderFrame, progress, bitrate, audio
     if (err) throw err;
     renderFrame(g, i / fps, W, H);
     const f = new VideoFrame(c, { timestamp: Math.round(i * us), duration: Math.round(us) });
-    enc.encode(f, { keyFrame: i % (fps * 2) === 0 }); f.close();
-    if (enc.encodeQueueSize > 8) await new Promise(r => setTimeout(r, 0));
+    enc.encode(f, { keyFrame: i % Math.round(fps * 2) === 0 }); f.close();
+    while (enc.encodeQueueSize > 8) { if (err) throw err; await new Promise(r => setTimeout(r, 2)); }
     progress(i + 1, n);
   }
   await enc.flush(); enc.close(); if (err) throw err;
   if (ac) await auEncode(audio, muxer, ac.cfg);
   muxer.finalize();
-  const out = new Blob([muxer.target.buffer], { type: 'video/mp4' }); if (audio && !ac) out.noAudio = true;
+  const out = new Blob([muxer.target.buffer], { type: 'video/mp4' }); if (audio && !ac) out.noAudio = true; out.codec = vmux;
   return out;
 }
 async function gsEncodeOnce(fmt, W, H, opt, prog) {
   const R = (g, t, w, h) => gsRenderAt(g, t, w, h);
   if (fmt === 'mp4') return encodeMp4(W, H, opt.fps, gsTotal(), R, prog, opt.bitrate, await auMix(gsTotal()));
-  const frames = gsFramePlan(opt.fps);
+  const frames = gsFramePlan(opt.gfps);
   if (fmt === 'gif') return encodeGif(W, H, frames, R, prog, opt.colors);
   return encodeWebp(W, H, frames, R, prog, opt.q);
 }
-const gsMp4Bitrate = (W, H, fps, q) => Math.round(W * H * fps * (0.04 + q / 100 * 0.22)); // 화질(40~100) → 픽셀당 비트
+const gsMp4Bitrate = (W, H, fps, q) => Math.min(150e6, Math.round(W * H * Math.pow(fps, 0.75) * 2.2 * (0.04 + q / 100 * 0.22))); // 화질(40~100) → 비트레이트 (프레임이 늘면 덜 늘게)
+// 움짤(GIF·WebP)은 영상과 따로: 프레임(GIF는 50까지 — 그보다 짧은 간격은 브라우저가 느리게 틀어요)과 크기
+const GS_GFPS = [8, 10, 12, 15, 20, 24, 25, 30, 50, 60];
+function gsOutFps(fmt) { const f = +gs.set.gfps || +gs.set.fps || 12; return fmt === 'gif' ? Math.min(50, f) : Math.min(60, f); }
+const GS_GSCALE = [['1', '영상과 같게'], ['0.75', '75%'], ['0.5', '50%'], ['l1080', '긴 쪽 1080'], ['l800', '긴 쪽 800 (추천)'], ['l640', '긴 쪽 640'], ['l480', '긴 쪽 480 (가볍게)']];
+function gsOutSize(fmt) {
+  const [W, H] = gsSize(); if (fmt === 'mp4') return [W, H];
+  const v = String(gs.set.gscale ?? 'l800'); let k = 1;
+  if (v[0] === 'l') k = Math.min(1, (+v.slice(1) || 800) / Math.max(W, H)); else k = clamp(+v || 1, 0.1, 1);
+  return [Math.max(16, Math.round(W * k / 2) * 2), Math.max(16, Math.round(H * k / 2) * 2)];
+}
 // 목표 용량 안으로: 한 번 만들어 보고, 크면 화질·색 수·크기를 줄여 다시 (최대 5번)
 async function gsEncodeTarget(fmt, prog) {
-  let [W, H] = gsSize(); const set = gs.set, target = (+set.target || 0) * 1048576;
-  let opt = { fps: +set.fps, colors: +set.colors || 256, q: +set.q || 88, bitrate: gsMp4Bitrate(W, H, +set.fps, +set.mq || 75) };
+  let [W, H] = gsOutSize(fmt); const set = gs.set, target = (+set.target || 0) * 1048576;
+  let opt = { fps: +set.fps, gfps: gsOutFps(fmt), colors: +set.colors || 256, q: +set.q || 88, bitrate: gsMp4Bitrate(W, H, +set.fps, +set.mq || 75) };
   if (fmt === 'mp4' && target) opt.bitrate = Math.max(150e3, Math.round(target * 8 * 0.93 / Math.max(0.5, gsTotal())) - ((gs.au || []).some(a => !a.hidden) ? 165000 : 0)); // 소리 몫은 빼고
   let blob = null;
   for (let tries = 0; tries < 5; tries++) {
@@ -140,7 +155,7 @@ async function gsEncodeTarget(fmt, prog) {
   return { blob, W, H };
 }
 async function gsEstimate() {
-  const [W, H] = gsSize(), fmt = gs.set.fmt, fps = +gs.set.fps, frames = gsFramePlan(fps), out = $('#gsEst');
+  const fmt = gs.set.fmt, [W, H] = gsOutSize(fmt), fps = +gs.set.fps, frames = gsFramePlan(fmt === 'mp4' ? fps : gsOutFps(fmt)), out = $('#gsEst');
   if (!gs.slides.length || !out) return;
   out.textContent = '계산하는 중…';
   try {
@@ -152,7 +167,7 @@ async function gsEstimate() {
       bytes = b.size / sample.length * frames.length;
     }
     const t = (+gs.set.target || 0) * 1048576;
-    out.textContent = `예상 약 ${(bytes / 1048576).toFixed(1)}MB (${frames.length}장)` + (t && bytes > t ? ` · 목표보다 커서 저장할 때 줄여요` : '');
+    out.textContent = `예상 약 ${(bytes / 1048576).toFixed(1)}MB (${fmt === 'mp4' ? Math.round(gsTotal() * fps) : frames.length}장${fmt === 'mp4' ? ` · ${(gsMp4Bitrate(W, H, fps, +gs.set.mq || 75) / 1e6).toFixed(1)}Mbps` : ''})` + (t && bytes > t ? ` · 목표보다 커서 저장할 때 줄여요` : '');
   } catch (e) { out.textContent = fmt === 'mp4' ? '이 컴퓨터에서는 MP4로 저장할 수 없어요' : '계산하지 못했어요'; }
 }
 /* ---- AI 중간 장면 (RIFE v4.9): 고른 장면 사이에 새 장면을 그려 넣어 부드럽게 ---- */

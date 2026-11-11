@@ -6,7 +6,7 @@ let edPj = null;     // 편집기에 열려 있는 작업
 let gifPj = null;    // 움짤 화면에 열려 있는 작업
 let pjBusy = false, pjListT = 0;
 const histStash = new Map(); // 작업 id -> 되돌리기 기록 (탭을 오가도 Ctrl+Z가 이어지게, 이 창을 켜 둔 동안만)
-const PJ_MODE = { cut: '컷 편집', image: '이미지 편집', gif: '움짤' };
+const PJ_MODE = { cut: '컷 편집', image: '이미지 편집', gif: '영상·움짤' };
 const PJ_ICON = {
   cut: '<svg width="14" height="14" viewBox="0 0 16 16"><rect x="1.5" y="1.5" width="13" height="13" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M1.5 7h13M8 7v7.5" stroke="currentColor" stroke-width="1.5"/></svg>',
   image: '<svg width="14" height="14" viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="5.5" cy="6.2" r="1.3" fill="currentColor"/><path d="M2 12.5l4-4 3 3 2-2 3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>',
@@ -91,7 +91,7 @@ async function pjNewGif(name) {
   const id = pjNewId(); projects.push({ id, name: name || pjGifName(), mode: 'gif', at: Date.now(), open: true });
   await pjSwitch(id);
 }
-function pjGifName() { let n = 1; while (projects.some(p => p.name === `움짤 ${n}`)) n++; return `움짤 ${n}`; }
+function pjGifName() { let n = 1; while (projects.some(p => p.name === `영상 ${n}` || p.name === `움짤 ${n}`)) n++; return `영상 ${n}`; }
 // 탭 바꾸기
 async function pjSwitch(id) {
   const P = pjGet(id); if (!P || pjBusy) return;

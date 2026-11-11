@@ -19,6 +19,20 @@ def ort_classic():
     return js
 
 
+def changes():
+    """changelog.md → [{v, date, title, items: [{t, s}]}] (앱의 '업데이트 기록' 창)"""
+    out = []
+    for line in read(os.path.join(ROOT, 'changelog.md')).splitlines():
+        if line.startswith('## '):
+            p = [x.strip() for x in line[3:].split('|')]
+            out.append({'v': p[0], 'date': p[1] if len(p) > 1 else '', 'title': p[2] if len(p) > 2 else '', 'items': []})
+        elif line.startswith('- ') and out:
+            t, _, rest = line[2:].partition('|')
+            out[-1]['items'].append({'t': t.strip(), 's': rest.strip()} if rest else {'t': '', 's': t.strip()})
+    assert out and out[0]['v'] == VERSION, ('changelog.md 맨 위 버전이 앱 버전과 달라요', out and out[0]['v'], VERSION)
+    return out
+
+
 def page(kind, extra):
     head = read(os.path.join(S, 'head.html')).rstrip('\n')
     main = read(os.path.join(S, 'main.js')).rstrip('\n')
@@ -28,6 +42,7 @@ def page(kind, extra):
         main = main.replace(f'/*@@{name}@@*/\n', read(os.path.join(S, name.lower() + '.js')), 1)
     assert main.startswith('<script>')
     build = '<script>window.POTATO_BUILD = ' + json.dumps({'kind': kind, 'version': VERSION}) + ';</script>'
+    build += '<script>window.POTATO_CHANGES = ' + json.dumps(changes(), ensure_ascii=False).replace('</', '<\\/') + ';</script>'
     mux = read(os.path.join(ROOT, 'vendor', 'mp4-muxer', 'mp4-muxer.js'))  # MP4 저장 (MIT)
     assert '</script' not in mux.lower()
     parts = [head, build, '<script>' + mux + '</script>', read(os.path.join(S, 'sfx-packs.html')).rstrip('\n'), main, NOTICE] + extra + ['</body>', '</html>']

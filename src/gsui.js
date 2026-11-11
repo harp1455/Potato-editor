@@ -25,7 +25,7 @@ function buildGifStudio() {
   if (gs.built) return; gs.built = true;
   const d = document.createElement('div'); d.id = 'gifStudio'; d.className = 'gs gp'; d.hidden = true;
   try { const h = +localStorage.getItem('potatoTLH'); if (h > 120) d.style.setProperty('--tlh', h + 'px'); } catch (e) { }
-  d.innerHTML = `<div class="gs-top gp-top"><b>움짤 만들기</b><div class="gp-dash" id="gpDash"></div><div class="flex1"></div>
+  d.innerHTML = `<div class="gs-top gp-top"><b>영상 편집</b><div class="gp-dash" id="gpDash"></div><div class="flex1"></div>
       <button class="btn" data-apilog title="제미나이 작업마다 예상·실제 토큰과 금액">API 사용</button><button class="btn" data-g="dub" title="대사를 적으면 고른 목소리와 감정으로 읽어 줘요 (제미나이). 만든 소리는 소리 줄에 넣을 수 있어요">AI 더빙</button><button class="btn primary" data-g="export-open" title="GIF, 움직이는 WebP, MP4로 저장 (Ctrl+M)">내보내기</button><button class="btn" data-g="close">편집기로 돌아가기</button></div>
     <div class="gp-up">
       <aside class="gp-lib" id="gpLib"></aside>
@@ -73,7 +73,8 @@ async function openGifStudio() {
 }
 function closeGifStudio() { gsPause(); $('#gifStudio').hidden = true; gsSave(); }
 function gsFitCanvas() {
-  const [W, H] = gsSize(), cv = $('#gsCv'), st = $('#gsStage');
+  const [W0, H0] = gsSize(), cv = $('#gsCv'), st = $('#gsStage');
+  const pk = Math.min(1, (+uiSet.pvMax || 99999) / Math.max(W0, H0)), W = Math.max(2, Math.round(W0 * pk)), H = Math.max(2, Math.round(H0 * pk)); // 미리보기는 줄여서 그려요 (4K도 가볍게)
   if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
   const k = Math.min((st.clientWidth - 28) / W, (st.clientHeight - 28) / H, 1.5);
   cv.style.width = Math.max(10, W * k) + 'px'; cv.style.height = Math.max(10, H * k) + 'px';
@@ -104,10 +105,10 @@ const gsSceneAt = t => { const st = gsStarts(); for (let i = gs.slides.length - 
 function gpDashRender() {
   const el = $('#gpDash'); if (!el) return;
   const S = gs.slides; if (!S.length) { el.innerHTML = '<span class="muted small">장면을 넣으면 여기에 길이·크기·저장 장 수가 보여요</span>'; return; }
-  const [W, H] = gsSize(), n = gsFramePlan(+gs.set.fps).length, fmt = gs.set.fmt === 'gif' ? 'GIF' : gs.set.fmt === 'mp4' ? 'MP4' : 'WebP';
+  const [W, H] = gsSize(), fmt = gs.set.fmt === 'gif' ? 'GIF' : gs.set.fmt === 'mp4' ? 'MP4' : 'WebP', gif = gs.set.fmt !== 'mp4', [oW, oH] = gsOutSize(gs.set.fmt);
   const chip = (l, v, t) => `<button class="gp-chip" data-g="desel" title="${t}"><i>${l}</i>${v}</button>`;
-  el.innerHTML = chip('장면', S.length + '개', '전체 설정 보기') + chip('길이', fmtTC(gsTotal()), '전체 설정 보기') + chip('크기', `${W}×${H}`, '전체 설정에서 바꿔요') + chip('초당', gs.set.fps + '장', '전체 설정에서 바꿔요')
-    + chip('저장하면', n + '장', '움직이지 않는 부분은 한 장으로 합쳐요') + chip('형식', fmt, '내보내기에서 바꿔요')
+  el.innerHTML = chip('해상도', `${W}×${H}`, '시퀀스 설정에서 바꿔요') + chip('프레임', gs.set.fps + 'fps', '시퀀스 설정에서 바꿔요') + chip('길이', fmtTC(gsTotal()), '전체 길이') + chip('장면', S.length + '개', '')
+    + chip('내보내기', gif ? `${fmt} ${oW}×${oH} · ${gsOutFps(gs.set.fmt)}fps · ${gsFramePlan(gsOutFps(gs.set.fmt)).length}장` : `MP4 · ${(gsMp4Bitrate(W, H, +gs.set.fps, +gs.set.mq || 75) / 1e6).toFixed(0)}Mbps`, '내보내기 창에서 바꿔요')
     + (gs.ovs.length ? chip('글자', gs.ovs.length + '개', '') : '') + (gs.fx.length ? chip('효과', gs.fx.length + '개', '') : '');
 }
 
@@ -213,7 +214,7 @@ function gsRenderProps() {
   const au = (gs.au || []).find(x => x.id === gs.asel);
   if ((gs.focus === 'ov' && !o) || (gs.focus === 'fx' && !f) || (gs.focus === 'au' && !au) || ((gs.focus === 'scene' || gs.focus === 'tr') && !s) || (gs.focus === 'tr' && gs.sel < 1)) gs.focus = 'set';
   const opt = (arr, cur) => arr.map(([v, l]) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${l}</option>`).join('');
-  let k = '전체', head = '움짤 전체 설정', body = '';
+  let k = '전체', head = '시퀀스 (영상 전체)', body = '';
   if (gs.focus === 'scene' && gs.pick.size > 1) { k = '장면'; head = `고른 장면 ${gs.pick.size}개`; body = gsBatchHtml() + (S[gs.sel] ? `<div class="sec">${gsXfHtml(S[gs.sel], 0)}</div>` : ''); }
   else if (gs.focus === 'scene') {
     k = '장면'; head = `${gs.sel + 1}번 장면 <span class="muted small">/ ${S.length}</span>`;
@@ -244,13 +245,16 @@ function gsRenderProps() {
   } else if (gs.focus === 'au') {
     k = '소리'; head = '♪ ' + esc(au.name || '소리'); body = auPropsHtml(au);
   } else {
-    body = `<div class="sec"><h3>화면</h3>
-        ${row('크기', `<select data-gk="size">${opt(GS_SIZES, set.size)}</select>`)}
-        ${set.size === 'custom' ? `<div class="grid2"><span>폭</span><input type="number" data-gk="cw" value="${set.cw}" min="16" max="2400"><span>높이</span><input type="number" data-gk="ch" value="${set.ch}" min="16" max="2400"></div>` : ''}
+    const [sW, sH] = gsSize();
+    body = `<div class="sec"><h3>시퀀스 설정 (영상)</h3>
+        ${row('해상도', `<select data-gk="size">${opt(GS_SIZES, set.size)}</select>`)}
+        ${set.size === 'custom' ? `<div class="grid2"><span>폭</span><input type="number" data-gk="cw" value="${set.cw}" min="16" max="${GS_OUTMAX}" step="2"><span>높이</span><input type="number" data-gk="ch" value="${set.ch}" min="16" max="${GS_OUTMAX}" step="2"></div>` : ''}
+        ${row('프레임', `<select data-gk="fps">${opt(GS_FPS.map(f => [String(f), `${f} fps${f === 24 ? ' (영화)' : f === 30 ? ' (기본)' : f === 60 ? ' (아주 부드럽게)' : f <= 12 ? ' (가볍게)' : ''}`]), String(set.fps))}</select>`)}
         ${row('바탕색', `<input type="color" data-gk="bg" value="${set.bg}">`)}
         ${row('맞추기', `<select data-gk="fit">${opt([['cover', '꽉 채우기'], ['contain', '전체 보이기']], set.fit)}</select>`)}
-        ${row('부드러움', `<select data-gk="fps">${opt([['8', '초당 8장 (가볍게)'], ['10', '초당 10장'], ['12', '초당 12장'], ['15', '초당 15장'], ['20', '초당 20장'], ['24', '초당 24장 (매끄럽게)'], ['30', '초당 30장']], String(set.fps))}</select>`)}
-        ${row('반복', `<label class="chk"><input type="checkbox" data-gk="loop" ${set.loop ? 'checked' : ''}> 계속 반복</label>`)}</div>
+        ${row('반복 재생', `<label class="chk"><input type="checkbox" data-gk="loop" ${set.loop ? 'checked' : ''}> 미리보기·움짤에서 계속 반복</label>`)}
+        <p class="gp-tip">지금 ${sW}×${sH} · ${set.fps}fps. 영상(MP4)은 이 크기·프레임 그대로 나가고, GIF·WebP 움짤은 내보내기 창에서 크기·프레임을 따로 줄여요.${sW * sH > 2073600 ? ' 큰 해상도는 미리보기를 줄여서 그려요(설정 → 영상).' : ''}</p></div>
+        ${S.some(s => Math.max(s.w, s.h) < Math.max(sW, sH) * 0.9 && s.fit !== 'contain' && !s.clip) ? `<p class="gp-tip warn">장면 그림 중에 영상 해상도(${Math.max(sW, sH)})보다 작게 들어온 것이 있어요. 해상도를 키웠다면 그 장면을 다시 넣으면 더 선명해요.</p>` : ''}
       <div class="sec"><h3>장면 기본값</h3>
         ${row('장면 길이', `<input type="number" data-gk="dur" min="0.05" max="60" step="0.1" value="${set.dur}"> 초`)}
         ${row('움직임', `<select data-gk="motion">${opt(GS_MOTIONS, set.motion)}</select>`)}
@@ -258,7 +262,7 @@ function gsRenderProps() {
         ${set.trans !== 'none' ? row('넘김 길이', `<input type="number" data-gk="trDur" min="0.05" max="3" step="0.05" value="${set.trDur}"> 초`) : ''}
         <p class="gp-tip">장면마다 따로 정하지 않은 것은 이 값을 따라요.</p>
         <div class="btnrow"><button class="btn sm" data-g="all-follow" title="장면마다 따로 정한 길이, 움직임, 넘김을 지우고 기본값으로 맞춰요">모든 장면을 기본값으로</button></div></div>
-      <div class="sec"><h3>저장</h3><div class="btnrow"><button class="btn primary" data-g="export-open" ${S.length ? '' : 'disabled'}>내보내기…</button></div>
+      <div class="sec"><h3>내보내기</h3><div class="btnrow"><button class="btn primary" data-g="export-open" ${S.length ? '' : 'disabled'}>영상·움짤 내보내기… <kbd>Ctrl+M</kbd></button></div>
         <p class="gp-tip">아래 시간 막대에서 장면·글자·효과를 누르면 여기에 그 속성이 나와요.</p></div>`;
   }
   el.innerHTML = `<div class="gp-insp-h"><span class="k k-${k === '전체' ? 'set' : 'x'}">${k}</span><b>${head}</b><span class="flex1"></span>${gs.focus !== 'set' ? '<button class="gp-ib sm" data-g="desel" title="고르기 풀기 (Esc)">×</button>' : ''}</div>` + body;
@@ -276,26 +280,36 @@ function gsXfHtml(s, nClip) { // 장면 그림 위치·크기·회전
     ${kfHtml((kfOwner(s) || s).kf, gsStarts()[gs.slides.indexOf(kfOwner(s) || s)] || 0)}`;
 }
 function gsSaveHtml() {
-  const set = gs.set, opt = (arr, cur) => arr.map(([v, l]) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${l}</option>`).join('');
-  return `<div class="sec">${row('형식', `<div class="seg"><button class="btn sm ${set.fmt === 'gif' ? 'on' : ''}" data-g="fmt" data-v="gif">GIF</button><button class="btn sm ${set.fmt === 'webp' ? 'on' : ''}" data-g="fmt" data-v="webp">움직이는 WebP</button><button class="btn sm ${set.fmt === 'mp4' ? 'on' : ''}" data-g="fmt" data-v="mp4">MP4 영상</button></div>`)}
-      ${row('부드러움', `<select data-gk="fps">${opt([['8', '초당 8장 (가볍게)'], ['10', '초당 10장'], ['12', '초당 12장'], ['15', '초당 15장'], ['20', '초당 20장'], ['24', '초당 24장 (매끄럽게)'], ['30', '초당 30장']], String(set.fps))}</select>`)}
+  const set = gs.set, opt = (arr, cur) => arr.map(([v, l]) => `<option value="${v}" ${String(v) === String(cur) ? 'selected' : ''}>${l}</option>`).join('');
+  const fmt = set.fmt, mp4 = fmt === 'mp4', [W, H] = gsSize(), [oW, oH] = gsOutSize(fmt), au = (gs.au || []).some(a => !a.hidden);
+  const card = (v, t, d) => `<button class="xp-card ${fmt === v ? 'on' : ''}" data-g="fmt" data-v="${v}"><b>${t}</b><span>${d}</span></button>`;
+  const vid = `<div class="xp-sec"><h4>영상 설정</h4>
+      ${row('해상도', `<b>${W}×${H}</b> <span class="muted small">시퀀스 설정을 따라요</span>`)}
+      ${row('프레임', `<select data-gk="fps">${opt(GS_FPS.map(f => [f, f + ' fps']), set.fps)}</select>`)}
+      ${row('화질', `<input type="range" data-gk="mq" min="40" max="100" value="${set.mq || 75}"> <span class="muted small rv">${set.mq || 75}</span>`)}
+      ${row('', `<span class="muted small">약 ${(gsMp4Bitrate(W, H, +set.fps, +set.mq || 75) / 1e6).toFixed(1)}Mbps · H.264 (안 되면 HEVC·VP9·AV1)${au ? ' · 소리 포함' : ''}</span>`)}</div>`;
+  const gif = `<div class="xp-sec"><h4>움짤 설정</h4>
+      ${row('크기', `<select data-gk="gscale">${opt(GS_GSCALE, set.gscale ?? 'l800')}</select> <span class="muted small">${oW}×${oH}</span>`)}
+      ${row('프레임', `<select data-gk="gfps"><option value="0" ${!+set.gfps ? 'selected' : ''}>영상과 같게 (${gsOutFps(fmt)}fps)</option>${opt(GS_GFPS.filter(f => fmt !== 'gif' || f <= 50).map(f => [f, f + ' fps']), +set.gfps || '')}</select>`)}
+      ${fmt === 'gif' ? row('색 수', `<select data-gk="colors">${opt([['256', '256색 (선명)'], ['128', '128색'], ['64', '64색 (가볍게)'], ['32', '32색']], String(set.colors || 256))}</select>`) + row('', `<label class="chk"><input type="checkbox" data-gk="dither" ${set.dither ? 'checked' : ''}> 색 경계 부드럽게</label>`)
+        : row('화질', `<input type="range" data-gk="q" min="40" max="100" value="${set.q}"> <span class="muted small rv">${set.q}</span>`)}
       ${row('반복', `<label class="chk"><input type="checkbox" data-gk="loop" ${set.loop ? 'checked' : ''}> 계속 반복</label>`)}
-      ${set.fmt === 'gif' ? row('', `<label class="chk"><input type="checkbox" data-gk="dither" ${set.dither ? 'checked' : ''}> 색 경계 부드럽게</label>`) + row('색 수', `<select data-gk="colors">${opt([['256', '256색 (선명)'], ['128', '128색'], ['64', '64색 (가볍게)'], ['32', '32색']], String(set.colors))}</select>`)
-        : set.fmt === 'mp4' ? row('화질', `<input type="range" data-gk="mq" min="40" max="100" value="${set.mq}"> <span class="muted small rv">${set.mq}</span>`) : row('화질', `<input type="range" data-gk="q" min="40" max="100" value="${set.q}"> <span class="muted small rv">${set.q}</span>`)}
-      ${row('용량 맞추기', `<input type="number" data-gk="target" min="0" max="500" step="0.5" value="${set.target || 0}" style="width:64px" title="0이면 안 맞춰요"> MB 이하`)}
-      <div class="btnrow"><button class="btn sm" data-g="est">예상 용량 보기</button><span class="muted small" id="gsEst"></span></div>
-      <div class="btnrow"><button class="btn primary" data-g="export" id="gsExport" ${gs.slides.length ? '' : 'disabled'}>${set.fmt === 'gif' ? 'GIF로 저장' : set.fmt === 'mp4' ? 'MP4로 저장' : 'WebP로 저장'}</button></div>
-      ${(gs.au || []).some(a => !a.hidden) && set.fmt !== 'mp4' ? '<p class="gp-tip warn">넣은 소리는 MP4로 저장할 때만 들어가요.</p>' : ''}
-      <p class="muted small">GIF는 256색이라 사진은 조금 거칠어질 수 있어요. 움직이는 WebP가 더 선명하고 가벼워요. MP4는 가장 가볍고${(gs.au || []).some(a => !a.hidden) ? ' 넣은 소리도 같이 들어가요' : ' \'+ 소리\'로 음악을 넣을 수 있어요'}. 용량을 정하면 넘을 때 화질·색 수·크기를 줄여 다시 만들어요.</p></div>`;
+      ${fmt === 'gif' ? '<p class="gp-tip">GIF는 50fps까지만 돼요(그보다 빠르면 브라우저가 느리게 틀어요). 60fps 움짤은 WebP로 저장하세요.</p>' : ''}
+      ${au ? '<p class="gp-tip warn">소리는 움짤에 들어가지 않아요. 소리까지 넣으려면 MP4로 내보내세요.</p>' : ''}</div>`;
+  return `<div class="xp-cards">${card('mp4', '영상 · MP4', '시퀀스 해상도·프레임 그대로, 소리 포함. 가장 가볍고 선명해요')}${card('gif', '움짤 · GIF', '어디서나 움직여요. 256색이라 사진은 조금 거칠어요')}${card('webp', '움짤 · 움직이는 WebP', 'GIF보다 선명하고 가벼워요. 60fps도 돼요')}</div>
+    ${mp4 ? vid : gif}
+    <div class="xp-sec">${row('용량 맞추기', `<input type="number" data-gk="target" min="0" max="2000" step="0.5" value="${set.target || 0}" style="width:70px" title="0이면 안 맞춰요"> MB 이하 <span class="muted small">(넘으면 ${mp4 ? '비트레이트' : '화질·색 수·크기'}를 줄여 다시 만들어요)</span>`)}
+      <div class="btnrow"><button class="btn sm" data-g="est">예상 용량 보기</button><span class="muted small" id="gsEst"></span></div></div>
+    <div class="foot" style="margin-top:12px"><span class="muted small" style="margin-right:auto;align-self:center">${mp4 ? `${W}×${H} · ${set.fps}fps · ${fmtTC(gsTotal())}` : `${oW}×${oH} · ${gsOutFps(fmt)}fps · ${gsFramePlan(gsOutFps(fmt)).length}장`}</span><button class="btn" data-close>닫기</button><button class="btn primary" data-g="export" id="gsExport" ${gs.slides.length ? '' : 'disabled'}>${fmt === 'gif' ? 'GIF로 저장' : mp4 ? 'MP4로 내보내기' : 'WebP로 저장'}</button></div>`;
 }
 function gsExportOpen() {
   if (!gs.slides.length) { toast('장면을 먼저 넣어 주세요'); return; }
   gsPause();
-  const [W, H] = gsSize(), m = modal(`<h2>내보내기</h2><p class="sub">${W}×${H} · ${fmtTC(gsTotal())} · 장면 ${gs.slides.length}개${gs.ovs.length ? ` · 글자 ${gs.ovs.length}개` : ''}${gs.fx.length ? ` · 효과 ${gs.fx.length}개` : ''}</p><div id="gsExpBody" class="gp-exp"></div><div class="foot"><button class="btn" data-close>닫기</button></div>`);
+  const [W, H] = gsSize(), m = modal(`<h2>내보내기</h2><p class="sub">${W}×${H} · ${gs.set.fps}fps · ${fmtTC(gsTotal())} · 장면 ${gs.slides.length}개${gs.ovs.length ? ` · 글자 ${gs.ovs.length}개` : ''}${gs.fx.length ? ` · 효과 ${gs.fx.length}개` : ''}${(gs.au || []).length ? ` · 소리 ${gs.au.length}개` : ''}</p><div id="gsExpBody" class="gp-exp"></div>`, { wide: true });
   gsExpRender();
   m.addEventListener('input', gsInput);
-  m.addEventListener('change', e => { gsInput(e); if (e.target.tagName === 'SELECT' || e.target.type === 'checkbox') gsExpRender(); });
-  m.addEventListener('click', e => { const b = e.target.closest('[data-g]'); if (!b) return; const a = b.dataset.g; if (a === 'fmt') { gs.set.fmt = b.dataset.v; gsChanged(); gsExpRender(); } else if (a === 'est') gsEstimate(); else if (a === 'export') gsExport(); });
+  m.addEventListener('change', e => { gsInput(e); if (e.target.tagName === 'SELECT' || e.target.type === 'checkbox' || e.target.dataset.gk === 'mq') gsExpRender(); });
+  m.addEventListener('click', e => { if (e.target.closest('[data-close]')) { closeModal(); return; } const b = e.target.closest('[data-g]'); if (!b) return; const a = b.dataset.g; if (a === 'fmt') { gs.set.fmt = b.dataset.v; gsChanged(); gsExpRender(); } else if (a === 'est') gsEstimate(); else if (a === 'export') gsExport(); });
 }
 function gsExpRender() { const b = $('#gsExpBody'); if (b) b.innerHTML = gsSaveHtml(); }
 
@@ -570,6 +584,7 @@ function gsInput(e) {
     else s[f] = v === '' ? null : v;
   } else {
     if (['dur', 'trDur', 'cw', 'ch', 'q', 'fps', 'mq', 'colors'].includes(k)) v = +v || gs.set[k];
+    if (k === 'gfps') v = +v || 0;
     if (k === 'target') v = Math.max(0, +v || 0);
     gs.set[k] = v;
     const rv = t.nextElementSibling; if (t.type === 'range' && rv && rv.classList.contains('rv')) rv.textContent = t.value;
