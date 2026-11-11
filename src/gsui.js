@@ -226,6 +226,7 @@ function gsRenderProps() {
         <p class="gp-tip">시간 막대에서 장면 오른쪽 끝을 끌면 길이가 바뀌고, 가운데를 끌면 순서가 바뀌어요.</p>
         ${gsXfHtml(s, nClip)}
         <div class="btnrow"><button class="btn sm" data-g="ri-open" data-v="${nClip > 1 ? 'clip' : 'one'}" title="장면 사이에 AI가 새 장면을 그려 넣어 부드럽게 이어요 (AI 중간 장면 팩, 설치판)">AI 중간 장면 (부드럽게 잇기)…</button></div>
+        <div class="btnrow"><button class="btn sm" data-g="ai-rig" title="AI가 캐릭터를 따내고 뼈대를 넣어, 관절을 끌어 움직임을 직접 만들어요${s.rig ? ' (하던 작업을 이어서 고쳐요)' : ''}">${s.rig ? '캐릭터 움직임 다시 고치기…' : '캐릭터 움직이기 (뼈대)…'}</button></div>
         ${nClip > 1 ? '' : `<div class="btnrow"><button class="btn sm" data-g="ai-para" title="AI가 잰 거리대로 앞뒤를 나눠 카메라가 움직이는 것 같은 장면들로 바꿔요">입체 움직임 (AI 깊이)…</button><button class="btn sm" data-g="ai-vid" title="이 장면 그림과 '어떻게 움직일지' 적은 글로 영상을 만들어요 (제미나이 유료 키)">AI 영상으로 (제미나이)…</button></div>`}
         <div class="btnrow"><button class="btn sm" data-g="dup" title="Ctrl+D">복제</button><button class="btn sm" data-g="split" title="재생 위치에서 두 장면으로 (Ctrl+K)">재생 위치에서 나누기</button><button class="btn sm danger" data-g="del-sel">빼기</button></div>
         ${nClip > 1 ? `<div class="btnrow"><button class="btn sm" data-g="pick-clip" data-v="${s.clip}" title="같은 GIF·영상에서 나온 장면을 모두 골라 속도·거꾸로·부메랑을 한꺼번에">이 GIF·영상 장면 모두 고르기 (${nClip}장)</button></div>` : ''}</div>
@@ -605,6 +606,7 @@ async function gsClick(e) {
   if (a === 'close') pjBackToEditor();
   else if (a === 'export-open') gsExportOpen();
   else if (a === 'ai-para') dpParaFromScene();
+  else if (a === 'ai-rig') rgFromScene();
   else if (a === 'ai-vid') vgFromScene();
   else if (a === 'xf-center') { for (const s of scTargets()) { s.tx = 0; s.ty = 0; } gsChanged(); gsRenderProps(); }
   else if (a === 'xf-reset') { for (const s of scTargets()) { delete s.tx; delete s.ty; delete s.tz; delete s.trot; delete s.tflip; } gsChanged(); gsRenderProps(); }

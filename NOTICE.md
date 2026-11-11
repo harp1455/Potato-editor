@@ -18,6 +18,10 @@
     ONNX 변환: Carve/LaMa-ONNX, Apache License 2.0 (https://huggingface.co/Carve/LaMa-ONNX)
     가중치: dreMaz/AnimeMangaInpainting (애니·만화용으로 다시 학습한 LaMa), MIT License (https://huggingface.co/dreMaz/AnimeMangaInpainting)
     바꾼 점: ONNX 그래프에 애니·만화용 가중치를 넣고(정규화 층은 합성곱에 합쳐서) 가중치를 16비트로 줄여 저장
+- DWPose (dw-ll_ucoco_384, 온몸 뼈대 찾기) : Apache License 2.0 (https://github.com/IDEA-Research/DWPose, https://huggingface.co/yzd-v/DWPose)  ※ 설치판 AI 캐릭터 뼈대 팩
+    바꾼 점: 가중치를 16비트로 줄여 저장
+- deepghs/anime_eye_detection v1.0_n (애니 눈 찾기) : OpenRAIL (https://huggingface.co/deepghs/anime_eye_detection)  ※ 설치판 AI 캐릭터 뼈대 팩
+    바꾼 점: 가중치를 16비트로 줄여 저장. Ultralytics YOLO 계열 구조
 - informative-drawings (선화 모델, ControlNet 'lineart' 주석기) : MIT License, Copyright (c) 2022 Caroline Chan (https://github.com/carolineec/informative-drawings)
     ONNX 변환: deepghs/imgutils-models, MIT License. 바꾼 점: 가중치를 16비트로 줄여 저장  ※ 설치판 AI 선화 추출 팩
 - mp4-muxer 5.2.2 : Copyright (c) 2023 Vanilagy, MIT License (https://github.com/Vanilagy/mp4-muxer)  ※ 움짤 MP4 저장

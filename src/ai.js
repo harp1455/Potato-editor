@@ -259,6 +259,8 @@ function aiSec() {
     <div class="btnrow"><button class="btn sm" data-act="ai-line" data-v="layer" title="원래 그림은 두고, 투명 바탕 선화를 위에 새 레이어로">선화 레이어로</button><button class="btn sm" data-act="ai-line" data-v="replace" title="그림을 흰 바탕 선화로 바꿔요">그림을 선화로</button></div>
     <h4 class="advh">깊이 효과</h4>
     <div class="btnrow"><button class="btn sm" data-act="ai-dof" title="AI가 잰 거리대로, 멀수록 더 흐리게 (카메라 심도처럼)">거리에 따라 흐리게…</button><button class="btn sm" data-act="ai-para" title="그림 한 장을 앞뒤로 나눠 카메라가 움직이는 것 같은 움짤로">입체 움짤 만들기…</button></div>
+    <h4 class="advh">캐릭터 움직이기</h4>
+    <div class="btnrow"><button class="btn sm" data-act="ai-rig" title="AI가 캐릭터를 따내고 뼈대를 넣어요. 관절을 끌어 자세를 바꾸거나, 숨쉬기·깜빡임·손 흔들기 같은 움직임을 만들어 영상으로 보내요">캐릭터 움직이기 (뼈대)…</button></div>
     <h4 class="advh">AI 영상 (제미나이)</h4>
     <div class="btnrow"><button class="btn sm" data-act="ai-vid" title="그림과 '어떻게 움직일지' 적은 글로 몇 초짜리 영상을 만들어요 (제미나이 유료 키)">AI 영상 만들기…</button></div>
     <h4 class="advh">AI 지우개</h4>
@@ -270,6 +272,7 @@ function aiAct(act, v) {
   if (act === 'ai-md') { aiSr.model = v; renderProps(); return; }
   if (act === 'ai-dof') { dpOpenDof(); return; }
   if (act === 'ai-para') { dpParaFromImage(); return; }
+  if (act === 'ai-rig') { rgFromImage(); return; }
   if (act === 'ai-vid') { vgFromImage(); return; }
   if (act === 'ai-bg') { aiRun('bg', v); return; }
   if (act === 'ai-sr') { aiRun('sr'); return; }

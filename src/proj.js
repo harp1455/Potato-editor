@@ -150,7 +150,7 @@ async function pjDelete(id) {
   if (!confirm(`'${P.name}' 작업을 지울까요? 이 작업의 그림과 기록이 모두 사라지고 되돌릴 수 없어요.`)) return false;
   if (id === gifPj) { gsReset(); gifPj = null; }
   projects.splice(projects.indexOf(P), 1); histStash.delete(id);
-  await Promise.all([idb.del('kv', 'doc:' + id), idb.del('kv', 'gif:' + id), idb.del('kv', 'pthumb:' + id), idb.delPj(id)]);
+  await Promise.all([idb.del('kv', 'doc:' + id), idb.del('kv', 'gif:' + id), idb.del('kv', 'pthumb:' + id), idb.delPj(id), idb.del('kv', IDBKeyRange.bound('rig:' + id + ':', 'rig:' + id + ':\uffff'))]);
   pjSaveList(true); renderTabs(); return true;
 }
 // 탭 줄

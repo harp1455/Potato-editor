@@ -103,7 +103,7 @@ async function czBytes(id) { // 파일 안에 넣어 둔 압축 데이터를 원
 }
 /* ---- 팩 (exe판): 모델과 실행 도구는 처음 쓸 때 한 번 받아 두고 써요 ---- */
 // 팩 목록(packs.json)과 파일은 깃허브 Releases의 packs-N에 있어요. 팩이 바뀌면 N을 올리고 편집기도 같이 업데이트해요
-const CZ_PACK_TAG = 'packs-5';
+const CZ_PACK_TAG = 'packs-6';
 const CZ_PACK_URL = 'https://github.com/harp1455/Potato-editor/releases/download/' + CZ_PACK_TAG + '/';
 const czIsApp = () => !!(window.POTATO_BUILD && window.POTATO_BUILD.kind === 'app');
 const czTauri = () => (window.__TAURI__ && window.__TAURI__.fs && window.__TAURI__.upload) ? window.__TAURI__ : null;

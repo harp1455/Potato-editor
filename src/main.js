@@ -3756,7 +3756,7 @@ async function gsSave() {
 
   for (const s of gs.slides) {
     if (!s.blob || s.blobOf !== s.bmp) { s.blob = await new Promise(r => s.bmp.toBlob ? s.bmp.toBlob(r, 'image/webp', 0.95) : r(null)); s.blobOf = s.bmp; }
-    slides.push({ id: s.id, name: s.name, blob: s.blob, w: s.w, h: s.h, dur: s.dur, motion: s.motion, fit: s.fit, tr: s.tr, trd: s.trd, clip: s.clip, tx: s.tx, ty: s.ty, tz: s.tz, trot: s.trot, tflip: s.tflip, op: s.op, kf: s.kf && s.kf.length ? clone(s.kf) : undefined });
+    slides.push({ id: s.id, name: s.name, blob: s.blob, w: s.w, h: s.h, dur: s.dur, motion: s.motion, fit: s.fit, tr: s.tr, trd: s.trd, clip: s.clip, tx: s.tx, ty: s.ty, tz: s.tz, trot: s.trot, tflip: s.tflip, op: s.op, rig: s.rig, kf: s.kf && s.kf.length ? clone(s.kf) : undefined });
   }
   await idb.set(key, { slides, set: gs.set, ovs: gs.ovs.map(ovPlain), fx: clone(gs.fx), ...auPlain() });
   pjTouch(key.slice(4));
@@ -3780,6 +3780,7 @@ async function gsLoad() {
 /*@@AUDIO@@*/
 /*@@DEPTH@@*/
 /*@@LIQUIFY@@*/
+/*@@RIG@@*/
 /*@@BATCH@@*/
 /*@@COST@@*/
 /*@@TRANS@@*/

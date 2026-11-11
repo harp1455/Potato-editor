@@ -132,7 +132,7 @@ const UI_MENUS = [
   ['AI', () => [
     { l: '자동 흰칠', fn: openCzMenu, dis: !uiEd() }, { l: '페이지 번역…', fn: trOpen, dis: !isImg() || !uiEd() }, { l: '고른 대사 AI 번역·다듬기…', fn: aiTxEl, dis: !uiTxtEl() || !uiEd() },
     { l: '페이지 말풍선 모두 번역…', fn: () => aiTxPages(false), dis: isImg() || !uiEd() }, '-',
-    { l: 'AI 더빙…', fn: () => uiTxtEl() && uiEd() ? dbFromEl() : dbOpen() }, { l: 'AI 영상 만들기…', fn: () => uiGif() ? vgFromScene() : vgFromImage(), dis: uiGif() ? !gs.slides[gs.sel] : !isImg() }, '-',
+    { l: 'AI 더빙…', fn: () => uiTxtEl() && uiEd() ? dbFromEl() : dbOpen() }, { l: 'AI 영상 만들기…', fn: () => uiGif() ? vgFromScene() : vgFromImage(), dis: uiGif() ? !gs.slides[gs.sel] : !isImg() }, { l: '캐릭터 움직이기 (뼈대)…', fn: () => uiGif() ? rgFromScene() : rgFromImage(), dis: uiGif() ? !gs.slides[gs.sel] : !isImg() }, '-',
     { l: 'API 사용 내역…', fn: apiOpenLog }, { l: 'AI 설정·팩 관리…', fn: () => uiSettings('ai') },
   ]],
   ['영상', () => [
@@ -175,7 +175,7 @@ function uiCtxEditor(e) {
     ...(!isImg() ? [{ l: '여기에 컷 넣기', fn: () => uiPlaceAt(p, addPanel) }] : []), { l: '레이어 넣기', sub: uiLayers }, '-',
     { l: '모두 고르기', k: 'Ctrl+A', fn: () => { sel = page().els.filter(x => !x.lock).map(x => x.id); renderProps(); requestRender(); } },
     { l: '화면에 맞추기', k: 'Ctrl+0', fn: fitView }, { l: '확대', k: 'Ctrl++', fn: () => zoomStep(1) }, { l: '축소', k: 'Ctrl+-', fn: () => zoomStep(-1) },
-    ...(isImg() && uiHasPage() ? ['-', { l: '자르기', fn: () => setMode('crop') }, { l: '자유 변형 (바탕)', k: 'Ctrl+T', fn: e2XfToggle }, { l: '뒤틀기…', fn: lqOpen }, { l: '페이지 번역…', fn: trOpen }, { l: 'AI 영상 만들기…', fn: vgFromImage }, { l: '영상·움짤 장면으로 보내기', fn: () => uiPageToGif(doc.cur) }] : []),
+    ...(isImg() && uiHasPage() ? ['-', { l: '자르기', fn: () => setMode('crop') }, { l: '자유 변형 (바탕)', k: 'Ctrl+T', fn: e2XfToggle }, { l: '뒤틀기…', fn: lqOpen }, { l: '캐릭터 움직이기 (뼈대)…', fn: rgFromImage }, { l: '페이지 번역…', fn: trOpen }, { l: 'AI 영상 만들기…', fn: vgFromImage }, { l: '영상·움짤 장면으로 보내기', fn: () => uiPageToGif(doc.cur) }] : []),
     '-', { l: '되돌리기', k: 'Ctrl+Z', fn: undo }, { l: '다시 하기', k: 'Ctrl+Y', fn: redo },
   ];
   const txt = el && (el.type === 'text' || el.type === 'bubble');
@@ -240,7 +240,7 @@ function uiCtxGif(t) {
       { l: '이 장면 처음으로 가기', fn: () => gpSeek(st[i]) }, { l: '재생 위치에서 나누기', k: 'Ctrl+K', fn: gpSplitAtHead }, { l: '복제', k: 'Ctrl+D', fn: gpDup }, '-',
       { l: '장면 길이', sub: () => [0.1, 0.25, 0.5, 1, 1.5, 2, 3, 5].map(d => ({ l: d + '초', chk: Math.abs(gsDur(s) - d) < 1e-3, fn: () => { for (const x of many ? gs.slides.filter(y => gs.pick.has(y.id)) : [s]) x.dur = d; gsChanged(); } })) },
       { l: '장면 넘김 없애기', fn: () => { s.tr = 'none'; gsChanged(); }, dis: i === 0 },
-      '-', { l: 'AI 중간 장면 (다음 장면과 잇기)…', fn: () => riOpen(many ? 'pick' : s.clip && gs.slides.filter(x => x.clip === s.clip).length > 1 ? 'clip' : 'one', i), dis: i >= gs.slides.length - 1 && !many }, { l: 'AI 영상으로 바꾸기…', fn: vgFromScene }, { l: '입체 움직임 (AI 깊이)…', fn: dpParaFromScene }, { l: '지금 화면을 PNG로 저장', fn: uiSaveFrame },
+      '-', { l: 'AI 중간 장면 (다음 장면과 잇기)…', fn: () => riOpen(many ? 'pick' : s.clip && gs.slides.filter(x => x.clip === s.clip).length > 1 ? 'clip' : 'one', i), dis: i >= gs.slides.length - 1 && !many }, { l: 'AI 영상으로 바꾸기…', fn: vgFromScene }, { l: '입체 움직임 (AI 깊이)…', fn: dpParaFromScene }, { l: s.rig ? '캐릭터 움직임 다시 고치기…' : '캐릭터 움직이기 (뼈대)…', fn: rgFromScene }, { l: '지금 화면을 PNG로 저장', fn: uiSaveFrame },
       '-', { l: '지우기', k: 'Delete', fn: gpDelete, danger: true }];
   }
   if (bar) {
