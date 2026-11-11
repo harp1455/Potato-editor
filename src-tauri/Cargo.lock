@@ -2452,7 +2452,7 @@ dependencies = [
 
 [[package]]
 name = "potato-editor"
-version = "8.16.0"
+version = "8.16.1"
 dependencies = [
  "serde",
  "serde_json",

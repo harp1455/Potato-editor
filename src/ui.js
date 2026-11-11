@@ -139,7 +139,7 @@ const UI_MENUS = [
     { l: uiGif() ? '편집기로 돌아가기' : '영상·움짤 편집 열기', fn: () => uiGif() ? pjBackToEditor() : pjOpenGif() }, { l: '새 영상·움짤 작업', fn: () => pjNewGif() }, '-',
     { l: '재생 / 멈춤', k: uiGif() ? 'Space' : '', fn: () => gs.playing ? gsPause() : gsPlay(), dis: !uiGif() }, { l: '처음으로', k: 'Home', fn: () => gpSeek(0), dis: !uiGif() }, { l: '지금 화면을 PNG로 저장', fn: uiSaveFrame, dis: !uiGif() || !gs.slides.length }, '-',
     { l: '시퀀스 설정 (해상도·프레임)', fn: async () => { if (!uiGif()) await pjOpenGif(); gs.focus = 'set'; gs.sel = gs.sel; gsChanged(); } }, { l: '내보내기 (MP4·GIF·WebP)…', k: 'Ctrl+M', fn: async () => { if (!uiGif()) await pjOpenGif(); gsExportOpen(); } }, '-',
-    { l: 'AI 더빙…', fn: () => dbOpen() }, { l: '영상 기본값·미리보기 설정…', fn: () => uiSettings('video') },
+    { l: 'AI 중간 장면 (부드럽게 잇기)…', fn: async () => { if (!uiGif()) await pjOpenGif(); riOpen(gs.pick.size > 1 ? 'pick' : 'all', gs.sel); } }, { l: 'AI 더빙…', fn: () => dbOpen() }, { l: '영상 기본값·미리보기 설정…', fn: () => uiSettings('video') },
   ]],
   ['도움말', () => [
     { l: '사용법', k: 'F1', fn: openHelp }, { l: '단축키', fn: () => uiSettings('keys') }, { l: '업데이트 기록', fn: () => uiChangelog() }, '-',
@@ -229,7 +229,7 @@ function uiCtxTabs(t) {
 }
 function uiCtxGif(t) {
   const trE = t.closest('.gp-tr[data-ti], .gp-cut[data-ti]');
-  if (trE) { const i = +trE.dataset.ti; gpSelTr(i); return [{ h: `${i}번과 ${i + 1}번 장면 사이` }, { l: '넘김 고르기 (오른쪽 칸)', fn: () => gpSelTr(i) }, { l: '서서히 바뀌기', fn: () => { gs.slides[i].tr = 'fade'; gsChanged(); } }, { l: '바로 넘기기 (넘김 없애기)', fn: () => { gs.slides[i].tr = 'none'; gsChanged(); } }, { l: '이 넘김을 모든 장면 사이에', fn: () => uiG('tr-all') }]; }
+  if (trE) { const i = +trE.dataset.ti; gpSelTr(i); return [{ h: `${i}번과 ${i + 1}번 장면 사이` }, { l: '넘김 고르기 (오른쪽 칸)', fn: () => gpSelTr(i) }, { l: '서서히 바뀌기', fn: () => { gs.slides[i].tr = 'fade'; gsChanged(); } }, { l: '바로 넘기기 (넘김 없애기)', fn: () => { gs.slides[i].tr = 'none'; gsChanged(); } }, { l: '이 넘김을 모든 장면 사이에', fn: () => uiG('tr-all') }, '-', { l: 'AI 중간 장면으로 잇기…', fn: () => riOpen('one', i - 1) }]; }
   const clipE = t.closest('.gp-clip[data-ci]'), bar = t.closest('.gp-bar[data-bk]'), stage = t.closest('#gsStage'), tl = t.closest('.gp-tl, #gpScroll');
   const base = [{ l: '재생 / 멈춤', k: 'Space', fn: () => gs.playing ? gsPause() : gsPlay() }];
   if (clipE) {
@@ -240,7 +240,7 @@ function uiCtxGif(t) {
       { l: '이 장면 처음으로 가기', fn: () => gpSeek(st[i]) }, { l: '재생 위치에서 나누기', k: 'Ctrl+K', fn: gpSplitAtHead }, { l: '복제', k: 'Ctrl+D', fn: gpDup }, '-',
       { l: '장면 길이', sub: () => [0.1, 0.25, 0.5, 1, 1.5, 2, 3, 5].map(d => ({ l: d + '초', chk: Math.abs(gsDur(s) - d) < 1e-3, fn: () => { for (const x of many ? gs.slides.filter(y => gs.pick.has(y.id)) : [s]) x.dur = d; gsChanged(); } })) },
       { l: '장면 넘김 없애기', fn: () => { s.tr = 'none'; gsChanged(); }, dis: i === 0 },
-      '-', { l: 'AI 영상으로 바꾸기…', fn: vgFromScene }, { l: '입체 움직임 (AI 깊이)…', fn: dpParaFromScene }, { l: '지금 화면을 PNG로 저장', fn: uiSaveFrame },
+      '-', { l: 'AI 중간 장면 (다음 장면과 잇기)…', fn: () => riOpen(many ? 'pick' : s.clip && gs.slides.filter(x => x.clip === s.clip).length > 1 ? 'clip' : 'one', i), dis: i >= gs.slides.length - 1 && !many }, { l: 'AI 영상으로 바꾸기…', fn: vgFromScene }, { l: '입체 움직임 (AI 깊이)…', fn: dpParaFromScene }, { l: '지금 화면을 PNG로 저장', fn: uiSaveFrame },
       '-', { l: '지우기', k: 'Delete', fn: gpDelete, danger: true }];
   }
   if (bar) {

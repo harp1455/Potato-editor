@@ -60,7 +60,7 @@ function gsBatch(a, v) {
   else if (a === 'b-dup') { const cp = idx.map(i => ({ ...gs.slides[i], id: uid() })); gs.slides.splice(idx[idx.length - 1] + 1, 0, ...cp); }
   else if (a === 'b-del') { gs.slides = gs.slides.filter(s => !gs.pick.has(s.id)); gs.pick.clear(); gs.sel = Math.min(gs.sel, gs.slides.length - 1); }
   else if (a === 'b-none') { for (const s of P) { s.motion = 'none'; s.tr = 'none'; } }
-  else if (a === 'b-ai') { gsInterp(+v || 2); return; }
+  else if (a === 'b-ai') { riOpen('pick', gs.sel, +v || 2); return; }
   gs.pick = new Set([...gs.pick].filter(id => gs.slides.some(s => s.id === id)));
   gsChanged();
 }
@@ -71,7 +71,7 @@ function gsBatchHtml() {
     ${row('속도', `<div class="seg">${[['0.5', '0.5배'], ['0.75', '0.75배'], ['1.5', '1.5배'], ['2', '2배'], ['3', '3배']].map(([x, l]) => `<button class="btn sm" data-g="b-speed" data-v="${x}">${l}</button>`).join('')}</div>`)}
     ${row('한 장 길이', `<input type="number" id="gsBDur" min="0.02" max="60" step="0.01" value="${(tot / P.length).toFixed(2)}"> 초 <button class="btn sm" data-g="b-dur">맞추기</button>`)}
     <div class="btnrow"><button class="btn sm" data-g="b-rev" title="고른 장면 순서를 뒤집어요">거꾸로</button><button class="btn sm" data-g="b-boom" title="앞으로 갔다가 거꾸로 돌아와요">부메랑</button><button class="btn sm" data-g="b-thin" title="한 장 걸러 하나씩 빼서 장 수를 반으로 (길이는 그대로)">반으로 솎기</button></div>
-    ${row('AI로 부드럽게', `<div class="seg"><button class="btn sm" data-g="b-ai" data-v="2" title="장면 사이에 AI가 한 장씩 새로 그려 넣어요">2배</button><button class="btn sm" data-g="b-ai" data-v="4" title="장면 사이에 세 장씩">4배</button></div><label class="chk" title="끄면 길이는 그대로 두고 더 부드럽게, 켜면 늘어난 장 수만큼 느리게(슬로모션)"><input type="checkbox" id="gsAiSlow" ${gs.set.aiSlow ? 'checked' : ''}> 느리게</label>`)}
+    ${row('AI 중간 장면', `<div class="seg"><button class="btn sm" data-g="b-ai" data-v="2" title="장면 사이에 AI가 한 장씩 새로 그려 넣어요">2배</button><button class="btn sm" data-g="b-ai" data-v="4" title="장면 사이에 세 장씩">4배</button><button class="btn sm" data-g="b-ai" data-v="8" title="장면 사이에 일곱 장씩">8배</button></div><label class="chk" title="끄면 길이는 그대로 두고 더 부드럽게, 켜면 늘어난 장 수만큼 느리게(슬로모션)"><input type="checkbox" id="gsAiSlow" ${gs.set.aiSlow ? 'checked' : ''}> 느리게</label>`)}
     <p class="muted small" style="margin:-2px 0 6px">영상·GIF처럼 조금씩 움직이는 장면에 잘 맞아요. 그림이 확 바뀌는 사이는 그대로 둬요.</p>
     <div class="btnrow"><button class="btn sm" data-g="b-none" title="움직임·넘김 효과 없이 (영상·GIF 프레임용)">효과 없이</button><button class="btn sm" data-g="b-dup">복제</button><button class="btn sm danger" data-g="b-del">빼기</button><button class="btn sm" data-g="b-clear">고르기 풀기</button></div></div>`;
 }
@@ -179,7 +179,8 @@ function riPlane(src, W, H, Wp, Hp) {
   if (Hp > H) g.drawImage(c, 0, H - 1, Wp, 1, 0, H, Wp, Hp - H);
   return g.getImageData(0, 0, Wp, Hp).data;
 }
-async function riRun(A, B, t, W, H) { // A, B: 같은 크기의 그림 → 중간 장면 캔버스
+async function riRun(A, B, t, W0, H0) { // A, B: 그림 → 중간 장면 캔버스 (W0×H0). 아주 크면 긴 쪽 1920으로 계산하고 키워요 (빠르게)
+  const k = Math.min(1, 1920 / Math.max(W0, H0)), W = Math.max(32, Math.round(W0 * k)), H = Math.max(32, Math.round(H0 * k));
   const Wp = Math.ceil(W / 32) * 32, Hp = Math.ceil(H / 32) * 32, N = Wp * Hp, x = new Float32Array(7 * N);
   const a = riPlane(A, W, H, Wp, Hp), b = riPlane(B, W, H, Wp, Hp);
   let alpha = false;
@@ -195,34 +196,72 @@ async function riRun(A, B, t, W, H) { // A, B: 같은 크기의 그림 → 중�
     d[j] = o[i] * 255; d[j + 1] = o[N + i] * 255; d[j + 2] = o[2 * N + i] * 255;
     d[j + 3] = alpha ? a[i * 4 + 3] * (1 - t) + b[i * 4 + 3] * t : 255; // 투명한 곳은 섞어서
   }
-  g.putImageData(id, 0, 0); return c;
+  g.putImageData(id, 0, 0); if (k >= 1) return c;
+  const C = newCanvas(W0, H0), G = C.getContext('2d'); G.imageSmoothingQuality = 'high'; G.drawImage(c, 0, 0, W0, H0); return C;
 }
 let riBusy = false;
-async function gsInterp(mult) {
-  const P = gsPicked(); if (P.length < 2 || riBusy) { if (P.length < 2) toast('장면을 두 개 넘게 골라 주세요'); return; }
+// 어느 장면 사이를 이을지 → 앞 장면 목록 (뒤에 장면이 붙어 있는 것만)
+function riPairs(kind, i) {
+  const S = gs.slides, ok = A => { const j = S.indexOf(A); return j >= 0 && j + 1 < S.length; };
+  if (kind === 'all') return S.slice(0, -1);
+  if (kind === 'one') return S[i] && S[i + 1] ? [S[i]] : [];
+  if (kind === 'clip') { const c = (S[i] || {}).clip; return c ? S.filter((A, j) => A.clip === c && S[j + 1] && S[j + 1].clip === c) : []; }
+  const idx = S.map((s, j) => gs.pick.has(s.id) ? j : -1).filter(j => j >= 0); // 고른 장면: 붙어 있는 사이만
+  return idx.filter((j, k) => idx[k + 1] === j + 1).map(j => S[j]).filter(ok);
+}
+// 설정 창: 어디를 · 몇 배로 · 길이 · 확 바뀌는 곳도 이을지
+async function riOpen(kind, i, mult0) {
+  if (gs.slides.length < 2) { toast('장면이 두 개 넘게 있어야 그 사이를 이을 수 있어요'); return; }
+  if (i == null || i < 0) i = Math.max(0, gs.sel);
+  if (kind === 'one' && !gs.slides[i + 1]) i = Math.max(0, i - 1);
+  if (kind === 'pick' && riPairs('pick', i).length === 0) kind = gs.slides[i + 1] ? 'one' : 'all';
+  let mult = mult0 || +gs.set.riMult || 2, slow = !!gs.set.aiSlow, force = false;
+  const S = gs.slides, nClip = S[i] && S[i].clip ? S.filter(x => x.clip === S[i].clip).length : 0;
+  const kinds = [['one', `${i + 1}번 → ${i + 2}번 장면 사이`], ...(nClip > 1 ? [['clip', `이 GIF·영상 장면들 (${nClip}장)`]] : []), ...(riPairs('pick', i).length ? [['pick', `고른 장면들 (${gs.pick.size}장)`]] : []), ['all', `모든 장면 사이 (${S.length}장)`]];
+  if (!kinds.some(k => k[0] === kind)) kind = kinds[0][0];
+  const m = modal(`<h2>AI 중간 장면</h2><p class="sub">두 장면 사이에 AI(RIFE)가 새 장면을 그려 넣어 부드럽게 이어요. 조금씩 움직이는 장면(영상·GIF 프레임, 같은 그림의 살짝 다른 자세)에 잘 맞아요.</p>
+    ${row('어디를', `<select id="riK">${kinds.map(([v, l]) => `<option value="${v}" ${v === kind ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`)}
+    ${row('몇 배로', `<span class="seg" id="riM">${[2, 4, 8].map(x => `<button class="btn sm ${x === mult ? 'on' : ''}" data-m="${x}">${x}배 <span class="muted small">(사이에 ${x - 1}장)</span></button>`).join('')}</span>`)}
+    ${row('길이', `<span class="seg" id="riS"><button class="btn sm ${!slow ? 'on' : ''}" data-s="0">그대로 두고 더 부드럽게</button><button class="btn sm ${slow ? 'on' : ''}" data-s="1">늘어난 만큼 느리게 (슬로모션)</button></span>`)}
+    ${row('', `<label class="chk"><input type="checkbox" id="riF"> 그림이 확 바뀌는 곳도 잇기 <span class="muted small">(서로 다른 그림이면 겹쳐 녹아들듯 바뀌어요)</span></label>`)}
+    <p class="apiest" id="riInfo"></p>
+    <div class="foot"><button class="btn" data-close>취소</button><button class="btn primary" id="riGo">만들기</button></div>`);
+  const info = () => {
+    const P = riPairs(kind, i), n = P.length * (mult - 1), W = P[0] ? P[0].bmp.width : 0, H = P[0] ? P[0].bmp.height : 0, px = Math.min(W * H, 1920 * 1080);
+    const cut = force ? 0 : P.filter((A, k) => k < 60 && riCut(A.bmp, gs.slides[gs.slides.indexOf(A) + 1].bmp)).length;
+    $('#riInfo', m).textContent = P.length ? `이을 곳 ${P.length}곳 → 새 장면 약 ${n}장 · CPU로 한 장에 약 ${Math.max(1, Math.round(px / 518400 * 0.8))}초 (그래픽카드면 더 빨라요)${cut ? ` · 그림이 확 바뀌는 ${cut}곳은 건너뛰어요 (위에서 켜면 이어요)` : ''}` : '이을 수 있는 장면 사이가 없어요';
+    $('#riGo', m).disabled = !P.length;
+  };
+  info();
+  $('#riK', m).addEventListener('change', e => { kind = e.target.value; info(); });
+  $$('#riM [data-m]', m).forEach(b => b.addEventListener('click', () => { mult = +b.dataset.m; $$('#riM [data-m]', m).forEach(x => x.classList.toggle('on', x === b)); info(); }));
+  $$('#riS [data-s]', m).forEach(b => b.addEventListener('click', () => { slow = b.dataset.s === '1'; $$('#riS [data-s]', m).forEach(x => x.classList.toggle('on', x === b)); }));
+  $('#riF', m).addEventListener('change', e => { force = e.target.checked; info(); });
+  $('#riGo', m).addEventListener('click', () => { const P = riPairs(kind, i); gs.set.riMult = mult; closeModal(); gsInterp(mult, { pairs: P, slow, force }); });
+}
+async function gsInterp(mult, o = {}) {
+  const pairs = (o.pairs || riPairs('pick', gs.sel)).filter(A => gs.slides.indexOf(A) >= 0 && gs.slides[gs.slides.indexOf(A) + 1]);
+  if (riBusy) return; if (!pairs.length) { toast('이을 장면 사이가 없어요. 붙어 있는 장면 두 개 이상을 골라 주세요'); return; }
   if (!(await aiReady('interp'))) return;
-  const slow = !!($('#gsAiSlow') && $('#gsAiSlow').checked); gs.set.aiSlow = slow;
-  const idx = P.map(s => gs.slides.indexOf(s)).sort((x, y) => x - y), pairs = [];
-  for (let k = 0; k + 1 < idx.length; k++) if (idx[k + 1] === idx[k] + 1) pairs.push(gs.slides[idx[k]]); // 붙어 있는 장면 사이만
-  if (!pairs.length) { toast('붙어 있는 장면을 골라 주세요'); return; }
-  riBusy = true; const tk = czProgress('AI로 중간 장면 만드는 중'); let made = 0, skip = 0;
+  const slow = !!o.slow; gs.set.aiSlow = slow;
+  riBusy = true; const tk = czProgress('AI로 중간 장면 만드는 중'); let made = 0; const skipped = [];
   try {
     tk.set('중간 장면 모델 준비하는 중… (처음엔 몇 초 걸려요)', 0.02);
     await czLoad('rife'); if (tk.stop) throw new Error('stop');
     const total = pairs.length * (mult - 1), t0 = performance.now();
     for (const A of pairs) {
-      const i = gs.slides.indexOf(A), B = gs.slides[i + 1]; if (!B) continue;
+      const i = gs.slides.indexOf(A), B = gs.slides[i + 1]; if (i < 0 || !B) continue;
       const W = A.bmp.width, H = A.bmp.height;
       if (gsPixels() + W * H * (mult - 1) > GS_BUDGET) { gsFull(); break; }
-      // 그림이 확 바뀌면(다른 그림) 건너뛰어요: 작게 줄여 차이를 봐요
-      if (riCut(A.bmp, B.bmp)) { skip++; continue; }
+      // 그림이 확 바뀌면(다른 그림) 건너뛰어요: 작게 줄여 차이를 봐요 ('확 바뀌는 곳도 잇기'를 켜면 그대로 이어요)
+      if (!o.force && riCut(A.bmp, B.bmp)) { skipped.push(A); continue; }
       const d0 = gsDur(A), add = [];
       for (let k = 1; k < mult; k++) {
         if (tk.stop) throw new Error('stop');
         const c = await riRun(A.bmp, B.bmp, k / mult, W, H);
-        add.push({ ...A, id: uid(), bmp: c, w: W, h: H, th: null, thBusy: false, tr: 'none', motion: 'none', dur: slow ? d0 : Math.round(d0 / mult * 1000) / 1000 });
+        add.push({ ...A, id: uid(), name: (A.name || '장면') + ' · AI 중간', bmp: c, w: W, h: H, th: null, thURL: null, thOf: null, thBusy: false, blob: null, blobOf: null, tr: 'none', motion: 'none', kf: undefined, dur: slow ? d0 : Math.round(d0 / mult * 1000) / 1000 });
         made++; const el = (performance.now() - t0) / made;
-        tk.set(`${made} / ${total}장 · 남은 시간 약 ${Math.ceil(el * (total - made) / 1000)}초`, made / total);
+        tk.set(`${made} / ${total}장 · 남은 시간 약 ${Math.ceil(el * (total - made - skipped.length * (mult - 1)) / 1000)}초 · ${czDevText()}`, made / total);
       }
       if (!slow) A.dur = Math.round(d0 / mult * 1000) / 1000;
       A.motion = 'none'; B.motion = 'none'; B.tr = 'none'; // 이어지는 움직임이 되니 장면마다 움직임·넘김 효과는 빼요
@@ -230,8 +269,9 @@ async function gsInterp(mult) {
       for (const s of add) gs.pick.add(s.id);
       await new Promise(r => setTimeout(r, 0));
     }
-    tk.done();
-    toast(made ? `중간 장면 ${made}장을 넣었어요${slow ? ' (느리게)' : ' (길이는 그대로)'}${skip ? `. 그림이 확 바뀌는 ${skip}곳은 건너뛰었어요` : ''}` : '그림이 확 바뀌는 장면들이라 넣지 않았어요', 4200);
+    tk.done(); gsChanged();
+    if (skipped.length && !made) { if (await askYes(`고른 곳은 그림이 확 바뀌어서(서로 다른 그림) 건너뛰었어요. 그래도 이을까요? 두 그림이 겹쳐 녹아들듯 바뀌어요.`)) { riBusy = false; return gsInterp(mult, { pairs: skipped, slow, force: true }); } return; }
+    toast(`중간 장면 ${made}장을 넣었어요${slow ? ' (느리게)' : ' (길이는 그대로)'}${skipped.length ? `. 그림이 확 바뀌는 ${skipped.length}곳은 건너뛰었어요('확 바뀌는 곳도 잇기'를 켜면 이어요)` : ''}`, 5000);
   } catch (e) {
     tk.done(); const m = String((e && e.message) || e);
     if (m !== 'stop') toast('중간 장면을 만들지 못했어요. ' + (/^nopack/.test(m) ? "'AI 중간 장면 팩'을 받아 주세요." : czErrText(e)), 5000);

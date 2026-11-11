@@ -225,7 +225,8 @@ function gsRenderProps() {
         ${row('맞추기', `<select data-gk="s.fit"><option value="">전체 설정 따름</option>${opt([['cover', '꽉 채우기'], ['contain', '전체 보이기']], s.fit ?? '')}</select>`)}
         <p class="gp-tip">시간 막대에서 장면 오른쪽 끝을 끌면 길이가 바뀌고, 가운데를 끌면 순서가 바뀌어요.</p>
         ${gsXfHtml(s, nClip)}
-        ${nClip > 1 ? `<div class="btnrow"><button class="btn sm" data-g="pick-clip" data-v="${s.clip}" title="이 GIF·영상 장면을 모두 고르면 오른쪽에 'AI로 부드럽게'가 나와요">AI로 부드럽게 (중간 장면)…</button></div>` : `<div class="btnrow"><button class="btn sm" data-g="ai-para" title="AI가 잰 거리대로 앞뒤를 나눠 카메라가 움직이는 것 같은 장면들로 바꿔요">입체 움직임 (AI 깊이)…</button><button class="btn sm" data-g="ai-vid" title="이 장면 그림과 '어떻게 움직일지' 적은 글로 영상을 만들어요 (제미나이 유료 키)">AI 영상으로 (제미나이)…</button></div>`}
+        <div class="btnrow"><button class="btn sm" data-g="ri-open" data-v="${nClip > 1 ? 'clip' : 'one'}" title="장면 사이에 AI가 새 장면을 그려 넣어 부드럽게 이어요 (AI 중간 장면 팩, 설치판)">AI 중간 장면 (부드럽게 잇기)…</button></div>
+        ${nClip > 1 ? '' : `<div class="btnrow"><button class="btn sm" data-g="ai-para" title="AI가 잰 거리대로 앞뒤를 나눠 카메라가 움직이는 것 같은 장면들로 바꿔요">입체 움직임 (AI 깊이)…</button><button class="btn sm" data-g="ai-vid" title="이 장면 그림과 '어떻게 움직일지' 적은 글로 영상을 만들어요 (제미나이 유료 키)">AI 영상으로 (제미나이)…</button></div>`}
         <div class="btnrow"><button class="btn sm" data-g="dup" title="Ctrl+D">복제</button><button class="btn sm" data-g="split" title="재생 위치에서 두 장면으로 (Ctrl+K)">재생 위치에서 나누기</button><button class="btn sm danger" data-g="del-sel">빼기</button></div>
         ${nClip > 1 ? `<div class="btnrow"><button class="btn sm" data-g="pick-clip" data-v="${s.clip}" title="같은 GIF·영상에서 나온 장면을 모두 골라 속도·거꾸로·부메랑을 한꺼번에">이 GIF·영상 장면 모두 고르기 (${nClip}장)</button></div>` : ''}</div>
       ${gs.sel > 0 ? `<div class="sec"><h3>들어올 때 넘김</h3>${row('넘김', gsTransSel('s.tr', s.tr ?? '', true))}${row('길이', `<input type="number" data-gk="s.trd" min="0.05" max="3" step="0.05" value="${s.trd ?? ''}" placeholder="${set.trDur}"> 초`)}</div>` : ''}`;
@@ -233,6 +234,7 @@ function gsRenderProps() {
     k = '넘김'; head = `${gs.sel}번 → ${gs.sel + 1}번 장면 사이`;
     const short = gsDur(s) < 0.3;
     body = `<div class="sec">${row('넘김', gsTransSel('s.tr', s.tr ?? '', true))}
+        <div class="btnrow"><button class="btn sm" data-g="ri-tr" title="넘김 효과 대신 AI가 두 장면 사이를 새로 그려 이어요 (AI 중간 장면 팩)">AI 중간 장면으로 잇기…</button></div>
         ${row('길이', `<input type="number" data-gk="s.trd" min="0.05" max="3" step="0.05" value="${s.trd ?? ''}" placeholder="${set.trDur}"> 초`)}
         ${short ? '<p class="gp-tip warn">뒤 장면이 0.3초보다 짧아서 넘김이 보이지 않아요.</p>' : ''}
         <p class="gp-tip">왼쪽 '넘김'에서 미리보기를 보고 눌러도 이 자리에 들어가요.</p>
@@ -626,6 +628,8 @@ async function gsClick(e) {
   else if (a === 'desel') gpDeselect();
   else if (a === 'scene-prev' || a === 'scene-next') { const i = clamp(gs.sel + (a === 'scene-next' ? 1 : -1), 0, S.length - 1); gs.sel = i; gs.pick.clear(); const st = gsStarts(); gs.t = st[i] + 0.001; gsRenderProps(); tlBuild(); gsDraw(); }
   else if (a === 'pick-all') { gs.pick = new Set(S.map(s => s.id)); gs.focus = 'scene'; gs.sel = 0; gsRenderProps(); tlBuild(); }
+  else if (a === 'ri-open') riOpen(b.dataset.v || 'one', gs.sel);
+  else if (a === 'ri-tr') riOpen('one', gs.sel - 1);
   else if (a === 'pick-clip') { const c = b.dataset.v || (S[gs.sel] || {}).clip; if (c) { gs.pick = new Set(S.filter(x => x.clip === c).map(x => x.id)); gs.sel = S.findIndex(x => x.clip === c); gs.focus = 'scene'; gsRenderProps(); tlBuild(); } }
   else if (a === 'b-clear') { gs.pick.clear(); gsRenderProps(); tlBuild(); }
   else if (a === 'b-dur') gsBatch(a, ($('#gsBDur') || {}).value);
