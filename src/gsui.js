@@ -26,7 +26,7 @@ function buildGifStudio() {
   const d = document.createElement('div'); d.id = 'gifStudio'; d.className = 'gs gp'; d.hidden = true;
   try { const h = +localStorage.getItem('potatoTLH'); if (h > 120) d.style.setProperty('--tlh', h + 'px'); } catch (e) { }
   d.innerHTML = `<div class="gs-top gp-top"><b>움짤 만들기</b><div class="gp-dash" id="gpDash"></div><div class="flex1"></div>
-      <button class="btn" data-g="dub" title="대사를 적으면 고른 목소리와 감정으로 읽어 줘요 (제미나이). 만든 소리는 소리 줄에 넣을 수 있어요">AI 더빙</button><button class="btn primary" data-g="export-open" title="GIF, 움직이는 WebP, MP4로 저장 (Ctrl+M)">내보내기</button><button class="btn" data-g="close">편집기로 돌아가기</button></div>
+      <button class="btn" data-apilog title="제미나이 작업마다 예상·실제 토큰과 금액">API 사용</button><button class="btn" data-g="dub" title="대사를 적으면 고른 목소리와 감정으로 읽어 줘요 (제미나이). 만든 소리는 소리 줄에 넣을 수 있어요">AI 더빙</button><button class="btn primary" data-g="export-open" title="GIF, 움직이는 WebP, MP4로 저장 (Ctrl+M)">내보내기</button><button class="btn" data-g="close">편집기로 돌아가기</button></div>
     <div class="gp-up">
       <aside class="gp-lib" id="gpLib"></aside>
       <main class="gp-mon">

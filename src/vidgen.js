@@ -76,15 +76,18 @@ async function vgOpen(T) {
         <span>화질</span><span><select id="vgRes"><option value="360p" ${vgCfg.res === '360p' ? 'selected' : ''}>360p (싸게 시험)</option><option value="720p" ${vgCfg.res === '720p' ? 'selected' : ''}>720p (기본)</option><option value="1080p" ${vgCfg.res === '1080p' ? 'selected' : ''}>1080p (키움)</option></select></span>
         <span>모델</span><span style="display:flex;gap:6px"><select id="vgModel" style="flex:1"><option>${esc(vgCfg.model)}</option></select><button class="btn sm" id="vgList" title="이 키로 쓸 수 있는 영상 모델을 불러와요">목록</button></span>
       </div>
+      <p class="apiest" id="vgEst"></p>
       <p class="muted small" id="vgNote">영상은 ${fr.ratio === '9:16' ? '세로(9:16)' : '가로(16:9)'}로만 만들어져요. 유료예요: 720p 1초에 약 0.1달러, 무료 사용량이 없어서 결제를 연결한 키가 필요해요. 그림이 구글로 보내지고, 노출·성인 그림은 거절돼요.</p>
     </div></div>
-    <div class="foot"><button class="btn" data-close>닫기</button><span id="vgAfter" hidden style="display:contents"><button class="btn" id="vgDl">MP4로 저장</button><label class="chk" style="margin:0 4px"><input type="checkbox" id="vgSnd" ${vgCfg.sound ? 'checked' : ''}> 소리도</label><button class="btn" id="vgUse">${T.useLabel || '움짤 탭에 넣기'}</button></span><button class="btn primary" id="vgGo">영상 만들기</button></div>`, { wide: true });
+    <div class="foot"><button class="btn" data-close>닫기</button><button class="btn" data-apilog>API 사용 내역</button><span class="flex1"></span><span id="vgAfter" hidden style="display:contents"><button class="btn" id="vgDl">MP4로 저장</button><label class="chk" style="margin:0 4px"><input type="checkbox" id="vgSnd" ${vgCfg.sound ? 'checked' : ''}> 소리도</label><button class="btn" id="vgUse">${T.useLabel || '움짤 탭에 넣기'}</button></span><button class="btn primary" id="vgGo">영상 만들기</button></div>`, { wide: true });
   m.style.width = 'min(980px, 100%)';
   const cv = $('#vgCv', m), vid = $('#vgVid', m), draw = () => { cv.width = fr.c.width; cv.height = fr.c.height; cv.getContext('2d').drawImage(fr.c, 0, 0); };
   draw(); $('#vgAfter', m).hidden = true; $('#vgAfter', m).style.display = 'none';
+  const est = () => { const md = $('#vgModel', m).value, rs = $('#vgRes', m).value, e = s => apiEstVid(md, rs, s); $('#vgEst', m).textContent = apiEstText('vid', md, e(8), `8초 기준 · 길이에 따라 ${apiFmt(e(3), true)}~${apiFmt(e(10), true)}`); };
+  est(); $('#vgRes', m).addEventListener('change', est); $('#vgModel', m).addEventListener('change', est);
   $$('#vgFit [data-v]', m).forEach(b => b.addEventListener('click', () => { vgCfg.fit = b.dataset.v; $$('#vgFit [data-v]', m).forEach(x => x.classList.toggle('on', x === b)); fr = vgFrame(T.src, T.W, T.H, vgCfg.fit); draw(); cv.hidden = false; vid.hidden = true; }));
   $$('[data-vgi]', m).forEach(b => b.addEventListener('click', () => { const ta = $('#vgPrompt', m), add = VG_IDEAS[+b.dataset.vgi][1]; ta.value = (ta.value.trim() ? ta.value.trim() + ' ' : '') + add; ta.focus(); }));
-  $('#vgList', m).addEventListener('click', async () => { try { const L = await vgModels(); if (!L.includes(vgCfg.model)) vgCfg.model = L[0]; $('#vgModel', m).innerHTML = L.map(x => `<option ${x === vgCfg.model ? 'selected' : ''}>${esc(x)}</option>`).join(''); toast(`영상 모델 ${L.length}개`, 1800); } catch (e) { toast(e.message, 5000); } });
+  $('#vgList', m).addEventListener('click', async () => { try { const L = await vgModels(); if (!L.includes(vgCfg.model)) vgCfg.model = L[0]; $('#vgModel', m).innerHTML = L.map(x => `<option ${x === vgCfg.model ? 'selected' : ''}>${esc(x)}</option>`).join(''); est(); toast(`영상 모델 ${L.length}개`, 1800); } catch (e) { toast(e.message, 5000); } });
   const clean = () => { if (url) { URL.revokeObjectURL(url); url = null; } };
   const obs = new MutationObserver(() => { if (!m.isConnected) { clean(); obs.disconnect(); } }); obs.observe(document.body, { childList: true, subtree: true });
   $('#vgGo', m).addEventListener('click', async () => {
@@ -92,11 +95,16 @@ async function vgOpen(T) {
     vgCfg.prompt = p; vgCfg.res = $('#vgRes', m).value; vgCfg.model = $('#vgModel', m).value; vgSave();
     const go = $('#vgGo', m), tk = { stop: false, set: s => { if (s) go.textContent = s; } }; go.disabled = true; go.textContent = '만드는 중… (1~3분)';
     const t0 = Date.now(), tick = setInterval(() => { if (m.isConnected && go.disabled) go.textContent = `만드는 중… ${Math.round((Date.now() - t0) / 1000)}초`; else { clearInterval(tick); tk.stop = !m.isConnected; } }, 1000);
+    const job = tk.job = apiJob('vid', `AI 영상 ${vgCfg.res}`, vgCfg.model, apiEstVid(vgCfg.model, vgCfg.res, 8));
     try {
-      blob = await vgGenerate(fr.c, fr.ratio, p, tk); clearInterval(tick); if (!m.isConnected) return;
+      blob = await vgGenerate(fr.c, fr.ratio, p, tk); clearInterval(tick);
+      const dur = await new Promise(r => { const v = document.createElement('video'), u = URL.createObjectURL(blob), fin = d => { URL.revokeObjectURL(u); r(isFinite(d) ? d : 0); }; v.preload = 'metadata'; v.onloadedmetadata = () => fin(v.duration); v.onerror = () => fin(0); setTimeout(() => fin(0), 5000); v.src = u; });
+      if (!job.real && dur > 0) apiGuess(job, vgCfg.model, { in: 1500, out: Math.round(dur * (API_VID_TOK[vgCfg.res] || 5792)) }); // 답에 토큰 수가 없으면 영상 길이로
+      apiEnd(job, 'ok'); if (!m.isConnected) return;
       clean(); url = URL.createObjectURL(blob); vid.src = url; vid.hidden = false; cv.hidden = true; vid.play().catch(() => { });
       $('#vgAfter', m).hidden = false; $('#vgAfter', m).style.display = 'contents'; go.textContent = '다시 만들기';
-    } catch (e) { clearInterval(tick); if (m.isConnected) { go.textContent = '영상 만들기'; if (e.code !== 'stop') toast(e.message, 8000); } }
+      $('#vgEst', m).textContent = `방금 만든 영상 ${dur ? dur.toFixed(1) + '초' : ''} · 쓴 금액 ${apiFmt(job.usd)}${job.guess ? ' (길이로 추정)' : ''}`;
+    } catch (e) { clearInterval(tick); apiEnd(job, e.code === 'stop' ? 'stop' : 'fail'); if (m.isConnected) { go.textContent = '영상 만들기'; if (e.code !== 'stop') toast(e.message + apiUsed(job), 8000); } }
     go.disabled = false;
   });
   const fname = () => safeName((T.name || '그림').replace(/\.[^.]+$/, '') + ' 영상') + '.mp4';

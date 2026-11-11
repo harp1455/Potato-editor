@@ -4,7 +4,7 @@
 const TR_API = 'https://generativelanguage.googleapis.com/v1beta';
 const TR_LANGS = [['ja', '일본어'], ['ko', '한국어'], ['zh', '중국어'], ['en', '영어']];
 const TR_LN = { ja: 'Japanese', ko: 'Korean', zh: 'Chinese', en: 'English' };
-const TR_PREF = ['gemini-3.8-flash', 'gemini-4-argon', 'gemini-3.1-pro-preview', 'gemini-3.6-flash', 'gemini-3-flash-preview', 'gemini-3.5-flash-lite', 'gemini-2.5-pro', 'gemini-2.5-flash'];
+const TR_PREF = ['gemini-3.8-flash', 'gemini-4-carbon', 'gemini-4-argon', 'gemini-3.1-pro-preview', 'gemini-3.6-flash', 'gemini-3-flash-preview', 'gemini-3.5-flash-lite', 'gemini-2.5-pro', 'gemini-2.5-flash'];
 const TR_KINDS = ['speech', 'thought', 'narration', 'sfx', 'sign', 'other'];
 const trCfg = { key: '', model: TR_PREF[0], models: [], src: 'auto', dst: 'ko', font: '고딕', style: '', sfx: 'keep', lama: true, ctx: true, gloss: '', notes: '', scope: 'one' };
 try { Object.assign(trCfg, JSON.parse(localStorage.getItem('potatoTrCfg') || '{}')); } catch (_) { }
@@ -21,7 +21,10 @@ async function trHttp(method, path, body, tk) {
     try { res = await fetch(TR_API + path, { method, headers: { 'Content-Type': 'application/json', 'x-goog-api-key': trCfg.key.trim() }, body: body ? JSON.stringify(body) : undefined }); }
     catch (e) { if (n < 2) { await trSleep(2500, tk); continue; } throw trErr('net', '인터넷에 연결하지 못했어요'); }
     let j = null; try { j = await res.json(); } catch (_) { }
-    if (res.ok) return j || {};
+    if (res.ok) {
+      if (j && (method === 'POST' || /\/interactions\//.test(path))) { const mm = /\/models\/([^:/]+):/.exec(path); apiSeen(tk && tk.job, (body && body.model) || (mm && decodeURIComponent(mm[1])) || '', j); }
+      return j || {};
+    }
     const em = (j && j.error) || {}, msg = String(em.message || ''), st = String(em.status || '');
     if (res.status === 400 && /API key|API_KEY/i.test(msg + JSON.stringify(em.details || ''))) throw trErr('key', 'API 키가 맞지 않아요. 키를 다시 확인해 주세요');
     if (res.status === 401 || res.status === 403) throw trErr('key', '이 API 키로는 쓸 수 없어요 (권한이 없거나 막힌 키예요)');
@@ -630,6 +633,7 @@ async function trRun(idxs, o) {
   if (trBusy) return; trBusy = true;
   const tk = czProgress('AI로 번역하는 중'); let done = 0, txt = 0, skip = [], viaT = 0;
   const ids = idxs.map(i => doc.pages[i].id);
+  const job = tk.job = apiJob('tr', `페이지 번역 ${ids.length}장`, trCfg.model, apiEstTr(trCfg.model, idxs.map(i => doc.pages[i]), o));
   try {
     o.lamaOk = false;
     o.tdetOk = false;
@@ -655,13 +659,15 @@ async function trRun(idxs, o) {
       tk.set(pre + '다 됐어요', (n + 1) / ids.length);
     }
     tk.done(); renderProps(); renderLib(); requestRender();
+    apiEnd(job, tk.stop ? 'stop' : done ? 'ok' : 'fail');
     const msg = done ? `${done}장을 번역했어요 (글자 ${txt}곳). 글자를 두 번 눌러 고치거나, 오른쪽 '페이지 번역'에서 번역문을 고칠 수 있어요` : '번역한 그림이 없어요';
-    toast(msg + (viaT ? ` · ${viaT}장은 그림이 거절돼서 글자 부분만 보냈어요` : '') + (skip.length ? ` · ${skip.length}장은 건너뛰었어요` : '') + (tk.stop ? ' (중간에 멈췄어요)' : ''), 6000);
+    toast(msg + (viaT ? ` · ${viaT}장은 그림이 거절돼서 글자 부분만 보냈어요` : '') + (skip.length ? ` · ${skip.length}장은 건너뛰었어요` : '') + (tk.stop ? ' (중간에 멈췄어요)' : '') + apiUsed(job), 7000);
     if (skip.length) setTimeout(() => modal(`<h2>건너뛴 그림</h2><ul class="tips">${skip.map(s => `<li>${esc(s)}</li>`).join('')}</ul><p class="muted small">그림이 거절되면 '그림 보내기'를 '글자 부분만'으로 바꿔 보세요(AI 글자 찾기 팩 필요). 모델을 바꾸면 될 때도 있어요.</p><div class="foot"><button class="btn primary" data-close>닫기</button></div>`), 300);
   } catch (e) {
     tk.done(); renderProps(); requestRender();
     if (done) commit();
-    toast((e && e.message) || '번역하지 못했어요', 7000);
+    apiEnd(job, 'fail');
+    toast(((e && e.message) || '번역하지 못했어요') + apiUsed(job), 7000);
   } finally { trBusy = false; }
 }
 
@@ -675,7 +681,7 @@ function trOpen() {
   const m = modal(`<h2>페이지 번역 (제미나이)</h2><p class="sub">그림 속 글자를 찾아 번역하고, 원래 글자만 지운 뒤 고칠 수 있는 글자로 다시 써요. 그림은 그대로라 언제든 끄거나 지울 수 있어요.</p>
     <div class="grid2">
       <span>API 키</span><span style="display:flex;gap:6px"><input type="password" id="trKey" value="${esc(trCfg.key)}" placeholder="AIza…" spellcheck="false" autocomplete="off" style="flex:1"><button class="btn sm" id="trKeyShow" title="보이기">보기</button></span>
-      <span>모델</span><span style="display:flex;gap:6px"><select id="trModel" style="flex:1">${models.map(x => `<option ${x === trCfg.model ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select><button class="btn sm" id="trList" title="이 키로 쓸 수 있는 모델을 불러와요">모델 목록 불러오기</button></span>
+      <span>모델</span><span style="display:flex;gap:6px"><select id="trModel" style="flex:1">${models.map(x => `<option value="${esc(x)}" ${x === trCfg.model ? 'selected' : ''}>${esc(apiModelLabel(x))}</option>`).join('')}</select><button class="btn sm" id="trList" title="이 키로 쓸 수 있는 모델을 불러와요">모델 목록 불러오기</button></span>
       <span>원문</span><span>${lang('trSrc', trCfg.src, true)}</span>
       <span>번역할 말</span><span><select id="trDst">${TR_LANGS.map(([v, l]) => `<option value="${v}" ${trCfg.dst === v ? 'selected' : ''}>${l}</option>`).join('')}<option value="same" ${trCfg.dst === 'same' ? 'selected' : ''}>번역 없이 원문 그대로 (글자만 깔끔하게 다시 쓰기)</option></select></span>
       <span>대상</span><span class="seg" id="trScope"><button class="btn sm ${trCfg.scope === 'one' || (!fo && trCfg.scope === 'fold') ? 'on' : ''}" data-v="one">이 그림</button>${fo ? `<button class="btn sm ${trCfg.scope === 'fold' ? 'on' : ''}" data-v="fold">'${esc(fo.name)}' 폴더 (${inF.length}장)</button>` : ''}${all.length > 1 ? `<button class="btn sm ${trCfg.scope === 'all' ? 'on' : ''}" data-v="all">모든 그림 (${all.length}장)</button>` : ''}</span>
@@ -692,9 +698,15 @@ function trOpen() {
       <p class="muted small" style="margin:8px 0 4px">말투·관계 메모 (예: 카이는 반말, 지호는 카이에게 존댓말. 거친 말투 그대로)</p>
       <textarea id="trNotes" rows="3" spellcheck="false" style="width:100%">${esc(trCfg.notes)}</textarea></div></details>
     <p class="muted small">키는 이 컴퓨터에만 저장돼요. 번역할 그림('글자 부분만'이면 글자 부분 조각만)이 구글(제미나이)로 보내져요. 키는 Google AI Studio(aistudio.google.com)의 'Get API key'에서 받아요.</p>
-    <div class="foot"><button class="btn" data-close>취소</button><button class="btn primary" id="trGo">번역 시작</button></div>`, { wide: true });
+    <p class="apiest" id="trEst"></p>
+    <div class="foot"><button class="btn" data-apilog>API 사용 내역</button><span class="flex1"></span><button class="btn" data-close>취소</button><button class="btn primary" id="trGo">번역 시작</button></div>`, { wide: true });
+  const est = () => {
+    const sc = $('#trScope .on', m) ? $('#trScope .on', m).dataset.v : 'one', ix = sc === 'all' ? all : sc === 'fold' ? inF : [doc.cur], md = $('#trModel', m).value;
+    $('#trEst', m).textContent = apiEstText('tr', md, apiEstTr(md, ix.map(i => doc.pages[i]), { gloss: $('#trGloss', m).value, notes: $('#trNotes', m).value, ctx: $('#trCtx', m).checked }), `그림 ${ix.length}장`);
+  };
+  setTimeout(est, 0); m.addEventListener('change', est);
   let scope = $('#trScope .on', m) ? $('#trScope .on', m).dataset.v : 'one';
-  $$('#trScope [data-v]', m).forEach(b => b.addEventListener('click', () => { scope = b.dataset.v; $$('#trScope [data-v]', m).forEach(x => x.classList.toggle('on', x === b)); }));
+  $$('#trScope [data-v]', m).forEach(b => b.addEventListener('click', () => { scope = b.dataset.v; $$('#trScope [data-v]', m).forEach(x => x.classList.toggle('on', x === b)); est(); }));
   $('#trKeyShow', m).addEventListener('click', () => { const i = $('#trKey', m); i.type = i.type === 'password' ? 'text' : 'password'; });
   const read = () => {
     trCfg.key = $('#trKey', m).value.trim(); trCfg.model = $('#trModel', m).value; trCfg.src = $('#trSrc', m).value; trCfg.dst = $('#trDst', m).value;
@@ -707,7 +719,7 @@ function trOpen() {
     try {
       const L = await trListModels(); if (!L.length) throw trErr('none', '쓸 수 있는 제미나이 모델이 없어요');
       trCfg.models = L; if (!L.includes(trCfg.model)) trCfg.model = L[0]; trSaveCfg();
-      $('#trModel', m).innerHTML = L.map(x => `<option ${x === trCfg.model ? 'selected' : ''}>${esc(x)}</option>`).join('');
+      $('#trModel', m).innerHTML = L.map(x => `<option value="${esc(x)}" ${x === trCfg.model ? 'selected' : ''}>${esc(apiModelLabel(x))}</option>`).join(''); est();
       toast(`키가 맞아요. 모델 ${L.length}개를 불러왔어요`, 2600);
     } catch (er) { toast(er.message, 5000); }
     b.disabled = false; b.textContent = '모델 목록 불러오기';
@@ -798,14 +810,17 @@ async function aiTxOpen(tgt) {
     <div class="txacts">${TX_ACTS.map(([v, l]) => `<button class="btn sm" data-tx="${v}">${l}</button>`).join('')}</div>
     <div style="display:flex;gap:6px;margin-top:6px"><input type="text" id="txReq" placeholder="직접 요청 (예: 더 능글맞게, 사투리로, 효과음처럼)" spellcheck="false" style="flex:1"><button class="btn sm" id="txGo">요청</button></div>
     <div id="txOut" class="txout"></div>
-    <div class="foot"><button class="btn" data-close>닫기</button></div>`, { wide: true });
+    <p class="apiest" id="txEst">${esc(apiEstText('tx', trCfg.model, apiEstTx(trCfg.model, [tgt.text, tgt.text, tgt.text], (tgt.ctx || []).join('\n')), '한 번 요청에 · 모델 ' + trCfg.model))}</p>
+    <div class="foot"><button class="btn" data-apilog>API 사용 내역</button><span class="flex1"></span><button class="btn" data-close>닫기</button></div>`, { wide: true });
   const out = $('#txOut', m);
   const run = async (act, req) => {
     const what = act && act.startsWith('tr:') ? `Translate it into natural ${TR_LN[act.slice(3)]} comic dialogue.` : ({ nat: 'Rewrite it to sound more natural and fluent, same language and meaning.', short: 'Make it noticeably shorter so it fits a smaller speech bubble, same language and meaning.', emo: 'Make it more emotional and expressive, same language and meaning.', casual: 'Rewrite it in casual / intimate speech (Korean: 반말), same language.', polite: 'Rewrite it in polite speech (Korean: 존댓말), same language.' })[act] || `Do this: ${req}`;
     out.innerHTML = '<p class="muted">제미나이가 생각하는 중…</p>'; $$('button', m).forEach(b => { if (!b.hasAttribute('data-close')) b.disabled = true; });
     try {
       const prompt = `You are an expert comic letterer and translator. Here is one line from a comic:\n"""${tgt.text}"""\n${tgt.ctx && tgt.ctx.length ? `Other lines on the same page, for context:\n${tgt.ctx.slice(0, 40).map(s => '- ' + String(s).replace(/\n/g, ' ')).join('\n')}\n` : ''}${what}\nKeep line breaks short so it fits a speech bubble (use \\n). Give 3 different good options.\n${trCommonRules()}\nReturn JSON {"options": ["...", "...", "..."]}.`;
-      const r = await trAskText(prompt, { type: 'OBJECT', properties: { options: { type: 'ARRAY', items: { type: 'STRING' } } }, required: ['options'] });
+      const job = apiJob('tx', `${tgt.label || '글자'} ${act ? (TX_ACTS.find(x => x[0] === act) || [, act])[1] : '직접 요청'}`, trCfg.model, apiEstTx(trCfg.model, [tgt.text, tgt.text, tgt.text], (tgt.ctx || []).join('\n')));
+      let r; try { r = await trAskText(prompt, { type: 'OBJECT', properties: { options: { type: 'ARRAY', items: { type: 'STRING' } } }, required: ['options'] }, { stop: false, set() { }, job }); apiEnd(job, 'ok'); } catch (e) { apiEnd(job, 'fail'); throw e; }
+      if (m.isConnected) $('#txEst', m).textContent = `방금 쓴 금액 ${apiFmt(job.usd)} (토큰 ${apiNum(job.in)} / ${apiNum(job.out + job.th)})`;
       const ops = (r.options || []).map(s => String(s).trim()).filter(Boolean).slice(0, 5);
       out.innerHTML = ops.length ? ops.map((s, i) => `<button class="txopt" data-i="${i}">${esc(s)}</button>`).join('') : '<p class="muted">답이 비어 있어요. 다시 해 보세요.</p>';
       $$('.txopt', out).forEach(b => b.addEventListener('click', () => { tgt.set(ops[+b.dataset.i]); closeModal(); toast('바꿨어요. Ctrl+Z로 되돌릴 수 있어요', 1800); }));
@@ -823,10 +838,12 @@ async function aiTxBatch(items, title, done) {
   const m = modal(`<h2>${esc(title)}</h2><p class="sub">글자 ${items.length}개를 한 번에 번역해요. 앞뒤 대사를 같이 보고 말투를 맞춰요.</p>
     ${row('번역할 말', `<select id="tbDst">${TR_LANGS.map(([v, l]) => `<option value="${v}" ${v === (trCfg.bdst || 'ja') ? 'selected' : ''}>${l}</option>`).join('')}</select>`)}
     <p class="muted small">용어집·말투 메모는 '페이지 번역' 설정에 적은 것을 같이 써요. 바꾼 뒤 Ctrl+Z로 한 번에 되돌릴 수 있어요.</p>
-    <div class="foot"><button class="btn" data-close>취소</button><button class="btn primary" id="tbGo">번역</button></div>`);
+    <p class="apiest">${esc(apiEstText('tx', trCfg.model, apiEstTx(trCfg.model, items.map(x => x.text), trCfg.gloss + trCfg.notes), '모델 ' + trCfg.model))}</p>
+    <div class="foot"><button class="btn" data-apilog>API 사용 내역</button><span class="flex1"></span><button class="btn" data-close>취소</button><button class="btn primary" id="tbGo">번역</button></div>`);
   $('#tbGo', m).addEventListener('click', async () => {
     const dst = $('#tbDst', m).value; trCfg.bdst = dst; trSaveCfg(); closeModal();
     const tk = czProgress('AI로 번역하는 중'); tk.set(`글자 ${items.length}개를 번역하는 중…`, 0.2);
+    const job = tk.job = apiJob('tx', `${title} (${items.length}개)`, trCfg.model, apiEstTx(trCfg.model, items.map(x => x.text), trCfg.gloss + trCfg.notes));
     try {
       const all = []; // 너무 많으면 나눠서 (앞 묶음 번역을 문맥으로)
       for (let a = 0; a < items.length; a += 120) {
@@ -836,10 +853,10 @@ async function aiTxBatch(items, title, done) {
         for (const it of r.items || []) { const x = part[it.i]; if (x && typeof it.t === 'string' && it.t.trim()) { x.out = it.t.replace(/\\n/g, '\n'); all.push(it.t); } }
         tk.set(null, Math.min(1, (a + part.length) / items.length));
       }
-      tk.done();
+      tk.done(); apiEnd(job, 'ok');
       let n = 0; for (const x of items) if (x.out != null) { x.set(x.out); n++; }
-      if (done) done(n); toast(`${n}개를 번역했어요${n < items.length ? ` (${items.length - n}개는 그대로)` : ''}. Ctrl+Z로 되돌릴 수 있어요`, 3600);
-    } catch (e) { tk.done(); if (e.code !== 'stop') toast(e.message, 6000); }
+      if (done) done(n); toast(`${n}개를 번역했어요${n < items.length ? ` (${items.length - n}개는 그대로)` : ''}. Ctrl+Z로 되돌릴 수 있어요` + apiUsed(job), 5000);
+    } catch (e) { tk.done(); apiEnd(job, e.code === 'stop' ? 'stop' : 'fail'); if (e.code !== 'stop') toast(e.message + apiUsed(job), 6000); }
   });
 }
 // 편집기: 고른 말풍선·글자 / 페이지 전체

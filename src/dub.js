@@ -122,8 +122,10 @@ async function dbTts(text, style, voice, tk) {
   return new Blob([u8], { type: mime.split(';')[0] });
 }
 async function dbMakeRaw(sig, text, style, voice, tk) {
+  const n0 = tk && tk.job ? (tk.job.real || 0) : 0;
   const blob = await dbTts(text, style, voice, tk);
   let buf; try { buf = await auDecode(blob); } catch (_) { throw trErr('parse', '받은 소리를 읽지 못했어요'); }
+  if (tk && tk.job && (tk.job.real || 0) === n0) apiGuess(tk.job, dbCfg.model, { in: 30 + apiTok(text) + apiTok(style), out: Math.round(buf.duration * 25) }); // 답에 토큰 수가 없으면 길이로
   return { sig, blob, buf, dur: buf.duration };
 }
 async function dbMake(l, tk) {
@@ -173,7 +175,7 @@ async function dbOpen(opts) {
   const inGif = typeof gifOpen === 'function' && gifOpen();
   const m = modal(`<h2>AI 더빙 (제미나이)</h2><p class="sub">대사를 적고 목소리와 말투를 고르면 감정을 담아 읽어 줘요. 줄을 여러 개 만들어 하나씩 듣고, 이어 붙이거나 따로 저장할 수 있어요.</p>
     <div class="dbtop">
-      <label>모델 <select id="dbModel">${DB_MODELS.map(([v, l]) => `<option value="${v}" ${v === dbCfg.model ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+      <label>모델 <select id="dbModel">${DB_MODELS.map(([v, l]) => `<option value="${v}" ${v === dbCfg.model ? 'selected' : ''}>${l}${apiRate(v) ? ` · 1분 약 ${apiWon(60 * 25 * apiRate(v).out / 1e6)}` : ''}</option>`).join('')}</select></label>
       <label>말 빠르기 <select id="dbSpeed">${[['slow2', '아주 느리게'], ['slow', '조금 느리게'], ['', '보통'], ['fast', '조금 빠르게'], ['fast2', '아주 빠르게']].map(([v, l]) => `<option value="${v}" ${v === dbCfg.speed ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
       <label title="이어서 듣거나 이어 붙일 때 대사와 대사 사이에 두는 쉼">대사 사이 쉼 <input type="number" id="dbGap" min="0" max="5" step="0.1" value="${+dbCfg.gap || 0}" style="width:58px"> 초</label>
       <span class="flex1"></span>
@@ -184,8 +186,9 @@ async function dbOpen(opts) {
     <div class="btnrow"><button class="btn sm" id="dbAdd">+ 대사 추가</button><button class="btn sm" id="dbImp" title="${inGif ? '움짤 글자를 나오는 순서대로 가져와요' : '이 페이지의 말풍선·글자를 위에서부터 가져와요'}">${inGif ? '움짤 글자에서 가져오기' : '말풍선에서 가져오기'}</button>${!inGif && typeof doc !== 'undefined' && doc.pages && doc.pages.length > 1 ? '<button class="btn sm" id="dbImpAll">모든 페이지에서</button>' : ''}<span class="flex1"></span><button class="btn sm" id="dbClear" title="대사 줄을 모두 지워요 (캐릭터 목소리는 남아요)">모두 지우기</button></div>
     <div class="dbchips"><span class="muted small">감정</span>${DB_EMO.map(([l], i) => `<button class="btn sm" data-dbe="${i}">${l}</button>`).join('')}</div>
     <div class="dbchips"><span class="muted small">소리</span>${DB_TAGS.map(([l, t]) => `<button class="btn sm" data-dbt="${esc(t)}" title="대사의 커서 자리에 ${esc(t)}를 넣어요">${l}</button>`).join('')}<span class="muted small">감정은 마지막에 누른 줄의 말투 칸에, 소리는 대사의 커서 자리에 들어가요</span></div>
-    <p class="muted small" id="dbNote" style="margin:8px 0 0">말투 칸은 한국어로 적어도 되지만 영어가 더 잘 먹혀요. 대사는 적은 그대로 읽고, 언어는 알아서 맞춰요. 대사가 구글로 보내지고 수위 높은 대사는 거절될 수 있어요.</p>
-    <div class="foot dbfoot"><button class="btn" data-close>닫기</button><span class="flex1"></span><span class="muted small" id="dbSum"></span>
+    <p class="apiest" id="dbEst"></p>
+    <p class="muted small" id="dbNote" style="margin:4px 0 0">말투 칸은 한국어로 적어도 되지만 영어가 더 잘 먹혀요. 대사는 적은 그대로 읽고, 언어는 알아서 맞춰요. 대사가 구글로 보내지고 수위 높은 대사는 거절될 수 있어요.</p>
+    <div class="foot dbfoot"><button class="btn" data-close>닫기</button><button class="btn" data-apilog>API 사용 내역</button><span class="flex1"></span><span class="muted small" id="dbSum"></span>
       <button class="btn" id="dbPlayAll" title="만들어 둔 대사를 순서대로 들어요">이어서 듣기</button>
       <button class="btn" id="dbSaveEach" title="대사마다 WAV 파일 하나씩">따로 저장</button>
       <button class="btn" id="dbSaveOne" title="모든 대사를 쉼을 두고 이어 붙인 WAV 파일 하나">이어 붙여 저장</button>
@@ -193,7 +196,7 @@ async function dbOpen(opts) {
       <button class="btn primary" id="dbGo">모두 만들기</button></div>`, { wide: true });
   m.style.width = 'min(1020px, 100%)'; m.classList.add('dbmodal');
   const box = $('#dbLines', m), cbox = $('#dbChars', m), tk = { stop: false, set: s => { if (s && m.isConnected) $('#dbSum', m).textContent = s; } };
-  let focus = dbCfg.lines[0].id, running = false;
+  let focus = dbCfg.lines[0].id, running = false; const myJobs = [];
   const obs = new MutationObserver(() => { if (!m.isConnected) { tk.stop = true; dbStop(); obs.disconnect(); } }); obs.observe(document.body, { childList: true, subtree: true });
   const lineOf = id => dbCfg.lines.find(l => l.id === id);
   const rowOf = id => box.querySelector(`.dbl[data-id="${id}"]`);
@@ -220,6 +223,8 @@ async function dbOpen(opts) {
     $('#dbGo', m).textContent = running ? '멈추기' : all && n === all ? '모두 만들었어요' : '모두 만들기'; $('#dbGo', m).disabled = !running && (!all || n === all);
     const so = $('#dbInto option[value="sync"]', m); so.hidden = so.disabled = !withT; if (!withT && dbCfg.into === 'sync') dbCfg.into = 'one'; $('#dbInto', m).value = dbCfg.into;
     $('#dbCharN', m).textContent = dbCfg.chars.length ? `(${dbCfg.chars.length})` : '';
+    const left = dbCfg.lines.filter(l => l.text.trim() && !dbReady(l)), spent = myJobs.reduce((a, j) => a + (j.usd || 0), 0);
+    $('#dbEst', m).textContent = (left.length ? apiEstText('dub', dbCfg.model, apiEstDub(dbCfg.model, left.map(l => ({ text: l.text, style: dbStyleOf(l) }))), `남은 대사 ${left.length}개`) : '만들 대사가 모두 준비됐어요') + (myJobs.some(j => j.calls) ? ` · 이 창에서 쓴 금액 ${apiFmt(spent)}` : '');
   };
   const whoOpts = l => `<option value="">목소리 직접 고르기</option>${dbCfg.chars.map(c => `<option value="${c.id}" ${c.id === l.who ? 'selected' : ''}>${esc(c.name || '이름 없음')}</option>`).join('')}`;
   const render = () => {
@@ -247,12 +252,16 @@ async function dbOpen(opts) {
   cbox.hidden = !dbCfg.charsOpen; renderChars(); render();
 
   // 한 줄 만들기 (이미 있으면 그대로)
-  const make = async (l, force) => {
+  const newJob = (label, lines) => { const j = apiJob('dub', label, dbCfg.model, apiEstDub(dbCfg.model, lines)); myJobs.push(j); return j; };
+  const make = async (l, force, job) => {
     if (dbBusy.has(l.id)) return null;
     if (force) dbAud.delete(l.id);
+    else if (dbReady(l)) return dbReady(l);
+    const own = !job; if (own) job = newJob(`대사 1줄: ${l.text.trim().slice(0, 20)}`, [{ text: l.text, style: dbStyleOf(l) }]);
     dbErrs.delete(l.id); dbBusy.add(l.id); paint();
-    try { return await dbMake(l, tk); }
-    catch (e) { if (e.code !== 'stop') { dbErrs.set(l.id, e.code === 'blocked' ? '거절됨' : e.code === 'empty' ? '' : '실패'); if (m.isConnected && e.code !== 'empty') toast(e.message, 6000); } throw e; }
+    try { const a = await dbMake(l, apiTk(tk, job)); if (own) apiEnd(job, 'ok'); return a; }
+    catch (e) {
+      if (own) apiEnd(job, e.code === 'stop' ? 'stop' : 'fail'); if (e.code !== 'stop') { dbErrs.set(l.id, e.code === 'blocked' ? '거절됨' : e.code === 'empty' ? '' : '실패'); if (m.isConnected && e.code !== 'empty') toast(e.message, 6000); } throw e; }
     finally { dbBusy.delete(l.id); if (m.isConnected) paint(); }
   };
   const done = () => dbCfg.lines.map(l => [l, dbReady(l)]).filter(x => x[1]);
@@ -291,7 +300,12 @@ async function dbOpen(opts) {
     const style = dbJoinStyle(c.style, DB_SPEED[dbCfg.speed]), sig = dbSigOf(c.voice, style, DB_SAMPLE);
     b.disabled = true; b.textContent = '만드는 중…';
     try {
-      let au = dbPrev.get(sig); if (!au) { au = await dbMakeRaw(sig, DB_SAMPLE, style, c.voice, tk); dbPrev.set(sig, au); if (dbPrev.size > 40) dbPrev.delete(dbPrev.keys().next().value); }
+      let au = dbPrev.get(sig);
+      if (!au) {
+        const job = newJob(`목소리 미리 듣기: ${c.name || c.voice}`, [{ text: DB_SAMPLE, style }]);
+        try { au = await dbMakeRaw(sig, DB_SAMPLE, style, c.voice, apiTk(tk, job)); apiEnd(job, 'ok'); } catch (er) { apiEnd(job, 'fail'); throw er; }
+        dbPrev.set(sig, au); if (dbPrev.size > 40) dbPrev.delete(dbPrev.keys().next().value); paint();
+      }
       if (m.isConnected) { dbPlay([au.buf], 0, 'c:' + c.id, () => m.isConnected && renderChars()); }
     } catch (err) { if (m.isConnected && err.code !== 'stop') toast(err.message, 6000); }
     if (m.isConnected) renderChars();
@@ -316,14 +330,16 @@ async function dbOpen(opts) {
   $('#dbGo', m).addEventListener('click', async () => {
     if (running) { tk.stop = true; return; }
     const todo = dbCfg.lines.filter(l => l.text.trim() && !dbReady(l)); if (!todo.length) return;
-    running = true; tk.stop = false; let ok = 0, bad = 0; paint();
+    running = true; tk.stop = false; let ok = 0, bad = 0;
+    const job = newJob(`대사 ${todo.length}줄 모두 만들기`, todo.map(l => ({ text: l.text, style: dbStyleOf(l) }))); paint();
     for (let i = 0; i < todo.length && !tk.stop && m.isConnected; i++) {
       tk.set(`${i + 1}/${todo.length} 만드는 중…`);
-      try { await make(todo[i]); ok++; }
+      try { await make(todo[i], false, job); ok++; }
       catch (e) { if (e.code === 'stop') break; bad++; if (e.code === 'key' || e.code === 'quota' || e.code === 'model' || e.code === 'net') break; }
     }
     running = false; const stopped = tk.stop; tk.stop = !m.isConnected;
-    if (m.isConnected) { paint(); if (!bad && !stopped) toast(`대사 ${ok}개를 만들었어요. '이어서 듣기'로 들어 보세요`, 3000); else if (bad) toast(`${ok}개 만들었고 ${bad}개는 못 만들었어요. 빨간 줄을 고쳐서 다시 해 보세요`, 5000); }
+    apiEnd(job, stopped ? 'stop' : ok ? 'ok' : 'fail');
+    if (m.isConnected) { paint(); if (!bad && !stopped) toast(`대사 ${ok}개를 만들었어요. '이어서 듣기'로 들어 보세요` + apiUsed(job), 4000); else if (bad) toast(`${ok}개 만들었고 ${bad}개는 못 만들었어요. 빨간 줄을 고쳐서 다시 해 보세요` + apiUsed(job), 5000); }
   });
   $('#dbPlayAll', m).addEventListener('click', () => {
     if (dbNow === 'all') { dbStop(); paint(); return; }
