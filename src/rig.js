@@ -493,15 +493,37 @@ function rgCutTex(px, A, W, H) {
   g.putImageData(id, 0, 0); return c;
 }
 // 구멍(hole 0~1)만 둘레에 맞게 메우기: 구멍 둘레만 잘라서 메우면 더 또렷해요
-async function rgFillRegion(px, hole, W, H, tk) {
+// ign(0~1): 메우지는 않지만 AI가 참고하면 안 되는 곳(떼어 낸 부위가 있던 자리, 엉터리로 메워진 배경 등)
+async function rgFillRegion(px, hole, W, H, tk, ign) {
   const b = rgBBox(hole, W, H, 0.02); if (!b) return px;
   const pad = Math.max(24, Math.round(Math.max(b.w, b.h) * 0.45)), x0 = Math.max(0, b.x - pad), y0 = Math.max(0, b.y - pad), x1 = Math.min(W, b.x + b.w + pad), y1 = Math.min(H, b.y + b.h + pad), w = x1 - x0, h = y1 - y0;
-  const sp = new Uint8ClampedArray(w * h * 4), sh = new Float32Array(w * h);
-  for (let y = 0; y < h; y++) { sp.set(px.subarray(((y + y0) * W + x0) * 4, ((y + y0) * W + x1) * 4), y * w * 4); sh.set(hole.subarray((y + y0) * W + x0, (y + y0) * W + x1), y * w); }
+  const sp = new Uint8ClampedArray(w * h * 4), sh = new Float32Array(w * h), own = new Float32Array(w * h); let known = 0;
+  for (let y = 0; y < h; y++) { sp.set(px.subarray(((y + y0) * W + x0) * 4, ((y + y0) * W + x1) * 4), y * w * 4); for (let x = 0; x < w; x++) { const i = (y + y0) * W + x + x0, v = hole[i]; own[y * w + x] = v; sh[y * w + x] = ign ? Math.max(v, ign[i]) : v; if (sh[y * w + x] < 0.5) known++; } }
+  if (ign && known < w * h * 0.06) sh.set(own); // 참고할 곳이 거의 안 남으면 가리지 않고 메워요
   const r = await dpFill(sp, sh, w, h, tk), o = new Uint8ClampedArray(px);
-  for (let y = 0; y < h; y++) o.set(r.px.subarray(y * w * 4, (y + 1) * w * 4), ((y + y0) * W + x0) * 4);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const a = own[y * w + x]; if (a <= 0) continue; const q = (y * w + x) * 4, j = ((y + y0) * W + x + x0) * 4; for (let c = 0; c < 3; c++) o[j + c] = px[j + c] * (1 - a) + r.px[q + c] * a; }
   return o;
 }
+// 부위를 떼어 내서 새로 드러난 배경(R: 0~255)을 그 둘레의 진짜 배경만 보고 다시 메워요.
+// (처음에 캐릭터 전체를 한꺼번에 지우고 메운 배경은 가운데로 갈수록 엉터리라서, 드러난 자리만 가까이에서 다시)
+async function rgRefillBg(rig, R, chars, tk) {
+  const { W, H } = rig, n = W * H, b = rgBBox(R, W, H, 128); if (!b || rig.by === 'smooth') return false;
+  const un = new Float32Array(n); for (const c of chars) for (const L of c.layers) { const A = rgAlpha(L, W, H); for (let i = 0; i < n; i++) if (A[i] > 20) un[i] = 1; } for (let i = 0; i < n; i++) if (R[i] > 20) un[i] = 1;
+  const grow = dpBox(un, W, H, Math.max(3, Math.round(Math.max(W, H) / 110))), hole = new Float32Array(n); for (let i = 0; i < n; i++) hole[i] = clamp(grow[i] * 5, 0, 1);
+  const bid = rig.bg.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, W, H), px = bid.data;
+  for (const padK of [0.7, 1.6, 3]) {
+    const pad = Math.max(48, Math.round(Math.max(b.w, b.h) * padK)), x0 = Math.max(0, b.x - pad), y0 = Math.max(0, b.y - pad), x1 = Math.min(W, b.x + b.w + pad), y1 = Math.min(H, b.y + b.h + pad), w = x1 - x0, h = y1 - y0;
+    const sp = new Uint8ClampedArray(w * h * 4), sh = new Float32Array(w * h); let known = 0;
+    for (let y = 0; y < h; y++) { sp.set(px.subarray(((y + y0) * W + x0) * 4, ((y + y0) * W + x1) * 4), y * w * 4); for (let x = 0; x < w; x++) { const v = hole[(y + y0) * W + x + x0]; sh[y * w + x] = v; if (v < 0.5) known++; } }
+    if (known < w * h * 0.15 && padK < 3) continue; if (known < w * h * 0.06) return false; // 둘레에 진짜 배경이 거의 없으면 그대로 둬요
+    const r = await dpFill(sp, sh, w, h, tk), rf = new Float32Array(n); for (let i = 0; i < n; i++) rf[i] = R[i] / 255; const use = dpBox(rf, W, H, Math.max(3, Math.round(Math.max(W, H) / 200)));
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const i = (y + y0) * W + x + x0, a = clamp(use[i] * 3, 0, 1) * hole[i]; if (a <= 0) continue; const q = (y * w + x) * 4; for (let c = 0; c < 3; c++) px[i * 4 + c] = px[i * 4 + c] * (1 - a) + r.px[q + c] * a; }
+    const nb = newCanvas(W, H); nb.getContext('2d').putImageData(bid, 0, 0); for (const c of chars) c.bg = nb; rig.bg = nb; return true;
+  }
+  return false;
+}
+// 메운 자리 기록(0~255)을 더하기: 나중에 '메운 자리만' 더 좋은 그림으로 바꿔 넣을 수 있게
+const rgAddFill = (L, add, n) => { const f = new Uint8ClampedArray(n); if (L.fillM) f.set(L.fillM); for (let i = 0; i < n; i++) if (add[i] > f[i]) f[i] = add[i]; L.fillM = f; };
 // 구멍 둘레 배경이 밋밋한지 (단색·부드러운 그라데이션이면 AI 지우개보다 번져 메우는 쪽이 자국이 안 남아요)
 function rgFlatAround(px, hole, W, H) {
   const n = W * H, near = dpBox(hole, W, H, Math.max(4, Math.round(Math.max(W, H) / 40))); let c = 0, s = 0, s2 = 0, e = 0;
@@ -523,7 +545,7 @@ function rgSmoothFill(px, hole, W, H) { // 둘레 색을 여러 크기로 번져
   return out;
 }
 // 몸 앞에 겹친 팔은 알아서 떼어 내요 (안 떼면 팔을 움직일 때 몸까지 같이 끌려가요)
-async function rgAutoParts(rig, tk) {
+async function rgAutoParts(rig, tk, chars) {
   const { W, H } = rig, J = rig.joints, made = []; if (!rig.autoSk || rig.stdOff) return made;
   const sw = Math.hypot(J.aSho.x - J.bSho.x, J.aSho.y - J.bSho.y), th = sw * 0.34;
   for (const pre of ['a', 'b']) {
@@ -540,7 +562,7 @@ async function rgAutoParts(rig, tk) {
     let an = 0, it = 0; for (let i = 0; i < N.length; i++) { if (A[i] < 128) N[i] = 0; if (N[i] > 128) { an++; if (M[i]) it++; } }
     const inN = p => N[clamp(Math.round(p.y), 0, H - 1) * W + clamp(Math.round(p.x), 0, W - 1)] > 128;
     if (an > am * 4.5 || it < am * 0.55 || inN(J.chest) || inN(J.spine) || inN(J.neck) || inN(J[pre === 'a' ? 'bSho' : 'aSho'])) continue;
-    const L = await rgSplit(rig, base, N, rgSideName(rig, pre === 'a' ? 'armA' : 'armB') + (up ? '' : ' 아래쪽'), tk); if (L) { L.auto = true; made.push(L); }
+    const L = await rgSplit(rig, base, N, rgSideName(rig, pre === 'a' ? 'armA' : 'armB') + (up ? '' : ' 아래쪽'), tk, chars); if (L) { L.auto = true; made.push(L); }
   }
   return made;
 }
@@ -669,9 +691,10 @@ async function rgFillBehind(sh, tex, M, tk) {
   const bgd = sh.bg.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, W, H).data, comp = new Uint8ClampedArray(n * 4);
   for (let i = 0; i < n; i++) { const j = i * 4, a = rem[i] / 255; comp[j] = d[j] * a + bgd[j] * (1 - a); comp[j + 1] = d[j + 1] * a + bgd[j + 1] * (1 - a); comp[j + 2] = d[j + 2] * a + bgd[j + 2] * (1 - a); comp[j + 3] = 255; }
   const hole = new Float32Array(n); for (let i = 0; i < n; i++) hole[i] = enc[i] * (1 - rem[i] / 255);
-  const filled = await rgFillRegion(comp, hole, W, H, tk);
-  for (let i = 0; i < n; i++) { const j = i * 4, e = hole[i]; if (e > 0.02) { d[j] = filled[j]; d[j + 1] = filled[j + 1]; d[j + 2] = filled[j + 2]; d[j + 3] = Math.max(rem[i], Math.round(enc[i] * 255)); } }
-  const c = newCanvas(W, H); c.getContext('2d').putImageData(id, 0, 0); return c;
+  const ign = new Float32Array(n); for (let i = 0; i < n; i++) ign[i] = M[i] > 40 && rem[i] < 128 ? 1 : 0;
+  const filled = await rgFillRegion(comp, hole, W, H, tk, ign), fm = new Uint8ClampedArray(n);
+  for (let i = 0; i < n; i++) { const j = i * 4, e = hole[i]; if (e > 0.02) { d[j] = filled[j]; d[j + 1] = filled[j + 1]; d[j + 2] = filled[j + 2]; d[j + 3] = Math.max(rem[i], Math.round(enc[i] * 255)); fm[i] = Math.round(e * 255); } }
+  const c = newCanvas(W, H); c.getContext('2d').putImageData(id, 0, 0); c.rgFill = fm; return c;
 }
 // 입 찾기: 두 눈 아래쪽에서 살색과 다른(어둡거나 붉은) 가로 덩어리. 못 찾으면 어림한 자리(est)
 function rgFindMouth(src, W, H, eyes) {
@@ -742,14 +765,15 @@ async function rgPrepare(src, sw, sh0, tk) {
   for (let i = 0; i < people.length; i++) {
     const P = people[i]; tk && tk.set(people.length > 1 ? `캐릭터 ${i + 1} 준비하는 중…` : '눈을 찾는 중…', 0.6 + 0.1 * i / people.length);
     let tex = rgCutTex(px, P.A, W, H);
-    if (people.length > 1) { const M = new Uint8ClampedArray(n); for (const O of people) if (O !== P) for (let q = 0; q < n; q++) if (O.A[q] > M[q]) M[q] = O.A[q]; tex = await soft(() => rgFillBehind(sh, tex, M, tk), tex); stopQ(); }
+    let fillM = null;
+    if (people.length > 1) { const M = new Uint8ClampedArray(n); for (const O of people) if (O !== P) for (let q = 0; q < n; q++) if (O.A[q] > M[q]) M[q] = O.A[q]; tex = await soft(() => rgFillBehind(sh, tex, M, tk), tex); fillM = tex.rgFill || null; stopQ(); }
     const sk = rgSkeleton(P.K, W, H, P.box), eyes = await soft(() => rgFindEyes(c, W, H, sk, P.box, tk), []); stopQ();
-    chars.push(rgNewChar(sh, tex, sk, eyes, i));
+    chars.push(rgNewChar(sh, tex, sk, eyes, i)); if (fillM) chars[chars.length - 1].layers[0].fillM = fillM;
   }
   // 왼쪽부터 번호를 붙여요
   [...chars].sort((a, b) => a.joints.chest.x - b.joints.chest.x).forEach((r, i) => { r.cname = '캐릭터 ' + (i + 1); });
   const main = chars[0]; main.more = chars.slice(1); main.autoParts = [];
-  for (const r of chars) { const made = await soft(() => rgAutoParts(r, tk), []); stopQ(); for (const L of made) main.autoParts.push((chars.length > 1 ? r.cname + ' ' : '') + L.name); }
+  for (const r of chars) { const made = await soft(() => rgAutoParts(r, tk, chars), []); stopQ(); for (const L of made) main.autoParts.push((chars.length > 1 ? r.cname + ' ' : '') + L.name); }
   tk && tk.set('그물을 씌우는 중…', 0.95);
   for (const r of chars) for (const L of r.layers) rgBuildLayer(r, L);
   return main;
@@ -799,7 +823,7 @@ function rgEnclosedGrid(rig, rem, M) {
   const d = g2.getImageData(0, 0, W, H).data, out = new Float32Array(W * H); for (let i = 0; i < W * H; i++) out[i] = M[i] > 0 ? clamp((d[i * 4 + 3] / 255 - 0.25) * 2, 0, 1) : 0;
   return out;
 }
-async function rgSplit(rig, L, M, name, tk) {
+async function rgSplit(rig, L, M, name, tk, chars) {
   const { W, H } = rig, n = W * H, id = rgTexPx(L, W, H), d = id.data, part = new ImageData(W, H), pd = part.data, rem = new Uint8Array(n); let cnt = 0;
   for (let i = 0; i < n; i++) { const j = i * 4, a = d[j + 3], m = M[i] / 255, pa = Math.round(a * m); if (pa > 0) { pd[j] = d[j]; pd[j + 1] = d[j + 1]; pd[j + 2] = d[j + 2]; pd[j + 3] = pa; if (pa > 128) cnt++; } rem[i] = Math.round(a * (1 - m)); }
   if (cnt < 30) return null;
@@ -808,9 +832,15 @@ async function rgSplit(rig, L, M, name, tk) {
   const bgd = rig.bg.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, W, H).data, comp = new Uint8ClampedArray(n * 4);
   for (let i = 0; i < n; i++) { const j = i * 4, a = rem[i] / 255; comp[j] = d[j] * a + bgd[j] * (1 - a); comp[j + 1] = d[j + 1] * a + bgd[j + 1] * (1 - a); comp[j + 2] = d[j + 2] * a + bgd[j + 2] * (1 - a); comp[j + 3] = 255; }
   let filled = comp;
-  if (en > 20) { tk && tk.set('떼어 낸 자리를 메우는 중…', 0.5); filled = await rgFillRegion(comp, enc, W, H, tk); }
-  for (let i = 0; i < n; i++) { const j = i * 4, e = enc[i]; if (e > 0.02) { d[j] = filled[j]; d[j + 1] = filled[j + 1]; d[j + 2] = filled[j + 2]; } d[j + 3] = Math.max(rem[i], Math.round(e * 255)); }
-  rgSetTex(L, id);
+  if (en > 20) { // 떼어 낸 부위가 있던 자리 전체(조금 넓혀서)는 AI가 참고하지 못하게 가리고, 남은 몸과 진짜 배경만 보고 메워요
+    tk && tk.set('떼어 낸 자리를 메우는 중…', 0.5); const mf = new Float32Array(n); for (let i = 0; i < n; i++) mf[i] = M[i] / 255; const mb = dpBox(mf, W, H, 3), ign = new Float32Array(n); for (let i = 0; i < n; i++) ign[i] = mb[i] > 0.02 ? 1 : 0;
+    filled = await rgFillRegion(comp, enc, W, H, tk, ign);
+  }
+  const fm = new Uint8ClampedArray(n);
+  for (let i = 0; i < n; i++) { const j = i * 4, e = enc[i]; if (e > 0.02) { d[j] = filled[j]; d[j + 1] = filled[j + 1]; d[j + 2] = filled[j + 2]; fm[i] = Math.round(e * 255); } d[j + 3] = Math.max(rem[i], Math.round(e * 255)); }
+  const oldFill = L.fillM; rgSetTex(L, id); L.fillM = oldFill; rgAddFill(L, fm, n);
+  // 새로 드러난 배경(떼어 낸 자리 중 몸으로 메우지 않은 곳)도 가까이에서 다시 메워요
+  try { const R = new Uint8ClampedArray(n); let rn = 0; for (let i = 0; i < n; i++) if (M[i] > 128 && enc[i] < 0.5 && pd[i * 4 + 3] > 128) { R[i] = 255; rn++; } if (rn > 60) { tk && tk.set('드러난 배경을 다시 메우는 중…', 0.8); await rgRefillBg(rig, R, chars || [rig], tk); } } catch (e) { if (String(e && e.message) === 'stop') throw e; console.warn('rgRefillBg', e); }
   const N = { id: 'p' + uid(), name: name || '부위', z: Math.max(...rig.layers.map(l => l.z || 0)) + 1, bind: [], follow: null }; rgSetTex(N, part);
   // 이 부위 안을 지나가는 뼈는 이 부위가 가져가요
   const A = rgAlpha(N, W, H);
@@ -852,12 +882,33 @@ async function rgSamRefine(rig, M, tk) {
   return rgUpMask(bin, tw, th, W, H);
 }
 
+/* ---- 메운 자리를 더 좋은 그림으로: 내보내서 NAI 인페인트 등으로 다시 그린 뒤 불러와요 ---- */
+// what: 층(L) 또는 'bg'. → { pic(다른 부위를 뺀 그림), mask(흰 곳 = 메운 자리), any(메운 자리가 있는지) }
+function rgFillExport(main, rig, what) {
+  const { W, H } = main, n = W * H, pic = newCanvas(W, H), g = pic.getContext('2d'), M = new Uint8ClampedArray(n); let any = 0;
+  g.drawImage(main.bg, 0, 0);
+  if (what === 'bg') { const un = new Float32Array(n); for (const c of rgChars(main)) for (const L of c.layers) { const A = rgAlpha(L, W, H); for (let i = 0; i < n; i++) if (A[i] > 20) un[i] = 1; } const gr = dpBox(un, W, H, Math.max(3, Math.round(Math.max(W, H) / 110))); for (let i = 0; i < n; i++) { M[i] = gr[i] > 0.02 ? 255 : 0; if (M[i]) any++; } }
+  else { g.drawImage(what.tex, 0, 0); if (what.fillM) for (let i = 0; i < n; i++) { M[i] = what.fillM[i] > 20 ? 255 : 0; if (M[i]) any++; } }
+  const mask = newCanvas(W, H), mg = mask.getContext('2d'), mi = mg.createImageData(W, H); for (let i = 0; i < n; i++) { mi.data[i * 4] = mi.data[i * 4 + 1] = mi.data[i * 4 + 2] = M[i]; mi.data[i * 4 + 3] = 255; } mg.putImageData(mi, 0, 0);
+  return { pic, mask, M, any };
+}
+// 불러온 그림(img)을 넣기: 메운 자리가 기록돼 있으면 그 자리만(가장자리는 부드럽게), 없으면 그 층이 보이는 곳 전체
+function rgFillImport(main, rig, what, img) {
+  const { W, H } = main, n = W * H, c = newCanvas(W, H), g = c.getContext('2d', { willReadFrequently: true }); g.imageSmoothingQuality = 'high'; g.drawImage(img, 0, 0, W, H);
+  const nd = g.getImageData(0, 0, W, H).data, ex = rgFillExport(main, rig, what), wf = new Float32Array(n);
+  if (what === 'bg' || ex.any) { for (let i = 0; i < n; i++) wf[i] = ex.M[i] / 255; const b = dpBox(wf, W, H, 2); for (let i = 0; i < n; i++) wf[i] = clamp(b[i] * 2.2, 0, 1); } else wf.fill(1);
+  if (what === 'bg') { const id = main.bg.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, W, H), d = id.data; for (let i = 0; i < n; i++) { const a = wf[i]; if (a > 0) for (let k = 0; k < 3; k++) d[i * 4 + k] = d[i * 4 + k] * (1 - a) + nd[i * 4 + k] * a; } const nb = newCanvas(W, H); nb.getContext('2d').putImageData(id, 0, 0); for (const ch of rgChars(main)) ch.bg = nb; return true; }
+  const id = rgTexPx(what, W, H), d = id.data; for (let i = 0; i < n; i++) { const a = wf[i]; if (a > 0 && d[i * 4 + 3] > 0) for (let k = 0; k < 3; k++) d[i * 4 + k] = d[i * 4 + k] * (1 - a) + nd[i * 4 + k] * a; }
+  const keep = what.fillM; rgSetTex(what, id); what.fillM = keep; rig.ver++; return true;
+}
+
 /* ---- 보관: 이어서 고칠 수 있게 작업을 통째로 저장 (IndexedDB kv 'rig:작업:이름') ---- */
 const rgBlob = (c, type, q) => new Promise(r => c.toBlob(r, type, q));
 async function rgStore(main, key) {
   if (!key) return false; const chars = [];
   for (const rig of rgChars(main)) {
-    const layers = []; for (const L of rig.layers) { if (!L.blob || L.blobOf !== L.tex) { L.blob = await rgBlob(L.tex, 'image/png'); L.blobOf = L.tex; } layers.push({ id: L.id, name: L.name, base: !!L.base, z: L.z || 0, bind: L.bind || null, follow: L.follow || null, hide: !!L.hide, blob: L.blob }); }
+    const layers = []; for (const L of rig.layers) { if (!L.blob || L.blobOf !== L.tex) { L.blob = await rgBlob(L.tex, 'image/png'); L.blobOf = L.tex; } if (L.fillM && L.fillBlobOf !== L.fillM) { const fc = newCanvas(rig.W, rig.H), fg = fc.getContext('2d'), fi = fg.createImageData(rig.W, rig.H); for (let i = 0; i < L.fillM.length; i++) { fi.data[i * 4] = fi.data[i * 4 + 1] = fi.data[i * 4 + 2] = L.fillM[i]; fi.data[i * 4 + 3] = 255; } fg.putImageData(fi, 0, 0); L.fillBlob = await rgBlob(fc, 'image/png'); L.fillBlobOf = L.fillM; }
+      layers.push({ id: L.id, name: L.name, base: !!L.base, z: L.z || 0, bind: L.bind || null, follow: L.follow || null, hide: !!L.hide, blob: L.blob, fill: L.fillM ? L.fillBlob : null }); }
     chars.push({ cid: rig.cid, cname: rig.cname, cz: rig.cz || 0, joints: rig.joints, conf: rig.conf, autoSk: rig.autoSk, stdOff: !!rig.stdOff, chains: rig.chains || [], zs: rig.zs, pins: rig.pins.map(p => ({ id: p.id, x: p.x, y: p.y, r: p.r })), eyes: rig.eyes, mouth: rig.mouth || null, anim: rig.anim, layers });
   }
   if (!main.srcBlob) main.srcBlob = await rgBlob(main.src, 'image/webp', 0.95);
@@ -872,7 +923,7 @@ async function rgRestore(key) {
     for (let i = 0; i < list.length; i++) {
       const q = list[i], rig = { ...sh, cid: q.cid || 'c' + uid(), cname: q.cname || '캐릭터 ' + (i + 1), cz: q.cz || 0, joints: q.joints, conf: q.conf, autoSk: q.autoSk, stdOff: !!q.stdOff, chains: q.chains || [], zs: q.zs || {}, pins: q.pins || [], eyes: q.eyes || [], mouth: q.mouth === undefined ? rgFindMouth(src, d.W, d.H, q.eyes || []) : q.mouth, anim: q.anim, ver: 1, layers: [] };
       if (rig.anim.auto.talk === undefined) rig.anim.auto.talk = 0;
-      for (const l of q.layers) { const tex = await cv(l.blob); rig.layers.push({ id: l.id, name: l.name, base: l.base, z: l.z, bind: l.bind, follow: l.follow, hide: l.hide, tex, blob: l.blob, blobOf: tex }); }
+      for (const l of q.layers) { const tex = await cv(l.blob), L = { id: l.id, name: l.name, base: l.base, z: l.z, bind: l.bind, follow: l.follow, hide: l.hide, tex, blob: l.blob, blobOf: tex }; if (l.fill) { const fd = (await cv(l.fill)).getContext('2d', { willReadFrequently: true }).getImageData(0, 0, d.W, d.H).data, f = new Uint8ClampedArray(d.W * d.H); for (let i = 0; i < f.length; i++) f[i] = fd[i * 4]; L.fillM = f; L.fillBlob = l.fill; L.fillBlobOf = f; } rig.layers.push(L); }
       chars.push(rig);
     }
     const main = chars[0]; main.more = chars.slice(1); main.out = d.out || null; main.srcBlob = d.src; main.bgBlob = d.bg; main.bgBlobOf = bg;
@@ -1013,6 +1064,7 @@ function rgWindow(main, from) {
     g.strokeStyle = 'rgba(120,130,150,.55)'; g.lineWidth = 1; g.strokeRect(X(0) + 0.5, Y(0) + 0.5, rig.W * st.view.k, rig.H * st.view.k);
     if (st.mode === 'part') {
       if (st.pm && st.pmAny) { g.save(); g.globalAlpha = 0.5; g.imageSmoothingEnabled = true; g.drawImage(st.pm, X(0), Y(0), rig.W * st.view.k, rig.H * st.view.k); g.restore(); }
+      if (st.showFill) { const L = rig.layers.find(l => l.id === st.selLayer) || base(); if (L.fillM) { if (!st.fillC || st.fillOf !== L.fillM) { const fc = newCanvas(rig.W, rig.H), fg = fc.getContext('2d'), fi = fg.createImageData(rig.W, rig.H); for (let i = 0; i < L.fillM.length; i++) { fi.data[i * 4] = 60; fi.data[i * 4 + 1] = 220; fi.data[i * 4 + 2] = 255; fi.data[i * 4 + 3] = L.fillM[i]; } fg.putImageData(fi, 0, 0); st.fillC = fc; st.fillOf = L.fillM; } g.save(); g.globalAlpha = 0.45; g.drawImage(st.fillC, X(0), Y(0), rig.W * st.view.k, rig.H * st.view.k); g.restore(); } }
       if (st.pmTmp && st.tmpAny) { g.save(); g.globalAlpha = 0.22; g.drawImage(st.pmTmp, X(0), Y(0), rig.W * st.view.k, rig.H * st.view.k); g.restore(); }
       if (st.cur) { g.beginPath(); g.arc(st.cur.x, st.cur.y, st.bsize / 2 * d, 0, 7); g.strokeStyle = '#fff'; g.lineWidth = 1.5 * d; g.stroke(); g.strokeStyle = 'rgba(0,0,0,.6)'; g.lineWidth = 0.75 * d; g.stroke(); }
     }
@@ -1138,9 +1190,15 @@ function rgWindow(main, from) {
         <div class="btnrow"><button class="btn sm" data-rga="carve" title="캐릭터가 아닌데 같이 따진 곳을 배경으로 돌려보내요">캐릭터에서 빼기</button><button class="btn sm" data-rga="uncarve" title="캐릭터인데 빠진 곳을 원래 그림에서 가져와요">캐릭터에 넣기</button></div></div>
         <div class="sec"><h3>부위 목록</h3><p class="muted small">위에 있을수록 앞에 그려요.</p><div class="rg-layers">${[...rig.layers].sort((x, y) => (y.z || 0) - (x.z || 0)).map(l => `<div class="rg-ly ${l.id === L.id ? 'on' : ''}" data-rgly="${l.id}"><button class="ic" data-rgeye="${l.id}" title="보이기·숨기기">${l.hide ? '○' : '●'}</button><span class="nm">${esc(l.name)}</span><button class="ic" data-rgup="${l.id}" title="앞으로">▲</button><button class="ic" data-rgdn="${l.id}" title="뒤로">▼</button></div>`).join('')}</div>
         <label class="chk"><input type="checkbox" data-rga2="solo" ${st.solo ? 'checked' : ''}> 고른 부위만 보기</label>
+        <label class="chk" title="AI가 메운 자리를 하늘색으로 보여 줘요"><input type="checkbox" data-rga2="showfill" ${st.showFill ? 'checked' : ''}> 메운 자리 보기</label>
         ${L.base ? '' : `<div class="grid2 rg-g" style="margin-top:6px"><span title="이 부위가 어느 관절을 따라 움직일지">따라갈 곳</span><span><select data-rgfollow><option value="">알아서${L.bind && L.bind.length ? ' (' + L.bind.map(i => rgJName(rig, i)).join('·') + ')' : L.stuck ? ' (' + selName(L.stuck) + ')' : ''}</option>${RG_IDS.filter(i => i !== 'fix' && rgOn(rig, i) && rgKids(rig, i).length).map(i => `<option value="${i}" ${L.follow === i ? 'selected' : ''}>${esc(selName(i))}</option>`).join('')}</select></span></div>
         <div class="btnrow"><button class="btn sm" data-rga="rename">이름 바꾸기</button><button class="btn sm" data-rga="merge" title="떼어 낸 부위를 다시 몸에 붙여요">몸에 다시 합치기</button></div>`}</div>`;
     }
+    if (st.mode === 'part') { const L = rig.layers.find(l => l.id === st.selLayer) || base();
+      h += `<div class="sec"><h3>메운 자리 더 좋게 (NAI 등)</h3><p class="muted small">AI가 메운 자리가 흐릿하면: <b>내보내기</b>로 그림과 '메울 자리'(흰 곳) 그림을 받아, NAI 인페인트 등에서 그 자리를 다시 그린 뒤 <b>불러오기</b>로 넣어요. 메운 자리만 바뀌고 나머지는 그대로예요.</p>
+        <div class="grid2 rg-g"><span>${esc(L.name)}</span><span class="btnrow" style="margin:0"><button class="btn sm" data-rgfx="layer">내보내기</button><button class="btn sm" data-rgfi="layer">불러오기</button></span>
+        <span>배경</span><span class="btnrow" style="margin:0"><button class="btn sm" data-rgfx="bg">내보내기</button><button class="btn sm" data-rgfi="bg">불러오기</button></span></div>
+        ${L.fillM ? '' : `<p class="muted small" style="margin-top:6px">'${esc(L.name)}'에는 메운 자리가 없어요. 불러오면 이 부위가 보이는 곳 전체가 바뀌어요.</p>`}</div>`; }
     side.innerHTML = h;
   }
   const editPose = fn => { const k = keyHere(true); fn(k.p); dirty(); };
@@ -1163,6 +1221,7 @@ function rgWindow(main, from) {
     else if (t.dataset.rgmo === 'on' && rig.mouth) { snap(); rig.mouth.on = t.checked; dirty(); }
     else if (t.dataset.rgmo === 'type' && rig.mouth) { snap(); rig.mouth.type = t.value; dirty(); }
     else if (t.dataset.rga2 === 'solo') { st.solo = t.checked; dirty(); }
+    else if (t.dataset.rga2 === 'showfill') { st.showFill = t.checked; dirty(); }
     else if (t.dataset.rgfollow !== undefined) { const L = rig.layers.find(l => l.id === st.selLayer); if (!L || L.base) return; snap(); L.follow = t.value || null; if (L.follow) L.bind = []; rig.ver++; renderSide(); dirty(); }
   });
   // 켠 팔·다리의 관절이 한 점에 뭉쳐 있으면 보기 좋게 펴 놓아요
@@ -1176,6 +1235,13 @@ function rgWindow(main, from) {
   side.addEventListener('click', async e => {
     const b = e.target.closest('button'), ly = e.target.closest('[data-rgly]'); if (st.busy) return;
     if (b && b.dataset.rgm2) { setMode(b.dataset.rgm2); return; }
+    if (b && (b.dataset.rgfx || b.dataset.rgfi)) {
+      const isBg = (b.dataset.rgfx || b.dataset.rgfi) === 'bg', L = rig.layers.find(l => l.id === st.selLayer) || base(), what = isBg ? 'bg' : L, nm = safeName((from.name || '그림').replace(/\.[^.]+$/, '') + '_' + (isBg ? '배경' : (chars().length > 1 ? rig.cname + '_' : '') + L.name));
+      if (b.dataset.rgfx) { const ex = rgFillExport(main, rig, what), r = await saveFiles([{ name: nm + '.png', blob: await rgBlob(ex.pic, 'image/png') }, { name: nm + '_메울자리.png', blob: await rgBlob(ex.mask, 'image/png') }], nm + '.zip'); if (r) toast(`그림 두 장을 저장했어요. '${nm}.png'를 NAI 인페인트에 넣고 '_메울자리' 그림의 흰 곳을 칠해 다시 그린 뒤, 불러오기로 넣어 주세요.${ex.any ? '' : ' (메운 자리가 없어서 메울 자리 그림은 까매요)'}`, 9000); return; }
+      const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'image/*';
+      inp.addEventListener('change', async () => { const f = inp.files && inp.files[0]; if (!f) return; try { const bm = await createImageBitmap(f), r0 = bm.width / bm.height, r1 = main.W / main.H; if (Math.abs(r0 - r1) / r1 > 0.03 && !(await rgAsk('불러온 그림의 가로세로 비율이 달라요. 늘여서 맞추면 어긋날 수 있어요. 그래도 넣을까요?'))) return; snap(); rgFillImport(main, rig, what, bm); renderSide(); dirty(); toast((isBg ? '배경' : `'${L.name}'`) + '에 불러온 그림을 넣었어요. 마음에 안 들면 Ctrl+Z'); } catch (e) { console.warn(e); toast('그림을 읽지 못했어요'); } });
+      inp.click(); return;
+    }
     if (b && b.dataset.rgch) { chainStart(b.dataset.rgch); toast(rgDraftName(st.draft) + '. 다 찍으면 Enter, 그만두려면 Esc', 4200); return; }
     if (b && b.dataset.rgchdel) { if (await rgAsk('이 뼈를 지울까요? 이 뼈로 만든 자세도 같이 지워져요.')) chainDel(b.dataset.rgchdel); return; }
     if (b && b.dataset.rgchsplit) {
@@ -1189,7 +1255,7 @@ function rgWindow(main, from) {
         let N = await rgSamRefine(rig, M, tk), an = 0; if (N) { for (let i = 0; i < N.length; i++) { if (A[i] < 20) N[i] = 0; if (N[i] > 128) an++; } }
         // AI 윤곽이 너무 크거나(몸 전체) 작으면, 뼈를 따라 그은 띠를 그대로 써요
         if (!N || an > am * 3.5 || an < am * 0.5) N = M; else { const f = new Float32Array(M.length); for (let i = 0; i < M.length; i++) f[i] = M[i] / 255; const bl = dpBox(f, W, H, Math.max(3, Math.round(len * 0.05))); for (let i = 0; i < N.length; i++) if (bl[i] > 0.97) N[i] = Math.max(N[i], A[i]); }
-        const before = shot(), P = await rgSplit(rig, L0, N, c.name, tk); if (!P) { toast('떼어 낼 곳을 찾지 못했어요'); return; }
+        const before = shot(), P = await rgSplit(rig, L0, N, c.name, tk, chars()); if (!P) { toast('떼어 낼 곳을 찾지 못했어요'); return; }
         P.bind = [...new Set([...(P.bind || []), ...ids.slice(0, -1)])]; rig.ver++; st.undo.push(before); st.redo.length = 0;
         toast(`'${c.name}' 부분을 따로 떼어 냈어요. 모자라거나 넘친 곳은 ② 부위 나누기에서 고칠 수 있어요.`, 4600);
       }); return;
@@ -1226,7 +1292,7 @@ function rgWindow(main, from) {
     else if (act === 'newchar') {
       const M = pmMask(); if (!M) { toast('먼저 따로 떼어 낼 캐릭터를 붓으로 칠해 주세요 (붙어 있는 캐릭터 찾기를 쓰면 편해요)', 4200); return; } if (chars().length >= 4) { toast('캐릭터는 4명까지 나눌 수 있어요'); return; }
       busy('새 캐릭터로 나누는 중…', async tk => {
-        const before = shot(), old = rig, N = await rgSplit(rig, base(), M, '몸 전체', tk); if (!N) { toast('칠한 곳에 캐릭터가 거의 없어요'); return; }
+        const before = shot(), old = rig, N = await rgSplit(rig, base(), M, '몸 전체', tk, chars()); if (!N) { toast('칠한 곳에 캐릭터가 거의 없어요'); return; }
         rig.layers.splice(rig.layers.indexOf(N), 1); rig.ver++;
         const W = main.W, H = main.H, found = async (tex, hint) => { const bx = rgBBox(rgAlpha({ tex }, W, H), W, H, 100) || { x: 0, y: 0, w: W, h: H }; let K = null, eyes = []; const only = newCanvas(W, H), og = only.getContext('2d', { willReadFrequently: true }); og.fillStyle = '#8a8a8a'; og.fillRect(0, 0, W, H); og.drawImage(tex, 0, 0); /* 이 캐릭터만 보이는 그림으로 찾아요 */ try { K = await rgPoseRun(only, W, H, bx, tk); } catch (e) { console.warn(e); } const sk = rgSkeleton(K, W, H, bx); try { eyes = await rgFindEyes(only, W, H, sk, bx, tk); } catch (e) { console.warn(e); } const A2 = rgAlpha({ tex }, W, H); eyes = eyes.filter(e => A2[clamp(Math.round(e.y + e.h / 2), 0, H - 1) * W + clamp(Math.round(e.x + e.w / 2), 0, W - 1)] > 100); return { sk, eyes }; };
         tk.set('새 캐릭터의 뼈대를 찾는 중…'); const f = await found(N.tex), c = rgNewChar(main, N.tex, f.sk, f.eyes, chars().length); c.bg = main.bg; c.out = main.out; c.anim.dur = main.anim.dur; c.anim.loop = main.anim.loop; c.cz = Math.max(...chars().map(q => q.cz || 0)) + 1; c.cname = '캐릭터 ' + (chars().length + 1);
@@ -1257,7 +1323,7 @@ function rgWindow(main, from) {
       const L = act === 'uncarve' ? (rig.layers.find(l => l.id === st.selLayer) || base()) : base();
       busy(act === 'split' ? '부위를 떼어 내는 중…' : '고치는 중…', async tk => {
         const before = shot();
-        if (act === 'split') { const name = '부위 ' + rig.layers.length, N = await rgSplit(rig, L, M, name, tk); if (!N) { toast('칠한 곳에 캐릭터가 거의 없어요'); return; } st.undo.push(before); st.redo.length = 0; st.selLayer = N.id; toast(`'${N.name}'을(를) 떼어 냈어요. ③ 움직임 만들기에서 움직여 보세요.${N.bind.length ? '' : ' 뼈가 없는 부위라 가까운 관절을 따라가요.'}`, 4200); }
+        if (act === 'split') { const name = '부위 ' + rig.layers.length, N = await rgSplit(rig, L, M, name, tk, chars()); if (!N) { toast('칠한 곳에 캐릭터가 거의 없어요'); return; } st.undo.push(before); st.redo.length = 0; st.selLayer = N.id; toast(`'${N.name}'을(를) 떼어 냈어요. ③ 움직임 만들기에서 움직여 보세요.${N.bind.length ? '' : ' 뼈가 없는 부위라 가까운 관절을 따라가요.'}`, 4200); }
         else { await rgCarve(rig, L, M, act === 'uncarve', tk); for (const c of chars()) c.bg = rig.bg; st.undo.push(before); st.redo.length = 0; }
         st.pm.getContext('2d').clearRect(0, 0, st.pm.width, st.pm.height); st.pmAny = false;
       });
