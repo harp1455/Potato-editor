@@ -41,14 +41,16 @@ async function rgPoseRun(src, W, H, box, tk) {
 }
 /* ---- AI: 눈 찾기 (애니 눈 탐지) ---- */
 // → [{x, y, w, h, s}] 점수 높은 순. box 안을 긴 쪽 640으로 보고 찾아요
-async function rgEyesRun(src, W, H, box, tk) {
-  await czLoad('eye'); if (tk && tk.stop) throw new Error('stop');
+const rgEyesRun = (src, W, H, box, tk) => rgYolo('eye', src, W, H, box, tk);
+const rgChars = rig => [rig, ...(rig.more || [])]; // 캐릭터가 여럿이면 첫 캐릭터의 more에 나머지가 들어 있어요 (그림·배경·내보내기 설정은 같이 써요)
+async function rgYolo(key, src, W, H, box, tk) {
+  await czLoad(key); if (tk && tk.stop) throw new Error('stop');
   const bx = clamp(Math.floor(box.x), 0, W - 2), by = clamp(Math.floor(box.y), 0, H - 2), bw = clamp(Math.round(box.w), 2, W - bx), bh = clamp(Math.round(box.h), 2, H - by);
   const r = 640 / Math.max(bw, bh), w = Math.max(1, Math.round(bw * r)), h = Math.max(1, Math.round(bh * r)), w32 = Math.ceil(w / 32) * 32, h32 = Math.ceil(h / 32) * 32;
   const c = newCanvas(w32, h32), g = c.getContext('2d', { willReadFrequently: true }); g.fillStyle = 'rgb(114,114,114)'; g.fillRect(0, 0, w32, h32); g.imageSmoothingQuality = 'high'; g.drawImage(src, bx, by, bw, bh, 0, 0, w, h);
   const d = g.getImageData(0, 0, w32, h32).data, n = w32 * h32, x = new Float32Array(3 * n);
   for (let i = 0; i < n; i++) { x[i] = d[i * 4] / 255; x[n + i] = d[i * 4 + 1] / 255; x[2 * n + i] = d[i * 4 + 2] / 255; }
-  const o = await czCall({ t: 'run', key: 'eye', data: x, dims: [1, 3, h32, w32] }, [x.buffer]);
+  const o = await czCall({ t: 'run', key, data: x, dims: [1, 3, h32, w32] }, [x.buffer]);
   const N = o.dims[2], y = o.data, list = [];
   for (let i = 0; i < N; i++) { const s = y[4 * N + i]; if (s < 0.25) continue; const ww = y[2 * N + i] / r, hh = y[3 * N + i] / r; list.push({ x: y[i] / r - ww / 2 + bx, y: y[N + i] / r - hh / 2 + by, w: ww, h: hh, s }); }
   list.sort((a, b) => b.s - a.s); const keep = [];
@@ -245,15 +247,15 @@ function rgPinWeights(rig, L) {
 }
 
 /* ---- 자세: 관절마다 돌리기(r)·밀기(d)·크기(s), 전체 옮기기(tx, ty)·돌리기(rot)·크기(sc), 핀(pins), 눈 감기(blink) ---- */
-const rgPose0 = () => ({ r: {}, d: {}, s: {}, tx: 0, ty: 0, rot: 0, sc: 1, pins: {}, blink: 0 });
-const rgPoseCopy = p => ({ r: { ...p.r }, d: Object.fromEntries(Object.entries(p.d).map(([k, v]) => [k, [v[0], v[1]]])), s: { ...p.s }, tx: p.tx, ty: p.ty, rot: p.rot, sc: p.sc, pins: Object.fromEntries(Object.entries(p.pins).map(([k, v]) => [k, [v[0], v[1]]])), blink: p.blink || 0 });
+const rgPose0 = () => ({ r: {}, d: {}, s: {}, tx: 0, ty: 0, rot: 0, sc: 1, pins: {}, blink: 0, mouth: 0 });
+const rgPoseCopy = p => ({ r: { ...p.r }, d: Object.fromEntries(Object.entries(p.d).map(([k, v]) => [k, [v[0], v[1]]])), s: { ...p.s }, tx: p.tx, ty: p.ty, rot: p.rot, sc: p.sc, pins: Object.fromEntries(Object.entries(p.pins).map(([k, v]) => [k, [v[0], v[1]]])), blink: p.blink || 0, mouth: p.mouth || 0 });
 function rgPoseMix(a, b, t) {
   const o = rgPose0(), L = (x, y) => x + (y - x) * t;
   for (const k of new Set([...Object.keys(a.r), ...Object.keys(b.r)])) o.r[k] = L(a.r[k] || 0, b.r[k] || 0);
   for (const k of new Set([...Object.keys(a.s), ...Object.keys(b.s)])) o.s[k] = L(a.s[k] || 1, b.s[k] || 1);
   for (const k of new Set([...Object.keys(a.d), ...Object.keys(b.d)])) { const p = a.d[k] || [0, 0], q = b.d[k] || [0, 0]; o.d[k] = [L(p[0], q[0]), L(p[1], q[1])]; }
   for (const k of new Set([...Object.keys(a.pins), ...Object.keys(b.pins)])) { const p = a.pins[k] || [0, 0], q = b.pins[k] || [0, 0]; o.pins[k] = [L(p[0], q[0]), L(p[1], q[1])]; }
-  o.tx = L(a.tx, b.tx); o.ty = L(a.ty, b.ty); o.rot = L(a.rot, b.rot); o.sc = L(a.sc, b.sc); o.blink = L(a.blink || 0, b.blink || 0);
+  o.tx = L(a.tx, b.tx); o.ty = L(a.ty, b.ty); o.rot = L(a.rot, b.rot); o.sc = L(a.sc, b.sc); o.blink = L(a.blink || 0, b.blink || 0); o.mouth = L(a.mouth || 0, b.mouth || 0);
   return o;
 }
 const rgEase = (e, t) => e === 'linear' ? t : e === 'hold' ? 0 : e === 'in' ? t * t : e === 'out' ? 1 - (1 - t) * (1 - t) : t * t * (3 - 2 * t);
@@ -288,6 +290,7 @@ function rgPoseAt(rig, t, noAuto) {
   if (a.head) { const w = rgOmega(rig, 5.4), k = 0.05 * a.head / 50; add('neck', k * Math.sin(w * t + 1.1)); mv('head', 0, U * 0.006 * a.head / 50 * Math.sin(2 * w * t)); }
   if (a.bounce) { const w = rgOmega(rig, 1.1), k = U * 0.03 * a.bounce / 50; p.ty -= k * Math.abs(Math.sin(w * t / 2)); }
   p.blink = Math.max(p.blink || 0, rgBlinkAuto(rig, t));
+  if (a.talk) { const A = rig.anim, f = A.loop ? Math.max(1, Math.round(4.6 * A.dur * (a.speed || 100) / 100)) / A.dur : 4.6 * (a.speed || 100) / 100, on = rgHash(Math.floor(t * 1.7) + 7) > 0.22 ? 1 : 0.12, w = Math.pow(Math.abs(Math.sin(Math.PI * f * t)), 0.8) * (0.55 + 0.45 * rgHash(Math.floor(f * t) + 3)); p.mouth = clamp((p.mouth || 0) + w * on * a.talk / 100, -1, 1); }
   return p;
 }
 /* ---- 관절 행렬 [a, b, c, d, e, f]: x' = a·x + c·y + e, y' = b·x + d·y + f ---- */
@@ -355,18 +358,27 @@ function rgGLNew(cv) {
   const pr = gl.createProgram();
   gl.attachShader(pr, sh(gl.VERTEX_SHADER, 'attribute vec2 a_pos; attribute vec2 a_uv; uniform vec4 u_view; varying vec2 v_uv; void main(){ v_uv = a_uv; gl_Position = vec4(a_pos.x * u_view.x + u_view.z, a_pos.y * u_view.y + u_view.w, 0.0, 1.0); }'));
   // 눈 감기: 눈 상자 위쪽 살(눈꺼풀 자리)을 아래로 늘이고, 속눈썹 줄은 그대로 내려요
-  gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, `precision highp float; uniform sampler2D u_tex; uniform vec4 u_eye0; uniform vec4 u_eye1; uniform vec2 u_blink; uniform float u_op; varying vec2 v_uv;
+  // 입 벌리기: 입 상자를 위쪽은 그대로 두고 아래로 늘여요(가운데가 가장 많이). 다문 입(선)은 늘어난 안쪽을 입속 색으로 칠해요. 턱 쪽은 그만큼 눌러요
+  gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, `precision highp float; uniform sampler2D u_tex; uniform vec4 u_eye0; uniform vec4 u_eye1; uniform vec2 u_blink; uniform vec4 u_mouth; uniform vec4 u_mo; uniform vec3 u_mcol; uniform float u_op; varying vec2 v_uv;
+    float tint;
     vec2 lid(vec2 uv, vec4 b, float c0){ float w = b.z - b.x, h = b.w - b.y; if (uv.x <= b.x - w * 0.08 || uv.x >= b.z + w * 0.08) return uv;
       float u = (uv.x - (b.x - w * 0.08)) / (w * 1.16), mx = smoothstep(0.0, 0.2, u) * smoothstep(0.0, 0.2, 1.0 - u), c = c0 * mx;
       float yT = b.y - h * 0.75, lidY = b.y + h * 0.26, band = h * 0.34, yc = mix(lidY, b.w - h * 0.1, c);
       if (uv.y > yT && uv.y < yc) { if (uv.y > yc - band) uv.y -= (yc - lidY); else uv.y = yT + (uv.y - yT) * ((lidY - band) - yT) / max(1e-5, (yc - band) - yT); }
       return uv; }
-    void main(){ vec2 uv = v_uv; if (u_blink.x > 0.0) uv = lid(uv, u_eye0, u_blink.x); if (u_blink.y > 0.0) uv = lid(uv, u_eye1, u_blink.y); gl_FragColor = texture2D(u_tex, uv) * u_op; }`));
+    vec2 mouth(vec2 uv, vec4 b){ float w = b.z - b.x, h = b.w - b.y, px = w * 0.1; if (uv.x <= b.x - px || uv.x >= b.z + px) return uv;
+      float u = (uv.x - (b.x - px)) / (w + 2.0 * px), mx = sin(3.14159265 * clamp(u, 0.0, 1.0)); mx = pow(mx, 0.75);
+      float d = u_mo.x * u_mo.z * mx, y0 = b.y, y1 = b.w, yb = max(y0 + h * 0.3, y1 + d), yE = y1 + u_mo.z * 2.4 + h;
+      if (uv.y > y0 && uv.y < yb) { float q = (uv.y - y0) / (yb - y0); if (d > 0.0) tint = smoothstep(0.08, 0.3, q) * smoothstep(0.06, 0.26, 1.0 - q) * clamp(d / (u_mo.z * 0.3), 0.0, 1.0) * smoothstep(0.0, 0.25, mx); uv.y = y0 + q * (y1 - y0); }
+      else if (uv.y >= yb && uv.y < yE) uv.y = y1 + (uv.y - yb) * (yE - y1) / (yE - yb);
+      return uv; }
+    void main(){ vec2 uv = v_uv; tint = 0.0; if (u_blink.x > 0.0) uv = lid(uv, u_eye0, u_blink.x); if (u_blink.y > 0.0) uv = lid(uv, u_eye1, u_blink.y); if (u_mo.x != 0.0) uv = mouth(uv, u_mouth);
+      vec4 c = texture2D(u_tex, uv); if (tint > 0.0) c.rgb = mix(c.rgb, u_mcol * c.a, tint * u_mo.y); gl_FragColor = c * u_op; }`));
   gl.bindAttribLocation(pr, 0, 'a_pos'); gl.bindAttribLocation(pr, 1, 'a_uv'); gl.linkProgram(pr);
   if (!gl.getProgramParameter(pr, gl.LINK_STATUS)) throw new Error('link');
   if (!v2) gl.getExtension('OES_element_index_uint');
   const U = n => gl.getUniformLocation(pr, n);
-  return { gl, v2, pr, u: { view: U('u_view'), tex: U('u_tex'), eye0: U('u_eye0'), eye1: U('u_eye1'), blink: U('u_blink'), op: U('u_op') }, tex: new Map(), buf: new Map(), quad: null };
+  return { gl, v2, pr, u: { view: U('u_view'), tex: U('u_tex'), eye0: U('u_eye0'), eye1: U('u_eye1'), blink: U('u_blink'), mouth: U('u_mouth'), mo: U('u_mo'), mcol: U('u_mcol'), op: U('u_op') }, tex: new Map(), buf: new Map(), quad: null };
 }
 function rgGLTex(R, cvs) { // 캔버스 → 텍스처 (한 번 올린 건 다시 안 올려요)
   const { gl } = R; let t = R.tex.get(cvs); if (t) return t;
@@ -377,40 +389,44 @@ function rgGLTex(R, cvs) { // 캔버스 → 텍스처 (한 번 올린 건 다시
   R.tex.set(cvs, t); return t;
 }
 function rgGLFree(R) { if (!R) return; const { gl } = R; for (const t of R.tex.values()) gl.deleteTexture(t); for (const b of R.buf.values()) { gl.deleteBuffer(b.pos); gl.deleteBuffer(b.uv); gl.deleteBuffer(b.idx); } R.tex.clear(); R.buf.clear(); const e = gl.getExtension('WEBGL_lose_context'); if (e) e.loseContext(); }
-// view: {k(배율), ox, oy} 작업 그림 좌표 → 캔버스 픽셀. o: {bg: 'fill'|'color'|'none', color, ev(rgEval 결과), t, hide(숨길 층 id 모음), solo}
-function rgGLDraw(R, rig, view, o) {
-  const { gl } = R, cw = gl.canvas.width, ch = gl.canvas.height, W = rig.W, H = rig.H;
+// view: {k(배율), ox, oy} 작업 그림 좌표 → 캔버스 픽셀. o: {bg: 'fill'|'color'|'none', color, evs(캐릭터마다 rgEval 결과), t, solo: {cid, id}}
+function rgGLDraw(R, main, view, o) {
+  const { gl } = R, cw = gl.canvas.width, ch = gl.canvas.height, W = main.W, H = main.H, chars = rgChars(main);
   gl.viewport(0, 0, cw, ch); gl.disable(gl.DEPTH_TEST); gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
   let cc = [0, 0, 0, 0]; if (o.bg === 'color') { const h = (o.color || '#ffffff').replace('#', ''); cc = [parseInt(h.slice(0, 2), 16) / 255, parseInt(h.slice(2, 4), 16) / 255, parseInt(h.slice(4, 6), 16) / 255, 1]; }
   gl.clearColor(cc[0], cc[1], cc[2], cc[3]); gl.clear(gl.COLOR_BUFFER_BIT);
   gl.useProgram(R.pr); gl.uniform4f(R.u.view, 2 * view.k / cw, -2 * view.k / ch, 2 * view.ox / cw - 1, 1 - 2 * view.oy / ch); gl.uniform1i(R.u.tex, 0); gl.activeTexture(gl.TEXTURE0);
   gl.enableVertexAttribArray(0); gl.enableVertexAttribArray(1);
-  gl.uniform2f(R.u.blink, 0, 0); gl.uniform1f(R.u.op, 1);
-  if (o.bg === 'fill' && rig.bg) {
+  gl.uniform2f(R.u.blink, 0, 0); gl.uniform4f(R.u.mo, 0, 0, 0, 0); gl.uniform1f(R.u.op, 1);
+  if (o.bg === 'fill' && main.bg) {
     if (!R.quad) { R.quad = { pos: gl.createBuffer(), uv: gl.createBuffer() }; gl.bindBuffer(gl.ARRAY_BUFFER, R.quad.uv); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 1, 0, 0, 1, 1, 0, 1, 1, 0, 1]), gl.STATIC_DRAW); }
     gl.bindBuffer(gl.ARRAY_BUFFER, R.quad.pos); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, W, 0, 0, H, W, 0, W, H, 0, H]), gl.DYNAMIC_DRAW); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
     gl.bindBuffer(gl.ARRAY_BUFFER, R.quad.uv); gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 0, 0);
-    gl.bindTexture(gl.TEXTURE_2D, rgGLTex(R, rig.bg)); gl.drawArrays(gl.TRIANGLES, 0, 6);
+    gl.bindTexture(gl.TEXTURE_2D, rgGLTex(R, main.bg)); gl.drawArrays(gl.TRIANGLES, 0, 6);
   }
-  const ev = o.ev, bl = ev.pose.blink || 0, E = rig.eyes || [], eb = i => E[i] && E[i].on !== false ? [E[i].x / W, E[i].y / H, (E[i].x + E[i].w) / W, (E[i].y + E[i].h) / H] : [0, 0, 0, 0];
-  gl.uniform4fv(R.u.eye0, eb(0)); gl.uniform4fv(R.u.eye1, eb(1)); gl.uniform2f(R.u.blink, E[0] && E[0].on !== false ? bl : 0, E[1] && E[1].on !== false ? bl : 0);
-  for (const L of [...rig.layers].sort((a, b) => (a.z || 0) - (b.z || 0))) {
-    if (L.hide || (o.solo && o.solo !== L.id)) continue;
-    if (!L.mesh || L.mesh.ver !== rig.ver) rgBuildLayer(rig, L);
-    const m = L.mesh; if (!m.nV) continue; let b = R.buf.get(L.id);
-    if (!b) { b = { pos: gl.createBuffer(), uv: gl.createBuffer(), idx: gl.createBuffer() }; R.buf.set(L.id, b); }
-    if (b.of !== m) { const uv = new Float32Array(m.nV * 2); for (let i = 0; i < m.nV; i++) { uv[i * 2] = m.V[i * 2] / W; uv[i * 2 + 1] = m.V[i * 2 + 1] / H; } gl.bindBuffer(gl.ARRAY_BUFFER, b.uv); gl.bufferData(gl.ARRAY_BUFFER, uv, gl.STATIC_DRAW); b.of = m; b.iVer = -1; }
-    if (b.iVer !== m.iVer) { gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, b.idx); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, m.I, gl.STATIC_DRAW); b.iVer = m.iVer; }
-    const out = rgSkin(rig, L, o.t, ev.pose, ev.lags, ev.still);
-    gl.bindBuffer(gl.ARRAY_BUFFER, b.pos); gl.bufferData(gl.ARRAY_BUFFER, out, gl.DYNAMIC_DRAW); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-    gl.bindBuffer(gl.ARRAY_BUFFER, b.uv); gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 0, 0);
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, b.idx); gl.bindTexture(gl.TEXTURE_2D, rgGLTex(R, L.tex)); gl.uniform1f(R.u.op, L.op === undefined ? 1 : L.op);
-    gl.drawElements(gl.TRIANGLES, m.I.length, m.I instanceof Uint32Array ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT, 0);
+  for (const rig of [...chars].sort((a, b) => (a.cz || 0) - (b.cz || 0))) {
+    const ev = o.evs[chars.indexOf(rig)]; if (!ev || rig.chide || (o.solo && o.solo.cid !== rig.cid)) continue;
+    const bl = ev.pose.blink || 0, E = rig.eyes || [], eb = i => E[i] && E[i].on !== false ? [E[i].x / W, E[i].y / H, (E[i].x + E[i].w) / W, (E[i].y + E[i].h) / H] : [0, 0, 0, 0], Mo = rig.mouth && rig.mouth.on !== false ? rig.mouth : null, mo = Mo ? ev.pose.mouth || 0 : 0;
+    gl.uniform4fv(R.u.eye0, eb(0)); gl.uniform4fv(R.u.eye1, eb(1)); gl.uniform2f(R.u.blink, E[0] && E[0].on !== false ? bl : 0, E[1] && E[1].on !== false ? bl : 0);
+    if (Mo) { const col = Mo.col || [110, 40, 45]; gl.uniform4f(R.u.mouth, Mo.x / W, Mo.y / H, (Mo.x + Mo.w) / W, (Mo.y + Mo.h) / H); gl.uniform4f(R.u.mo, mo, Mo.type === 'open' ? 0 : 1, (mo < 0 ? Mo.h * 0.85 : Math.max(Mo.w * 0.42, Mo.h * 0.5)) / H, 0); gl.uniform3f(R.u.mcol, col[0] / 255, col[1] / 255, col[2] / 255); } else gl.uniform4f(R.u.mo, 0, 0, 0, 0);
+    for (const L of [...rig.layers].sort((a, b) => (a.z || 0) - (b.z || 0))) {
+      if (L.hide || (o.solo && o.solo.id !== L.id)) continue;
+      if (!L.mesh || L.mesh.ver !== rig.ver) rgBuildLayer(rig, L);
+      const m = L.mesh; if (!m.nV) continue; const bk = (rig.cid || '') + ':' + L.id; let b = R.buf.get(bk);
+      if (!b) { b = { pos: gl.createBuffer(), uv: gl.createBuffer(), idx: gl.createBuffer() }; R.buf.set(bk, b); }
+      if (b.of !== m) { const uv = new Float32Array(m.nV * 2); for (let i = 0; i < m.nV; i++) { uv[i * 2] = m.V[i * 2] / W; uv[i * 2 + 1] = m.V[i * 2 + 1] / H; } gl.bindBuffer(gl.ARRAY_BUFFER, b.uv); gl.bufferData(gl.ARRAY_BUFFER, uv, gl.STATIC_DRAW); b.of = m; b.iVer = -1; }
+      if (b.iVer !== m.iVer) { gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, b.idx); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, m.I, gl.STATIC_DRAW); b.iVer = m.iVer; }
+      const out = rgSkin(rig, L, o.t, ev.pose, ev.lags, ev.still);
+      gl.bindBuffer(gl.ARRAY_BUFFER, b.pos); gl.bufferData(gl.ARRAY_BUFFER, out, gl.DYNAMIC_DRAW); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, b.uv); gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, b.idx); gl.bindTexture(gl.TEXTURE_2D, rgGLTex(R, L.tex)); gl.uniform1f(R.u.op, L.op === undefined ? 1 : L.op);
+      gl.drawElements(gl.TRIANGLES, m.I.length, m.I instanceof Uint32Array ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT, 0);
+    }
   }
 }
 
 /* ---- 준비: 그림 → 캐릭터 층 + 메운 배경 + 뼈대 + 눈 ---- */
-const rgNewAnim = () => ({ dur: 3, loop: true, keys: [{ t: 0, e: 'ease', p: rgPose0() }], auto: { breath: 50, sway: 30, head: 30, bounce: 0, wind: 40, follow: 50, blink: 50, speed: 100 } });
+const rgNewAnim = () => ({ dur: 3, loop: true, keys: [{ t: 0, e: 'ease', p: rgPose0() }], auto: { breath: 50, sway: 30, head: 30, bounce: 0, wind: 40, follow: 50, blink: 50, talk: 0, speed: 100 } });
 function rgBBox(A, W, H, thr) { let x0 = W, y0 = H, x1 = -1, y1 = -1; for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (A[y * W + x] > thr) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; } return x1 < 0 ? null : { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 }; }
 // 캐릭터 가장자리에 원래 배경색이 묻어나지 않게: 반투명한 테두리 색을 안쪽 색으로 바꿔요
 function rgCutTex(px, A, W, H) {
@@ -471,38 +487,154 @@ async function rgAutoParts(rig, tk) {
   }
   return made;
 }
-async function rgPrepare(src, sw, sh, tk) {
-  const k = Math.min(1, RG_MAX / Math.max(sw, sh)), W = Math.max(8, Math.round(sw * k)), H = Math.max(8, Math.round(sh * k));
-  const c = newCanvas(W, H), cg = c.getContext('2d', { willReadFrequently: true }); cg.fillStyle = '#fff'; cg.fillRect(0, 0, W, H); cg.imageSmoothingQuality = 'high'; cg.drawImage(src, 0, 0, W, H);
-  const px = cg.getImageData(0, 0, W, H).data, n = W * H;
-  tk && tk.set('캐릭터를 따내는 중…', 0.08);
-  const A0 = await aiMask(c, W, H, tk); if (tk && tk.stop) throw new Error('stop');
-  const bin = new Uint8Array(n); for (let i = 0; i < n; i++) bin[i] = A0[i] > 100 ? 1 : 0;
-  const big = czLargest(bin, W, H); if (!big || big.n < n * 0.004) throw new Error('nochar');
-  // 가장 큰 덩어리(+ 그 둘레의 반투명한 가장자리)만 캐릭터로. 떨어져 있는 다른 것은 배경에 그대로 둬요
-  const nearB = dpBox(Float32Array.from(big.bin), W, H, 3), A = new Uint8ClampedArray(n);
-  for (let i = 0; i < n; i++) A[i] = nearB[i] > 0.01 ? A0[i] : 0;
-  const box = rgBBox(A, W, H, 100);
-  tk && tk.set('뼈대를 찾는 중…', 0.3);
-  let K = null; try { K = await rgPoseRun(c, W, H, box, tk); } catch (e) { if (String(e && e.message) === 'stop') throw e; console.warn('rgPose', e); }
-  if (tk && tk.stop) throw new Error('stop');
-  const sk = rgSkeleton(K, W, H, box);
-  tk && tk.set('눈을 찾는 중…', 0.42);
-  let eyes = []; try { eyes = await rgFindEyes(c, W, H, sk, box, tk); } catch (e) { if (String(e && e.message) === 'stop') throw e; console.warn('rgEyes', e); }
-  tk && tk.set('캐릭터 뒤 배경을 메우는 중…', 0.55);
-  const m = new Float32Array(n); for (let i = 0; i < n; i++) m[i] = A[i] / 255;
-  const mb = dpBox(dpBox(m, W, H, Math.max(3, Math.round(Math.max(W, H) / 90))), W, H, Math.max(2, Math.round(Math.max(W, H) / 180))), hole = new Float32Array(n); for (let i = 0; i < n; i++) hole[i] = clamp(mb[i] * 6, 0, 1);
-  const bgr = rgFlatAround(px, hole, W, H) ? { px: rgSmoothFill(px, hole, W, H), by: 'smooth' } : await dpFill(px, hole, W, H, tk); if (tk && tk.stop) throw new Error('stop');
-  const bg = newCanvas(W, H); bg.getContext('2d').putImageData(new ImageData(bgr.px, W, H), 0, 0);
-  tk && tk.set('그물을 씌우는 중…', 0.92);
-  const g = Math.max(W, H) / 120, rig = { W, H, gw: Math.max(8, Math.round(W / g)), gh: Math.max(8, Math.round(H / g)), src: c, bg, joints: sk.joints, conf: sk.conf, autoSk: sk.auto, zs: {}, pins: [], eyes, anim: rgNewAnim(), ver: 1, by: bgr.by,
-    layers: [{ id: 'body', name: '몸 전체', base: true, z: 0, tex: rgCutTex(px, A, W, H) }] };
+// 그림을 SAM(윤곽 AI)에 한 번 읽혀 두기 → { s(줄인 배율), tw, th }
+async function rgSamEnc(rig, tk) {
+  await czLoad('samE'); await czLoad('samD'); if (tk && tk.stop) throw new Error('stop');
+  const { W, H } = rig, s = 1024 / Math.max(W, H), tw = Math.max(1, Math.round(W * s)), th = Math.max(1, Math.round(H * s)), key = 'rig:' + rig.uid;
+  if (cz.samEnc !== key) {
+    const c = newCanvas(tw, th), gc = c.getContext('2d', { willReadFrequently: true }); gc.imageSmoothingQuality = 'high'; gc.drawImage(rig.src, 0, 0, tw, th);
+    const px = gc.getImageData(0, 0, tw, th).data, x = new Float32Array(tw * th * 3); for (let i = 0, j = 0; i < tw * th; i++, j += 4) { x[i * 3] = px[j]; x[i * 3 + 1] = px[j + 1]; x[i * 3 + 2] = px[j + 2]; }
+    cz.samEnc = ''; await czCall({ t: 'run2', key: 'samE', feeds: { input_image: { data: x, dims: [th, tw, 3] } }, keep: ['image_embeddings'], outs: [] }, [x.buffer]); cz.samEnc = key;
+  }
+  return { s, tw, th };
+}
+// 점·상자(줄인 그림 좌표)로 SAM에 물어보기. pts: [[x, y, 1(이것)|0(아님)]…], box: [x0, y0, x1, y1] → { m(후보마다 점수 지도), nm, iou }
+async function rgSamAsk(E, pts, box) {
+  const np = pts.length + (box ? 2 : 1), pc = new Float32Array(np * 2), pl = new Float32Array(np); pts.forEach(([x, y, l], i) => { pc[i * 2] = x; pc[i * 2 + 1] = y; pl[i] = l; });
+  if (box) { pc[pts.length * 2] = box[0]; pc[pts.length * 2 + 1] = box[1]; pl[pts.length] = 2; pc[pts.length * 2 + 2] = box[2]; pc[pts.length * 2 + 3] = box[3]; pl[pts.length + 1] = 3; } else pl[pts.length] = -1;
+  const r = await czCall({ t: 'run2', key: 'samD', outs: ['masks', 'iou_predictions'], feeds: { image_embeddings: { ref: 'image_embeddings' }, point_coords: { data: pc, dims: [1, np, 2] }, point_labels: { data: pl, dims: [1, np] },
+    mask_input: { data: new Float32Array(256 * 256), dims: [1, 1, 256, 256] }, has_mask_input: { data: new Float32Array([0]), dims: [1] }, orig_im_size: { data: new Float32Array([E.th, E.tw]), dims: [2] } } });
+  return { m: r.out.masks.data, nm: r.out.masks.dims[1] || 1, iou: r.out.iou_predictions ? r.out.iou_predictions.data : null };
+}
+// 줄인 0/1 지도 → 원래 크기 0~255 (가장자리 부드럽게). AI가 망설인 곳의 점박이 무늬와 부스러기는 먼저 정리해요
+function rgUpMask(bin0, tw, th, W, H) {
+  const bl = dpBox(Float32Array.from(bin0), tw, th, 2), bin = new Uint8Array(tw * th); for (let i = 0; i < bin.length; i++) bin[i] = bl[i] > 0.5 ? 1 : 0;
+  { const seen = new Int32Array(tw * th).fill(-1), sizes = []; for (let i0 = 0; i0 < bin.length; i0++) { if (!bin[i0] || seen[i0] >= 0) continue; const id = sizes.length, st = [i0]; seen[i0] = id; let n = 0; while (st.length) { const i = st.pop(), x = i % tw, y = (i / tw) | 0; n++; if (x > 0 && bin[i - 1] && seen[i - 1] < 0) { seen[i - 1] = id; st.push(i - 1); } if (x < tw - 1 && bin[i + 1] && seen[i + 1] < 0) { seen[i + 1] = id; st.push(i + 1); } if (y > 0 && bin[i - tw] && seen[i - tw] < 0) { seen[i - tw] = id; st.push(i - tw); } if (y < th - 1 && bin[i + tw] && seen[i + tw] < 0) { seen[i + tw] = id; st.push(i + tw); } } sizes.push(n); } const big = Math.max(0, ...sizes); for (let i = 0; i < bin.length; i++) if (bin[i] && sizes[seen[i]] < big * 0.03) bin[i] = 0; }
+  const oc = newCanvas(tw, th), og = oc.getContext('2d'), oid = og.createImageData(tw, th); for (let i = 0; i < tw * th; i++) { oid.data[i * 4] = oid.data[i * 4 + 1] = oid.data[i * 4 + 2] = 255; oid.data[i * 4 + 3] = bin[i] ? 255 : 0; } og.putImageData(oid, 0, 0);
+  const uc = newCanvas(W, H), ug = uc.getContext('2d', { willReadFrequently: true }); ug.imageSmoothingQuality = 'high'; ug.drawImage(oc, 0, 0, W, H);
+  const ud = ug.getImageData(0, 0, W, H).data, out = new Uint8ClampedArray(W * H); for (let i = 0; i < W * H; i++) out[i] = clamp((ud[i * 4 + 3] - 96) * 4, 0, 255);
+  return out;
+}
+// 캐릭터가 여럿일 때: 사람 상자 + 뼈대 점으로 SAM에 한 명씩 물어서, 따낸 그림(A0)의 픽셀을 캐릭터마다 나눠요
+async function rgInstances(sh, A0, people, tk) {
+  const { W, H } = sh, E = await rgSamEnc(sh, tk), { s, tw, th } = E, plane = tw * th, BODY = [0, 5, 6, 11, 12, 7, 8];
+  const good = (K, i, t) => K && K[i] && K[i][2] >= t, logit = [];
+  for (let a = 0; a < people.length; a++) {
+    if (tk && tk.stop) throw new Error('stop');
+    const P = people[a], b = P.box, pts = [];
+    for (const i of BODY) if (good(P.K, i, 0.4) && P.K[i][0] > b.x && P.K[i][0] < b.x + b.w && P.K[i][1] > b.y && P.K[i][1] < b.y + b.h) pts.push([P.K[i][0] * s, P.K[i][1] * s, 1]);
+    if (!pts.length) pts.push([(b.x + b.w / 2) * s, (b.y + b.h * 0.4) * s, 1]);
+    for (let o = 0; o < people.length; o++) if (o !== a) for (const i of [0, 5, 6, 11, 12]) { const K = people[o].K; if (!good(K, i, 0.5)) continue; const x = K[i][0], y = K[i][1]; if (x < b.x || x > b.x + b.w || y < b.y || y > b.y + b.h) continue; if (pts.some(q => q[2] === 1 && Math.hypot(q[0] - x * s, q[1] - y * s) < 0.05 * Math.max(tw, th))) continue; pts.push([x * s, y * s, 0]); }
+    const r = await rgSamAsk(E, pts, [b.x * s, b.y * s, (b.x + b.w) * s, (b.y + b.h) * s]), ba = b.w * b.h * s * s; let best = 0, bs = -1e9;
+    for (let k = 0; k < r.nm; k++) { let ar = 0; for (let i = 0; i < plane; i += 3) if (r.m[k * plane + i] > 0) ar += 3; const sc = (r.iou ? r.iou[k] : 0) - (ar > ba * 1.25 ? 1 : 0) - (ar < ba * 0.12 ? 0.5 : 0); if (sc > bs) { bs = sc; best = k; } }
+    logit.push(r.m.slice(best * plane, (best + 1) * plane));
+  }
+  // 줄인 그림에서 픽셀마다 누구 것인지: SAM 점수가 가장 높은 캐릭터. 아무도 안 가져간 곳은 가까운 캐릭터에게
+  const mc = newCanvas(W, H), mg = mc.getContext('2d'), mid = mg.createImageData(W, H); for (let i = 0; i < W * H; i++) { mid.data[i * 4] = mid.data[i * 4 + 1] = mid.data[i * 4 + 2] = 255; mid.data[i * 4 + 3] = A0[i]; } mg.putImageData(mid, 0, 0);
+  const lc = newCanvas(tw, th), lg = lc.getContext('2d', { willReadFrequently: true }); lg.imageSmoothingQuality = 'high'; lg.drawImage(mc, 0, 0, tw, th);
+  const ld = lg.getImageData(0, 0, tw, th).data, lab = new Int8Array(plane).fill(-2), q = new Int32Array(plane); let qh = 0, qt = 0;
+  for (let i = 0; i < plane; i++) { if (ld[i * 4 + 3] <= 90) continue; let b = -1, bv = 0; for (let a = 0; a < people.length; a++) if (logit[a][i] > bv) { bv = logit[a][i]; b = a; } lab[i] = b; if (b >= 0) q[qt++] = i; }
+  while (qh < qt) { const i = q[qh++], x = i % tw, y = (i / tw) | 0; for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const xx = x + dx, yy = y + dy; if (xx < 0 || yy < 0 || xx >= tw || yy >= th) continue; const j = yy * tw + xx; if (lab[j] === -1) { lab[j] = lab[i]; q[qt++] = j; } } }
+  const out = [];
+  for (let a = 0; a < people.length; a++) {
+    const bin = new Uint8Array(plane); let n = 0; for (let i = 0; i < plane; i++) if (lab[i] === a) { bin[i] = 1; n++; }
+    if (n < plane * 0.004) continue;
+    const up = rgUpMask(bin, tw, th, W, H), A = new Uint8ClampedArray(W * H); for (let i = 0; i < A.length; i++) A[i] = Math.round(A0[i] * up[i] / 255);
+    const box = rgBBox(A, W, H, 100); if (box) out.push({ A, K: people[a].K, box });
+  }
+  return out;
+}
+// 다른 캐릭터(M: 0~255)에 가려진 자리 중 이 캐릭터 몸이 이어질 곳을 메워요 → 떨어뜨려 움직여도 구멍이 안 보이게
+async function rgFillBehind(sh, tex, M, tk) {
+  const { W, H } = sh, n = W * H, id = tex.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, W, H), d = id.data, rem = new Uint8Array(n); for (let i = 0; i < n; i++) rem[i] = d[i * 4 + 3];
+  const enc = rgEnclosed(sh, rem, M); let en = 0; for (let i = 0; i < n; i++) if (enc[i] > 0.5 && rem[i] < 128) en++;
+  if (en < 40) return tex;
+  const bgd = sh.bg.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, W, H).data, comp = new Uint8ClampedArray(n * 4);
+  for (let i = 0; i < n; i++) { const j = i * 4, a = rem[i] / 255; comp[j] = d[j] * a + bgd[j] * (1 - a); comp[j + 1] = d[j + 1] * a + bgd[j + 1] * (1 - a); comp[j + 2] = d[j + 2] * a + bgd[j + 2] * (1 - a); comp[j + 3] = 255; }
+  const hole = new Float32Array(n); for (let i = 0; i < n; i++) hole[i] = enc[i] * (1 - rem[i] / 255);
+  const filled = await rgFillRegion(comp, hole, W, H, tk);
+  for (let i = 0; i < n; i++) { const j = i * 4, e = hole[i]; if (e > 0.02) { d[j] = filled[j]; d[j + 1] = filled[j + 1]; d[j + 2] = filled[j + 2]; d[j + 3] = Math.max(rem[i], Math.round(enc[i] * 255)); } }
+  const c = newCanvas(W, H); c.getContext('2d').putImageData(id, 0, 0); return c;
+}
+// 입 찾기: 두 눈 아래쪽에서 살색과 다른(어둡거나 붉은) 가로 덩어리. 못 찾으면 어림한 자리(est)
+function rgFindMouth(src, W, H, eyes) {
+  if (!eyes || eyes.length < 2) return null;
+  const c0 = { x: eyes[0].x + eyes[0].w / 2, y: eyes[0].y + eyes[0].h / 2 }, c1 = { x: eyes[1].x + eyes[1].w / 2, y: eyes[1].y + eyes[1].h / 2 }, d = Math.hypot(c1.x - c0.x, c1.y - c0.y); if (d < 8) return null;
+  let rx = (c1.x - c0.x) / d, ry = (c1.y - c0.y) / d, dx = -ry, dy = rx; if (dy < 0) { dx = -dx; dy = -dy; }
+  const mid = { x: (c0.x + c1.x) / 2, y: (c0.y + c1.y) / 2 }, eh = (eyes[0].h + eyes[1].h) / 2, GW = 96, GH = 72, U0 = -0.45, U1 = 0.45, V0 = Math.max(0.3, eh / d * 0.7), V1 = 1.08; // 애니 얼굴은 눈 사이가 넓어서 입이 눈 줄에서 눈 사이 거리의 0.6배쯤 아래에 있어요
+  const g = src.getContext('2d', { willReadFrequently: true }), bx = Math.max(0, Math.floor(mid.x - d * 1.6)), by = Math.max(0, Math.floor(mid.y - d * 0.2)), bw = Math.min(W - bx, Math.ceil(d * 3.2)), bh = Math.min(H - by, Math.ceil(d * 2)); if (bw < 4 || bh < 4) return null;
+  const px = g.getImageData(bx, by, bw, bh).data, col = new Float32Array(GW * GH * 3), ok = new Uint8Array(GW * GH), pos = new Float32Array(GW * GH * 2);
+  for (let j = 0; j < GH; j++) for (let i = 0; i < GW; i++) { const u = U0 + (U1 - U0) * (i + 0.5) / GW, v = V0 + (V1 - V0) * (j + 0.5) / GH, x = mid.x + (rx * u + dx * v) * d, y = mid.y + (ry * u + dy * v) * d, k = j * GW + i; pos[k * 2] = x; pos[k * 2 + 1] = y; const ix = Math.round(x - bx), iy = Math.round(y - by); if (ix < 0 || iy < 0 || ix >= bw || iy >= bh) continue; const q = (iy * bw + ix) * 4; col[k * 3] = px[q]; col[k * 3 + 1] = px[q + 1]; col[k * 3 + 2] = px[q + 2]; ok[k] = 1; }
+  const med = ch => { const a = []; for (let k = 0; k < GW * GH; k++) if (ok[k]) a.push(col[k * 3 + ch]); a.sort((p, q) => p - q); return a.length ? a[a.length >> 1] : 200; }, sk = [med(0), med(1), med(2)], sL = sk[0] * 0.3 + sk[1] * 0.59 + sk[2] * 0.11;
+  const hot = new Uint8Array(GW * GH); for (let k = 0; k < GW * GH; k++) { if (!ok[k]) continue; const r = col[k * 3], gg = col[k * 3 + 1], b = col[k * 3 + 2], L = r * 0.3 + gg * 0.59 + b * 0.11, sc = Math.max(0, sL - L) + 0.7 * Math.max(0, (r - gg) - (sk[0] - sk[1])); if (sc > 24) hot[k] = 1; }
+  const seen = new Uint8Array(GW * GH); let best = null;
+  for (let k0 = 0; k0 < GW * GH; k0++) {
+    if (!hot[k0] || seen[k0]) continue; const st = [k0]; seen[k0] = 1; let n = 0, x0 = GW, x1 = -1, y0 = GH, y1 = -1, edge = false, cr = 0, cg = 0, cb = 0;
+    while (st.length) { const k = st.pop(), x = k % GW, y = (k / GW) | 0; n++; cr += col[k * 3]; cg += col[k * 3 + 1]; cb += col[k * 3 + 2]; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; if (x === 0 || x === GW - 1 || y === GH - 1) edge = true; for (let yy = y - 1; yy <= y + 1; yy++) for (let xx = x - 1; xx <= x + 1; xx++) { if (xx < 0 || yy < 0 || xx >= GW || yy >= GH) continue; const q = yy * GW + xx; if (hot[q] && !seen[q]) { seen[q] = 1; st.push(q); } } }
+    const w = x1 - x0 + 1, h = y1 - y0 + 1, cu = U0 + (U1 - U0) * ((x0 + x1 + 1) / 2) / GW, cv = V0 + (V1 - V0) * ((y0 + y1 + 1) / 2) / GH;
+    if (edge || n < 3 || w < 2 || h > w * 1.6 || w > GW * 0.75) continue;
+    const sc = Math.sqrt(n) * 3 * (1 - Math.min(1, Math.abs(cu) / 0.28)) * Math.exp(-Math.pow((cv - 0.6) / 0.2, 2)) * Math.min(1, w / (h * 1.2));
+    if (!best || sc > best.sc) best = { sc, x0, x1, y0, y1, w, h, col: [cr / n, cg / n, cb / n] };
+  }
+  const boxOf = (i0, j0, i1, j1) => { let X0 = 1e9, Y0 = 1e9, X1 = -1e9, Y1 = -1e9; for (const [i, j] of [[i0, j0], [i1, j0], [i0, j1], [i1, j1]]) { const u = U0 + (U1 - U0) * i / GW, v = V0 + (V1 - V0) * j / GH, x = mid.x + (rx * u + dx * v) * d, y = mid.y + (ry * u + dy * v) * d; X0 = Math.min(X0, x); Y0 = Math.min(Y0, y); X1 = Math.max(X1, x); Y1 = Math.max(Y1, y); } return { x: X0, y: Y0, w: X1 - X0, h: Y1 - Y0 }; };
+  if (best && best.sc > 1.5) { const b = boxOf(best.x0 - 1, best.y0 - 0.5, best.x1 + 2, best.y1 + 1.5), open = best.h / best.w > 0.42 && best.h >= 5 && best.w * (U1 - U0) / GW > 0.2, lc = best.col; return { ...b, on: true, type: open ? 'open' : 'line', col: [Math.round(lc[0] * 0.45 + 120 * 0.55), Math.round(lc[1] * 0.45 + 38 * 0.55), Math.round(lc[2] * 0.45 + 44 * 0.55)] }; }
+  const cx = mid.x + dx * d * 0.6, cy = mid.y + dy * d * 0.6, w = d * 0.3, h = Math.max(4, d * 0.045);
+  return { x: cx - w / 2, y: cy - h / 2, w, h, on: true, type: 'line', est: true, col: [120, 40, 45] };
+}
+function rgNewChar(sh, tex, sk, eyes, i) {
+  const rig = { W: sh.W, H: sh.H, gw: sh.gw, gh: sh.gh, src: sh.src, bg: sh.bg, uid: sh.uid, by: sh.by, cid: 'c' + uid(), cname: '캐릭터 ' + (i + 1), cz: i, joints: sk.joints, conf: sk.conf, autoSk: sk.auto, zs: {}, pins: [], eyes, mouth: rgFindMouth(sh.src, sh.W, sh.H, eyes), anim: rgNewAnim(), ver: 1, layers: [{ id: 'body', name: '몸 전체', base: true, z: 0, tex }] };
   if (!eyes.length) rig.anim.auto.blink = 0;
-  rig.uid = uid();
-  try { const made = await rgAutoParts(rig, tk); rig.autoParts = made.map(l => l.name); } catch (e) { if (String(e && e.message) === 'stop') throw e; console.warn('rgAutoParts', e); }
-  if (tk && tk.stop) throw new Error('stop');
-  for (const L of rig.layers) rgBuildLayer(rig, L);
   return rig;
+}
+async function rgPrepare(src, sw, sh0, tk) {
+  const k = Math.min(1, RG_MAX / Math.max(sw, sh0)), W = Math.max(8, Math.round(sw * k)), H = Math.max(8, Math.round(sh0 * k));
+  const c = newCanvas(W, H), cg = c.getContext('2d', { willReadFrequently: true }); cg.fillStyle = '#fff'; cg.fillRect(0, 0, W, H); cg.imageSmoothingQuality = 'high'; cg.drawImage(src, 0, 0, W, H);
+  const px = cg.getImageData(0, 0, W, H).data, n = W * H, g = Math.max(W, H) / 120, sh = { W, H, gw: Math.max(8, Math.round(W / g)), gh: Math.max(8, Math.round(H / g)), src: c, bg: null, uid: uid() };
+  const stopQ = () => { if (tk && tk.stop) throw new Error('stop'); }, soft = async (fn, def) => { try { return await fn(); } catch (e) { if (String(e && e.message) === 'stop') throw e; console.warn('rgPrepare', e); return def; } };
+  tk && tk.set('캐릭터를 따내는 중…', 0.06);
+  const A0 = await aiMask(c, W, H, tk); stopQ();
+  const bin = new Uint8Array(n); let tot = 0; for (let i = 0; i < n; i++) { bin[i] = A0[i] > 100 ? 1 : 0; tot += bin[i]; }
+  const big = czLargest(bin, W, H); if (!big || big.n < n * 0.004) throw new Error('nochar');
+  // 사람이 여럿인지
+  tk && tk.set('캐릭터가 몇 명인지 보는 중…', 0.2);
+  let boxes = await soft(() => rgYolo('person', c, W, H, { x: 0, y: 0, w: W, h: H }, tk), []); stopQ();
+  const inMask = b => { let m = 0, t = 0; for (let y = Math.max(0, Math.floor(b.y)); y < Math.min(H, b.y + b.h); y += 4) for (let x = Math.max(0, Math.floor(b.x)); x < Math.min(W, b.x + b.w); x += 4) { t++; m += bin[y * W + x]; } return t ? m / t : 0; };
+  boxes = boxes.filter(b => b.s >= 0.4 && b.w * b.h > W * H * 0.012 && inMask(b) > 0.2).sort((a, b) => b.w * b.h - a.w * a.h);
+  const kept = []; for (const b of boxes) { if (kept.every(q => { const ix = Math.max(0, Math.min(b.x + b.w, q.x + q.w) - Math.max(b.x, q.x)), iy = Math.max(0, Math.min(b.y + b.h, q.y + q.h) - Math.max(b.y, q.y)), it = ix * iy; return it / (b.w * b.h + q.w * q.h - it) < 0.55 && !(it > b.w * b.h * 0.8 && b.w * b.h < q.w * q.h * 0.4); })) kept.push(b); if (kept.length >= 4) break; }
+  let people = [];
+  if (kept.length >= 2) {
+    tk && tk.set('캐릭터마다 뼈대를 찾는 중…', 0.26);
+    for (const b of kept) { people.push({ box: b, K: await soft(() => rgPoseRun(c, W, H, b, tk), null) }); stopQ(); }
+    tk && tk.set('붙어 있는 캐릭터를 나누는 중…', 0.34);
+    people = await soft(() => rgInstances(sh, A0, people, tk), []); stopQ();
+  }
+  if (people.length < 2) { // 한 명: 가장 큰 덩어리(+ 그 둘레의 반투명한 가장자리)만 캐릭터로. 떨어져 있는 다른 것은 배경에 그대로 둬요
+    const nearB = dpBox(Float32Array.from(big.bin), W, H, 3), A = new Uint8ClampedArray(n); for (let i = 0; i < n; i++) A[i] = nearB[i] > 0.01 ? A0[i] : 0;
+    const box = rgBBox(A, W, H, 100); tk && tk.set('뼈대를 찾는 중…', 0.3);
+    people = [{ A, box, K: await soft(() => rgPoseRun(c, W, H, box, tk), null) }]; stopQ();
+  }
+  tk && tk.set('캐릭터 뒤 배경을 메우는 중…', 0.45);
+  const m = new Float32Array(n); for (const P of people) for (let i = 0; i < n; i++) if (P.A[i] > m[i] * 255) m[i] = P.A[i] / 255;
+  const mb = dpBox(dpBox(m, W, H, Math.max(3, Math.round(Math.max(W, H) / 90))), W, H, Math.max(2, Math.round(Math.max(W, H) / 180))), hole = new Float32Array(n); for (let i = 0; i < n; i++) hole[i] = clamp(mb[i] * 6, 0, 1);
+  const bgr = rgFlatAround(px, hole, W, H) ? { px: rgSmoothFill(px, hole, W, H), by: 'smooth' } : await dpFill(px, hole, W, H, tk); stopQ();
+  sh.bg = newCanvas(W, H); sh.bg.getContext('2d').putImageData(new ImageData(bgr.px, W, H), 0, 0); sh.by = bgr.by;
+  // 화면 아래쪽에 닿는 캐릭터일수록 앞에 그려요
+  people.sort((a, b) => (a.box.y + a.box.h) - (b.box.y + b.box.h) || a.box.w * a.box.h - b.box.w * b.box.h);
+  const chars = [];
+  for (let i = 0; i < people.length; i++) {
+    const P = people[i]; tk && tk.set(people.length > 1 ? `캐릭터 ${i + 1} 준비하는 중…` : '눈을 찾는 중…', 0.6 + 0.1 * i / people.length);
+    let tex = rgCutTex(px, P.A, W, H);
+    if (people.length > 1) { const M = new Uint8ClampedArray(n); for (const O of people) if (O !== P) for (let q = 0; q < n; q++) if (O.A[q] > M[q]) M[q] = O.A[q]; tex = await soft(() => rgFillBehind(sh, tex, M, tk), tex); stopQ(); }
+    const sk = rgSkeleton(P.K, W, H, P.box), eyes = await soft(() => rgFindEyes(c, W, H, sk, P.box, tk), []); stopQ();
+    chars.push(rgNewChar(sh, tex, sk, eyes, i));
+  }
+  // 왼쪽부터 번호를 붙여요
+  [...chars].sort((a, b) => a.joints.chest.x - b.joints.chest.x).forEach((r, i) => { r.cname = '캐릭터 ' + (i + 1); });
+  const main = chars[0]; main.more = chars.slice(1); main.autoParts = [];
+  for (const r of chars) { const made = await soft(() => rgAutoParts(r, tk), []); stopQ(); for (const L of made) main.autoParts.push((chars.length > 1 ? r.cname + ' ' : '') + L.name); }
+  tk && tk.set('그물을 씌우는 중…', 0.95);
+  for (const r of chars) for (const L of r.layers) rgBuildLayer(r, L);
+  return main;
 }
 async function rgFindEyes(c, W, H, sk, box, tk) {
   const J = sk.joints; let hb;
@@ -510,6 +642,7 @@ async function rgFindEyes(c, W, H, sk, box, tk) {
   else hb = { x: box.x, y: box.y, w: box.w, h: Math.min(box.h, box.w * 1.3) };
   let list = await rgEyesRun(c, W, H, hb, tk);
   if (!list.length && sk.auto) list = await rgEyesRun(c, W, H, { x: box.x, y: box.y, w: box.w, h: Math.min(box.h, box.w * 1.4) }, tk);
+  const cx0 = box.x - box.w * 0.02, cx1 = box.x + box.w * 1.02; list = list.filter(e => e.x + e.w / 2 > cx0 && e.x + e.w / 2 < cx1 && e.y + e.h / 2 > box.y && e.y + e.h / 2 < box.y + box.h);
   if (!list.length) return [];
   const a = list[0], b = list.slice(1).find(q => { const r = (q.w * q.h) / (a.w * a.h), dx = Math.abs(q.x + q.w / 2 - a.x - a.w / 2), dy = Math.abs(q.y + q.h / 2 - a.y - a.h / 2); return r > 0.25 && r < 4 && dx > Math.max(a.w, q.w) * 0.6 && dx < Math.max(a.w, q.w) * 5 && dy < Math.max(a.h, q.h) * 2.2; });
   return (b ? [a, b] : [a]).sort((p, q) => p.x - q.x).map(e => ({ x: e.x, y: e.y, w: e.w, h: e.h, on: true }));
@@ -573,50 +706,46 @@ function rgMerge(rig, L) { // 부위를 다시 몸에 합치기
 // 칠한 곳을 AI(MobileSAM)로 물체 윤곽에 맞추기. M: 0~255 → 새 M (못 하면 null)
 async function rgSamRefine(rig, M, tk) {
   const { W, H } = rig, b = rgBBox(M, W, H, 128); if (!b) return null;
-  await czLoad('samE'); await czLoad('samD'); if (tk && tk.stop) throw new Error('stop');
-  const s = 1024 / Math.max(W, H), tw = Math.max(1, Math.round(W * s)), th = Math.max(1, Math.round(H * s)), key = 'rig:' + rig.uid;
-  if (cz.samEnc !== key) {
-    const c = newCanvas(tw, th), gc = c.getContext('2d', { willReadFrequently: true }); gc.imageSmoothingQuality = 'high'; gc.drawImage(rig.src, 0, 0, tw, th);
-    const px = gc.getImageData(0, 0, tw, th).data, x = new Float32Array(tw * th * 3); for (let i = 0, j = 0; i < tw * th; i++, j += 4) { x[i * 3] = px[j]; x[i * 3 + 1] = px[j + 1]; x[i * 3 + 2] = px[j + 2]; }
-    cz.samEnc = ''; await czCall({ t: 'run2', key: 'samE', feeds: { input_image: { data: x, dims: [th, tw, 3] } }, keep: ['image_embeddings'], outs: [] }, [x.buffer]); cz.samEnc = key;
-  }
+  const E = await rgSamEnc(rig, tk), { s, tw, th } = E, plane = tw * th;
   // 칠한 곳을 줄여 본 것 + 그 안쪽 깊은 점 몇 개를 '이것'으로
   const mc = newCanvas(tw, th), mg = mc.getContext('2d', { willReadFrequently: true }), full = newCanvas(W, H), fg = full.getContext('2d'), fid = fg.createImageData(W, H);
   for (let i = 0; i < W * H; i++) { fid.data[i * 4] = fid.data[i * 4 + 1] = fid.data[i * 4 + 2] = 255; fid.data[i * 4 + 3] = M[i]; } fg.putImageData(fid, 0, 0); mg.drawImage(full, 0, 0, tw, th);
-  const md = mg.getImageData(0, 0, tw, th).data, sm = new Uint8Array(tw * th); for (let i = 0; i < tw * th; i++) sm[i] = md[i * 4 + 3] > 128 ? 1 : 0;
+  const md = mg.getImageData(0, 0, tw, th).data, sm = new Uint8Array(plane); for (let i = 0; i < plane; i++) sm[i] = md[i * 4 + 3] > 128 ? 1 : 0;
   const pts = []; let work = sm.slice();
-  for (let k = 0; k < 5; k++) { const dp = czDeepest(work, tw, th); if (!dp || dp[1] < 2) break; const i = dp[0], x = i % tw, y = (i / tw) | 0, r = Math.max(6, dp[1] * 1.6); pts.push([x, y]); for (let yy = Math.max(0, Math.floor(y - r)); yy < Math.min(th, y + r); yy++) for (let xx = Math.max(0, Math.floor(x - r)); xx < Math.min(tw, x + r); xx++) if ((xx - x) * (xx - x) + (yy - y) * (yy - y) < r * r) work[yy * tw + xx] = 0; }
+  for (let k = 0; k < 5; k++) { const dp = czDeepest(work, tw, th); if (!dp || dp[1] < 2) break; const i = dp[0], x = i % tw, y = (i / tw) | 0, r = Math.max(6, dp[1] * 1.6); pts.push([x, y, 1]); for (let yy = Math.max(0, Math.floor(y - r)); yy < Math.min(th, y + r); yy++) for (let xx = Math.max(0, Math.floor(x - r)); xx < Math.min(tw, x + r); xx++) if ((xx - x) * (xx - x) + (yy - y) * (yy - y) < r * r) work[yy * tw + xx] = 0; }
   if (!pts.length) return null;
-  const np = pts.length + 2, pc = new Float32Array(np * 2), pl = new Float32Array(np); pts.forEach(([x, y], i) => { pc[i * 2] = x; pc[i * 2 + 1] = y; pl[i] = 1; });
-  pc[pts.length * 2] = b.x * s; pc[pts.length * 2 + 1] = b.y * s; pl[pts.length] = 2; pc[pts.length * 2 + 2] = (b.x + b.w) * s; pc[pts.length * 2 + 3] = (b.y + b.h) * s; pl[pts.length + 1] = 3;
-  const r = await czCall({ t: 'run2', key: 'samD', outs: ['masks', 'iou_predictions'], feeds: { image_embeddings: { ref: 'image_embeddings' }, point_coords: { data: pc, dims: [1, np, 2] }, point_labels: { data: pl, dims: [1, np] },
-    mask_input: { data: new Float32Array(256 * 256), dims: [1, 1, 256, 256] }, has_mask_input: { data: new Float32Array([0]), dims: [1] }, orig_im_size: { data: new Float32Array([th, tw]), dims: [2] } } });
-  const m = r.out.masks.data, nm = r.out.masks.dims[1] || 1, plane = tw * th, iou = r.out.iou_predictions ? r.out.iou_predictions.data : null; let best = -1, bs = -1, na = 0; for (let i = 0; i < plane; i++) na += sm[i];
-  for (let k = 0; k < nm; k++) { let a = 0, it = 0; for (let i = 0; i < plane; i++) if (m[k * plane + i] > 0) { a++; if (sm[i]) it++; } if (!a) continue; const sc = it / (a + na - it) + (iou ? iou[k] * 0.25 : 0); if (sc > bs) { bs = sc; best = k; } }
+  const r = await rgSamAsk(E, pts, [b.x * s, b.y * s, (b.x + b.w) * s, (b.y + b.h) * s]), m = r.m; let best = -1, bs = -1, na = 0; for (let i = 0; i < plane; i++) na += sm[i];
+  for (let k = 0; k < r.nm; k++) { let a = 0, it = 0; for (let i = 0; i < plane; i++) if (m[k * plane + i] > 0) { a++; if (sm[i]) it++; } if (!a) continue; const sc = it / (a + na - it) + (r.iou ? r.iou[k] * 0.25 : 0); if (sc > bs) { bs = sc; best = k; } }
   if (best < 0 || bs < 0.3) return null;
-  const oc = newCanvas(tw, th), og = oc.getContext('2d'), oid = og.createImageData(tw, th); for (let i = 0; i < plane; i++) { oid.data[i * 4] = oid.data[i * 4 + 1] = oid.data[i * 4 + 2] = 255; oid.data[i * 4 + 3] = m[best * plane + i] > 0 ? 255 : 0; } og.putImageData(oid, 0, 0);
-  const uc = newCanvas(W, H), ug = uc.getContext('2d', { willReadFrequently: true }); ug.imageSmoothingQuality = 'high'; ug.drawImage(oc, 0, 0, W, H);
-  const ud = ug.getImageData(0, 0, W, H).data, out = new Uint8ClampedArray(W * H); for (let i = 0; i < W * H; i++) out[i] = clamp((ud[i * 4 + 3] - 96) * 4, 0, 255);
-  return out;
+  const bin = new Uint8Array(plane); for (let i = 0; i < plane; i++) bin[i] = m[best * plane + i] > 0 ? 1 : 0;
+  return rgUpMask(bin, tw, th, W, H);
 }
 
 /* ---- 보관: 이어서 고칠 수 있게 작업을 통째로 저장 (IndexedDB kv 'rig:작업:이름') ---- */
 const rgBlob = (c, type, q) => new Promise(r => c.toBlob(r, type, q));
-async function rgStore(rig, key) {
-  if (!key) return false;
-  const layers = []; for (const L of rig.layers) { if (!L.blob || L.blobOf !== L.tex) { L.blob = await rgBlob(L.tex, 'image/png'); L.blobOf = L.tex; } layers.push({ id: L.id, name: L.name, base: !!L.base, z: L.z || 0, bind: L.bind || null, follow: L.follow || null, hide: !!L.hide, blob: L.blob }); }
-  if (!rig.srcBlob) rig.srcBlob = await rgBlob(rig.src, 'image/webp', 0.95);
-  if (!rig.bgBlob || rig.bgBlobOf !== rig.bg) { rig.bgBlob = await rgBlob(rig.bg, 'image/webp', 0.95); rig.bgBlobOf = rig.bg; }
-  return !!(await idb.set('rig:' + key, { v: 1, at: Date.now(), W: rig.W, H: rig.H, gw: rig.gw, gh: rig.gh, uid: rig.uid, joints: rig.joints, conf: rig.conf, autoSk: rig.autoSk, zs: rig.zs, pins: rig.pins, eyes: rig.eyes, anim: rig.anim, out: rig.out || null, by: rig.by, layers, src: rig.srcBlob, bg: rig.bgBlob }));
+async function rgStore(main, key) {
+  if (!key) return false; const chars = [];
+  for (const rig of rgChars(main)) {
+    const layers = []; for (const L of rig.layers) { if (!L.blob || L.blobOf !== L.tex) { L.blob = await rgBlob(L.tex, 'image/png'); L.blobOf = L.tex; } layers.push({ id: L.id, name: L.name, base: !!L.base, z: L.z || 0, bind: L.bind || null, follow: L.follow || null, hide: !!L.hide, blob: L.blob }); }
+    chars.push({ cid: rig.cid, cname: rig.cname, cz: rig.cz || 0, joints: rig.joints, conf: rig.conf, autoSk: rig.autoSk, zs: rig.zs, pins: rig.pins.map(p => ({ id: p.id, x: p.x, y: p.y, r: p.r })), eyes: rig.eyes, mouth: rig.mouth || null, anim: rig.anim, layers });
+  }
+  if (!main.srcBlob) main.srcBlob = await rgBlob(main.src, 'image/webp', 0.95);
+  if (!main.bgBlob || main.bgBlobOf !== main.bg) { main.bgBlob = await rgBlob(main.bg, 'image/webp', 0.95); main.bgBlobOf = main.bg; }
+  return !!(await idb.set('rig:' + key, { v: 2, at: Date.now(), W: main.W, H: main.H, gw: main.gw, gh: main.gh, uid: main.uid, out: main.out || null, by: main.by, chars, layers: chars[0].layers, src: main.srcBlob, bg: main.bgBlob }));
 }
 async function rgRestore(key) {
   const d = key && await idb.get('rig:' + key); if (!d || !d.layers || !d.src) return null;
   const cv = async b => { const bm = await createImageBitmap(b), c = newCanvas(bm.width, bm.height); c.getContext('2d', { willReadFrequently: true }).drawImage(bm, 0, 0); return c; };
   try {
-    const rig = { W: d.W, H: d.H, gw: d.gw, gh: d.gh, uid: d.uid || uid(), joints: d.joints, conf: d.conf, autoSk: d.autoSk, zs: d.zs || {}, pins: d.pins || [], eyes: d.eyes || [], anim: d.anim, out: d.out || null, by: d.by, ver: 1, layers: [], srcBlob: d.src, bgBlob: d.bg };
-    rig.src = await cv(d.src); rig.bg = await cv(d.bg); rig.bgBlobOf = rig.bg;
-    for (const l of d.layers) { const tex = await cv(l.blob); rig.layers.push({ id: l.id, name: l.name, base: l.base, z: l.z, bind: l.bind, follow: l.follow, hide: l.hide, tex, blob: l.blob, blobOf: tex }); }
-    return rig;
+    const src = await cv(d.src), bg = await cv(d.bg), sh = { W: d.W, H: d.H, gw: d.gw, gh: d.gh, src, bg, uid: d.uid || uid(), by: d.by }, list = d.chars || [d], chars = []; // v1은 캐릭터 하나가 통째로 들어 있었어요
+    for (let i = 0; i < list.length; i++) {
+      const q = list[i], rig = { ...sh, cid: q.cid || 'c' + uid(), cname: q.cname || '캐릭터 ' + (i + 1), cz: q.cz || 0, joints: q.joints, conf: q.conf, autoSk: q.autoSk, zs: q.zs || {}, pins: q.pins || [], eyes: q.eyes || [], mouth: q.mouth === undefined ? rgFindMouth(src, d.W, d.H, q.eyes || []) : q.mouth, anim: q.anim, ver: 1, layers: [] };
+      if (rig.anim.auto.talk === undefined) rig.anim.auto.talk = 0;
+      for (const l of q.layers) { const tex = await cv(l.blob); rig.layers.push({ id: l.id, name: l.name, base: l.base, z: l.z, bind: l.bind, follow: l.follow, hide: l.hide, tex, blob: l.blob, blobOf: tex }); }
+      chars.push(rig);
+    }
+    const main = chars[0]; main.more = chars.slice(1); main.out = d.out || null; main.srcBlob = d.src; main.bgBlob = d.bg; main.bgBlobOf = bg;
+    return main;
   } catch (e) { console.warn('rgRestore', e); return null; }
 }
 
@@ -641,14 +770,14 @@ const rgLimbOf = id => Object.keys(RG_LIMBS).find(k => RG_LIMBS[k].includes(id))
 /* ---- 여러 장 그려 내기 ---- */
 // o: {size(긴 쪽), fps, bg: 'fill'|'color'|'none', color} → [캔버스…]
 async function rgRenderFrames(rig, o, tk, one) {
-  const k = Math.min(1, o.size / Math.max(rig.W, rig.H)), w = Math.max(2, Math.round(rig.W * k)), h = Math.max(2, Math.round(rig.H * k)), cv = newCanvas(w, h), R = rgGLNew(cv);
+  const k = Math.min(1, o.size / Math.max(rig.W, rig.H)), w = Math.max(2, Math.round(rig.W * k)), h = Math.max(2, Math.round(rig.H * k)), cv = newCanvas(w, h), R = rgGLNew(cv), chars = rgChars(rig);
   if (!R) throw new Error('webgl');
   try {
     const A = rig.anim, N = one ? 1 : Math.max(2, Math.round(A.dur * o.fps) + (A.loop ? 0 : 1)), frames = [];
     for (let f = 0; f < N; f++) {
       if (tk && tk.stop) throw new Error('stop');
-      const t = one ? o.t : f / o.fps, ev = rgEval(rig, t);
-      rgGLDraw(R, rig, { k, ox: 0, oy: 0 }, { bg: o.bg, color: o.color, ev, t });
+      const t = one ? o.t : f / o.fps;
+      rgGLDraw(R, rig, { k, ox: 0, oy: 0 }, { bg: o.bg, color: o.color, evs: chars.map(c => rgEval(c, t)), t });
       const c = newCanvas(w, h); c.getContext('2d').drawImage(cv, 0, 0); frames.push(c);
       if (tk && !one) { tk.set(`장면 그리는 중… ${f + 1} / ${N}`, (f + 1) / N); if (f % 4 === 3) await new Promise(r => setTimeout(r, 0)); }
     }
@@ -676,9 +805,10 @@ async function rgOpen(from) {
   }
   rgWindow(rig, from);
 }
-function rgWindow(rig, from) {
-  const U0 = rgUnit(rig), maxSide = Math.max(rig.W, rig.H);
-  rig.out = Object.assign({ size: Math.min(1080, maxSide), fps: 24, bg: 'fill', color: '#ffffff' }, rig.out || {});
+function rgWindow(main, from) {
+  let rig = main; // 지금 고치는 캐릭터
+  const chars = () => rgChars(main), maxSide = Math.max(main.W, main.H);
+  main.out = Object.assign({ size: Math.min(1080, maxSide), fps: 24, bg: 'fill', color: '#ffffff' }, main.out || {}); for (const c of chars()) { c.out = main.out; c.anim.dur = main.anim.dur; c.anim.loop = main.anim.loop; if (c.anim.auto.talk === undefined) c.anim.auto.talk = 0; }
   const st = { mode: rig.autoSk === false ? 'bone' : 'pose', t: 0, playing: false, sel: null, selPin: null, selKey: 0, selLayer: 'body', selEye: -1, tool: 'move', brush: 'add', bsize: 60, view: { k: 1, ox: 0, oy: 0 }, undo: [], redo: [], ev: null, drag: null, pm: null, pmAny: false, solo: false, busy: false };
   const sizes = [...new Set([480, 720, 1080, 1440, maxSide].filter(v => v <= maxSide))].sort((a, b) => a - b);
   const m = modal(`<div class="rg">
@@ -707,13 +837,17 @@ function rgWindow(rig, from) {
   const stage = $('#rgStage', m), cv = $('#rgGL', m), ov = $('#rgOv', m), side = $('#rgSide', m), tip = $('#rgTip', m);
   let R = null; try { R = rgGLNew(cv); } catch (e) { console.warn(e); }
   if (!R) { closeModal(); toast('이 컴퓨터에서 그리기 기능(WebGL)을 쓸 수 없어서 열지 못했어요.', 5000); return; }
-  const A = () => rig.anim, base = () => rig.layers.find(l => l.base), dpr = () => Math.min(2, window.devicePixelRatio || 1);
+  const cur = () => rig, A = () => rig.anim, base = () => rig.layers.find(l => l.base), dpr = () => Math.min(2, window.devicePixelRatio || 1);
   const frameT = t => Math.round(t * rig.out.fps) / rig.out.fps;
 
   /* 되돌리기 */
-  const shot = () => ({ j: JSON.stringify({ joints: rig.joints, zs: rig.zs, pins: rig.pins, eyes: rig.eyes, anim: rig.anim }), layers: rig.layers.map(l => ({ ...l })), bg: rig.bg });
+  const shot = () => ({ cur: rig, bg: main.bg, cs: chars().map(c => ({ c, j: JSON.stringify({ joints: c.joints, zs: c.zs, pins: c.pins.map(p => ({ id: p.id, x: p.x, y: p.y, r: p.r })), eyes: c.eyes, mouth: c.mouth || null, anim: c.anim, cz: c.cz || 0, cname: c.cname }), layers: c.layers.map(l => ({ ...l })) })) });
   const snap = () => { st.undo.push(shot()); if (st.undo.length > 60) st.undo.shift(); st.redo.length = 0; };
-  const put = s => { const d = JSON.parse(s.j); rig.joints = d.joints; rig.zs = d.zs; rig.pins = d.pins; rig.eyes = d.eyes; rig.anim = d.anim; rig.layers = s.layers.map(l => ({ ...l, mesh: null })); rig.bg = s.bg; rig.ver++; if (!rig.layers.some(l => l.id === st.selLayer)) st.selLayer = 'body'; st.selKey = clamp(st.selKey, 0, rig.anim.keys.length - 1); syncTime(); renderSide(); dirty(); };
+  const put = s => {
+    main.more = s.cs.slice(1).map(q => q.c);
+    for (const q of s.cs) { const c = q.c, d = JSON.parse(q.j); c.joints = d.joints; c.zs = d.zs; c.pins = d.pins; c.eyes = d.eyes; c.mouth = d.mouth; c.anim = d.anim; c.cz = d.cz; c.cname = d.cname; c.layers = q.layers.map(l => ({ ...l, mesh: null })); c.bg = s.bg; c.ver++; }
+    rig = chars().includes(s.cur) ? s.cur : main; if (!rig.layers.some(l => l.id === st.selLayer)) st.selLayer = 'body'; st.selKey = clamp(st.selKey, 0, rig.anim.keys.length - 1); st.sel = null; st.selPin = null; st.selEye = -1; syncTime(); renderSide(); dirty();
+  };
   const undo = () => { const s = st.undo.pop(); if (!s) return; st.redo.push(shot()); put(s); }, redo = () => { const s = st.redo.pop(); if (!s) return; st.undo.push(shot()); put(s); };
 
   /* 화면 */
@@ -721,12 +855,13 @@ function rgWindow(rig, from) {
   const resize = () => { const r = stage.getBoundingClientRect(), w = Math.max(50, Math.round(r.width * dpr())), h = Math.max(50, Math.round(r.height * dpr())); if (cv.width === w && cv.height === h) return; const first = !st.sized; cv.width = ov.width = w; cv.height = ov.height = h; st.sized = true; if (first) fit(); else dirty(); };
   let raf = 0, lastNow = 0;
   const dirty = () => { if (!raf) raf = requestAnimationFrame(render); };
-  const curEv = () => st.mode === 'pose' ? rgEval(rig, st.t) : Object.assign(rgEval(rig, 0, rgPose0()), { still: true });
+  const evOf = c => st.mode === 'pose' ? rgEval(c, st.t) : Object.assign(rgEval(c, 0, rgPose0()), { still: true });
+  const switchChar = c => { if (c === rig || !chars().includes(c)) return; rig = c; st.sel = null; st.selPin = null; st.selEye = -1; st.selLayer = 'body'; st.selKey = clamp(st.selKey, 0, rig.anim.keys.length - 1); st.ev = st.evs ? st.evs[chars().indexOf(c)] : null; syncTime(); renderSide(); dirty(); };
   function render(now) {
     raf = 0; if (!m.isConnected) return;
     if (st.playing) { const dt = Math.min(0.1, (now - lastNow) / 1000 || 0); lastNow = now; st.t += dt; if (st.t >= A().dur) { if (A().loop) st.t %= A().dur; else { st.t = A().dur; st.playing = false; syncPlay(); } } syncClock(); raf = requestAnimationFrame(render); }
-    const ev = st.ev = curEv();
-    try { rgGLDraw(R, rig, st.view, { bg: st.mode === 'part' && st.solo ? 'none' : rig.out.bg, color: rig.out.color, ev, t: st.t, solo: st.mode === 'part' && st.solo ? st.selLayer : null }); } catch (e) { console.warn('rgDraw', e); }
+    const cs = chars(), evs = st.evs = cs.map(evOf), ev = st.ev = evs[cs.indexOf(rig)];
+    try { rgGLDraw(R, main, st.view, { bg: st.mode === 'part' && st.solo ? 'none' : main.out.bg, color: main.out.color, evs, t: st.t, solo: st.mode === 'part' && st.solo ? { cid: rig.cid, id: st.selLayer } : null }); } catch (e) { console.warn('rgDraw', e); }
     drawOv(ev);
   }
   const X = x => x * st.view.k + st.view.ox, Y = y => y * st.view.k + st.view.oy;
@@ -742,13 +877,16 @@ function rgWindow(rig, from) {
       if (st.cur) { g.beginPath(); g.arc(st.cur.x, st.cur.y, st.bsize / 2 * d, 0, 7); g.strokeStyle = '#fff'; g.lineWidth = 1.5 * d; g.stroke(); g.strokeStyle = 'rgba(0,0,0,.6)'; g.lineWidth = 0.75 * d; g.stroke(); }
     }
     if (!rgUi.skel && !(st.mode === 'bone')) return;
-    if (st.mode === 'part') { g.globalAlpha = 0.45; }
+    // 다른 캐릭터의 뼈대는 흐리게 (누르면 그 캐릭터로 바뀌어요)
+    chars().forEach((c, ci) => { if (c === rig || !st.evs[ci]) return; const Q = st.evs[ci].P; g.globalAlpha = 0.4; for (const id of RG_IDS) { const par = rgPar(id); if (!par || !Q[id] || !Q[par]) continue; g.beginPath(); g.moveTo(X(Q[par].x), Y(Q[par].y)); g.lineTo(X(Q[id].x), Y(Q[id].y)); g.strokeStyle = 'rgba(0,0,0,.6)'; g.lineWidth = 4 * d; g.lineCap = 'round'; g.stroke(); g.strokeStyle = '#d8dde6'; g.lineWidth = 1.8 * d; g.stroke(); } for (const id of RG_IDS) { if (!Q[id]) continue; g.beginPath(); g.arc(X(Q[id].x), Y(Q[id].y), 4 * d, 0, 7); g.fillStyle = '#d8dde6'; g.fill(); g.strokeStyle = 'rgba(0,0,0,.7)'; g.lineWidth = 1.2 * d; g.stroke(); } });
+    g.globalAlpha = st.mode === 'part' ? 0.45 : 1;
     const P = ev.P;
     for (const id of RG_IDS) { const par = rgPar(id); if (!par || !P[id] || !P[par]) continue; g.beginPath(); g.moveTo(X(P[par].x), Y(P[par].y)); g.lineTo(X(P[id].x), Y(P[id].y)); g.strokeStyle = 'rgba(0,0,0,.55)'; g.lineWidth = 5 * d; g.lineCap = 'round'; g.stroke(); g.strokeStyle = COL(id); g.lineWidth = 2.5 * d; g.stroke(); }
     for (const id of RG_IDS) { if (!P[id]) continue; const s = st.sel === id, r = (id === 'root' ? 7 : 5.5) * d * (s ? 1.35 : 1); g.beginPath(); if (id === 'root') g.rect(X(P[id].x) - r, Y(P[id].y) - r, r * 2, r * 2); else g.arc(X(P[id].x), Y(P[id].y), r, 0, 7); g.fillStyle = s ? '#ffe14a' : COL(id); g.fill(); g.strokeStyle = 'rgba(0,0,0,.75)'; g.lineWidth = 1.5 * d; g.stroke(); }
     g.globalAlpha = 1;
     if (st.mode === 'pose') for (const p of rig.pins) { const q = pinPos(p), s = st.selPin === p.id, r = 6.5 * d * (s ? 1.3 : 1); g.save(); g.translate(X(q.x), Y(q.y)); g.rotate(Math.PI / 4); g.fillStyle = s ? '#ffe14a' : '#ff5fd0'; g.fillRect(-r, -r, r * 2, r * 2); g.strokeStyle = 'rgba(0,0,0,.75)'; g.lineWidth = 1.5 * d; g.strokeRect(-r, -r, r * 2, r * 2); g.restore(); if (s) { g.beginPath(); g.arc(X(q.x), Y(q.y), p.r * st.view.k, 0, 7); g.setLineDash([5 * d, 4 * d]); g.strokeStyle = 'rgba(255,95,208,.9)'; g.lineWidth = 1.2 * d; g.stroke(); g.setLineDash([]); } }
     if (st.mode === 'bone') rig.eyes.forEach((e, i) => { g.strokeStyle = e.on === false ? 'rgba(150,150,150,.8)' : i === st.selEye ? '#ffe14a' : '#5cf0ff'; g.lineWidth = 2 * d; g.strokeRect(X(e.x), Y(e.y), e.w * st.view.k, e.h * st.view.k); g.fillStyle = g.strokeStyle; g.fillRect(X(e.x + e.w) - 4 * d, Y(e.y + e.h) - 4 * d, 8 * d, 8 * d); });
+    if (st.mode === 'bone' && rig.mouth) { const e = rig.mouth; g.strokeStyle = e.on === false ? 'rgba(150,150,150,.8)' : st.selEye === 'm' ? '#ffe14a' : '#ff7ad9'; g.lineWidth = 2 * d; g.strokeRect(X(e.x), Y(e.y), e.w * st.view.k, e.h * st.view.k); g.fillStyle = g.strokeStyle; g.fillRect(X(e.x + e.w) - 4 * d, Y(e.y + e.h) - 4 * d, 8 * d, 8 * d); }
   }
 
   /* 시간 막대 */
@@ -784,15 +922,17 @@ function rgWindow(rig, from) {
   const delKey = () => { const a = A(); if (a.keys.length < 2 || !a.keys[st.selKey]) return; snap(); a.keys.splice(st.selKey, 1); st.selKey = clamp(st.selKey, 0, a.keys.length - 1); syncTime(); renderSide(); dirty(); };
   $('#rgKeyDel', m).addEventListener('click', delKey);
   $('#rgEase', m).addEventListener('change', e => { const k = A().keys[st.selKey]; if (!k) return; snap(); k.e = e.target.value; dirty(); });
-  $('#rgLoop', m).addEventListener('change', e => { snap(); A().loop = e.target.checked; dirty(); });
-  $('#rgDur', m).addEventListener('change', e => { const v = clamp(+e.target.value || 3, 0.5, 20); snap(); const a = A(); a.dur = v; for (const k of a.keys) k.t = Math.min(k.t, v); a.keys = a.keys.filter((k, i) => !a.keys.some((q, j) => j < i && Math.abs(q.t - k.t) < 1e-6)); st.selKey = clamp(st.selKey, 0, a.keys.length - 1); st.t = Math.min(st.t, v); syncTime(); dirty(); });
+  $('#rgLoop', m).addEventListener('change', e => { snap(); for (const c of chars()) c.anim.loop = e.target.checked; dirty(); });
+  const setDur = v => { for (const c of chars()) { const a = c.anim; a.dur = v; for (const k of a.keys) k.t = Math.min(k.t, v); a.keys = a.keys.filter((k, i) => !a.keys.some((q, j) => j < i && Math.abs(q.t - k.t) < 1e-6)); } st.selKey = clamp(st.selKey, 0, A().keys.length - 1); st.t = Math.min(st.t, v); };
+  $('#rgDur', m).addEventListener('change', e => { const v = clamp(+e.target.value || 3, 0.5, 20); snap(); setDur(v); syncTime(); dirty(); });
 
   /* 오른쪽 칸 */
   let sideT = 0; const renderSideSoon = () => { clearTimeout(sideT); sideT = setTimeout(() => { if (m.isConnected && !st.drag) renderSide(); }, 120); };
   const rng = (label, attr, val, min, max, step, tipTxt) => `<span title="${tipTxt || ''}">${label}</span><span><input type="range" ${attr} min="${min}" max="${max}" step="${step || 1}" value="${val}"></span>`;
   const selName = id => { const l = rgLimbOf(id); return (l ? rgSideName(rig, l) + ' ' : '') + RG_J[id][0]; };
   function renderSide() {
-    const a = A().auto; let h = '';
+    const a = A().auto, hasMouth = !!(rig.mouth && rig.mouth.on !== false); let h = '';
+    if (chars().length > 1) h += `<div class="sec"><h3>캐릭터 (${chars().length}명)</h3><p class="muted small">고친 내용은 고른 캐릭터에만 들어가요. 그림에서 캐릭터를 눌러도 바뀌어요.</p><div class="btnrow">${[...chars()].sort((x, y) => x.cname.localeCompare(y.cname)).map(c => `<button class="btn sm ${c === rig ? 'on' : ''}" data-rgc="${c.cid}">${esc(c.cname)}</button>`).join('')}</div><div class="btnrow"><button class="btn sm" data-rga="cfront" title="이 캐릭터를 다른 캐릭터 앞에 그려요">앞으로</button><button class="btn sm" data-rga="cback" title="이 캐릭터를 다른 캐릭터 뒤에 그려요">뒤로</button><button class="btn sm" data-rga="crename">이름</button></div></div>`;
     if (st.mode === 'pose') {
       const key = A().keys[keyAt(st.t)] || null, p = rgKeyPose(rig, st.t), sj = st.sel && rgOn(rig, st.sel) ? st.sel : null, limb = sj && rgLimbOf(sj), pin = rig.pins.find(q => q.id === st.selPin);
       h += `<div class="sec"><h3>자세 잡기</h3><p class="muted small">동그란 <b>관절을 끌면</b> 그 부분이 움직여요. 손목·발목을 끌면 팔꿈치·무릎이 알아서 굽어요. 네모(골반)를 끌면 통째로 옮겨요.<br>Ctrl+끌기 = 늘이기, Alt+끌기 = 그 마디만 돌리기.<br>시간 막대의 다른 곳에서 자세를 바꾸면 ◆가 새로 생기고, ◆ 사이는 저절로 이어져요.</p>
@@ -801,12 +941,12 @@ function rgWindow(rig, from) {
         ${rng('돌리기', 'data-rgj="r"', Math.round((p.r[sj] || 0) * 180 / Math.PI), -180, 180, 1, '이 관절에 달린 부분을 돌려요')}
         ${rng('크기', 'data-rgj="s"', Math.round((p.s[sj] || 1) * 100), 50, 160, 1, '이 관절에 달린 부분을 키우거나 줄여요 (멀어지고 가까워지는 느낌)')}</div>
         <div class="btnrow"><button class="btn sm" data-rga="joint0">이 관절 처음대로</button>${limb ? `<button class="btn sm" data-rga="zfront" title="이 팔·다리를 몸 앞에 그려요">몸 앞으로</button><button class="btn sm" data-rga="zback" title="이 팔·다리를 몸 뒤에 그려요">몸 뒤로</button>` : ''}</div></div>`;
-      if (pin) h += `<div class="sec"><h3>고른 핀</h3><div class="grid2 rg-g">${rng('범위', 'data-rgp="r"', Math.round(pin.r), Math.round(U0 * 0.08), Math.round(U0 * 1.5), 1, '핀을 끌 때 같이 움직이는 넓이')}</div><div class="btnrow"><button class="btn sm" data-rga="pin0">제자리로</button><button class="btn sm" data-rga="pindel">핀 지우기</button></div></div>`;
-      h += `<div class="sec"><h3>전체</h3><div class="grid2 rg-g">${rng('크기', 'data-rgw="sc"', Math.round(p.sc * 100), 50, 160)}${rng('기울기', 'data-rgw="rot"', Math.round(p.rot * 180 / Math.PI), -90, 90)}${rig.eyes.some(e => e.on !== false) ? rng('눈 감기', 'data-rgw="blink"', Math.round((p.blink || 0) * 100), 0, 100, 1, '이 시각에 눈을 얼마나 감을지 (윙크·졸린 눈)') : ''}</div></div>`;
+      if (pin) h += `<div class="sec"><h3>고른 핀</h3><div class="grid2 rg-g">${rng('범위', 'data-rgp="r"', Math.round(pin.r), Math.round(rgUnit(rig) * 0.08), Math.round(rgUnit(rig) * 1.5), 1, '핀을 끌 때 같이 움직이는 넓이')}</div><div class="btnrow"><button class="btn sm" data-rga="pin0">제자리로</button><button class="btn sm" data-rga="pindel">핀 지우기</button></div></div>`;
+      h += `<div class="sec"><h3>전체</h3><div class="grid2 rg-g">${rng('크기', 'data-rgw="sc"', Math.round(p.sc * 100), 50, 160)}${rng('기울기', 'data-rgw="rot"', Math.round(p.rot * 180 / Math.PI), -90, 90)}${rig.eyes.some(e => e.on !== false) ? rng('눈 감기', 'data-rgw="blink"', Math.round((p.blink || 0) * 100), 0, 100, 1, '이 시각에 눈을 얼마나 감을지 (윙크·졸린 눈)') : ''}${hasMouth ? rng('입 벌리기', 'data-rgw="mouth"', Math.round((p.mouth || 0) * 100), rig.mouth.type === 'open' ? -100 : 0, 100, 1, '이 시각에 입을 얼마나 벌릴지. 원래 벌린 입은 왼쪽으로 밀면 다물어요') : ''}</div>${rig.mouth ? '' : '<p class="muted small" style="margin-top:6px">입 벌리기는 ① 뼈대 맞추기에서 입 상자를 넣으면 쓸 수 있어요.</p>'}</div>`;
       h += `<div class="sec"><h3>자동 움직임</h3><p class="muted small">저장한 자세 위에 저절로 더해져요. 0이면 꺼져요.</p><div class="grid2 rg-g">
         ${rng('숨쉬기', 'data-rgau="breath"', a.breath, 0, 100)}${rng('몸 흔들기', 'data-rgau="sway"', a.sway, 0, 100)}${rng('고개', 'data-rgau="head"', a.head, 0, 100)}${rng('통통 튀기', 'data-rgau="bounce"', a.bounce, 0, 100)}
         ${rng('살랑임', 'data-rgau="wind"', a.wind, 0, 100, 1, '머리카락 끝·옷자락처럼 몸에서 먼 곳이 바람에 살랑거려요')}${rng('늦게 따라오기', 'data-rgau="follow"', a.follow, 0, 100, 1, '몸이 움직일 때 머리카락·옷자락이 조금 늦게 따라와요')}
-        ${rig.eyes.some(e => e.on !== false) ? rng('눈 깜빡임', 'data-rgau="blink"', a.blink, 0, 100, 1, '클수록 자주 깜빡여요') : ''}${rng('빠르기', 'data-rgau="speed"', a.speed, 40, 250)}</div>
+        ${rig.eyes.some(e => e.on !== false) ? rng('눈 깜빡임', 'data-rgau="blink"', a.blink, 0, 100, 1, '클수록 자주 깜빡여요') : ''}${hasMouth ? rng('말하기', 'data-rgau="talk"', a.talk || 0, 0, 100, 1, '말하는 것처럼 입을 뻥긋거려요. 클수록 크게 벌려요') : ''}${rng('빠르기', 'data-rgau="speed"', a.speed, 40, 250)}</div>
         <div class="btnrow"><button class="btn sm" data-rga="auto0">모두 끄기</button><button class="btn sm" data-rga="auto1">기본값</button></div></div>`;
       h += `<div class="sec"><h3>움직임 견본</h3><p class="muted small">누르면 맨 앞 자세를 바탕으로 시간 막대를 채워요.</p><div class="btnrow">${RG_MOVES.filter(([k]) => !/^wave/.test(k) || rgOn(rig, k === 'waveA' ? 'aWri' : 'bWri')).map(([k, l]) => `<button class="btn sm" data-rgmv="${k}">${l}${/^wave/.test(k) ? ' (' + rgSideName(rig, k === 'waveA' ? 'armA' : 'armB').replace(' 팔', '') + ')' : ''}</button>`).join('')}</div></div>`;
     } else if (st.mode === 'bone') {
@@ -816,14 +956,17 @@ function rgWindow(rig, from) {
         ${['armA', 'armB', 'legA', 'legB'].filter(k => rgOn(rig, RG_LIMBS[k][1])).map(k => `<label class="chk" style="margin-left:14px"><input type="checkbox" data-rgl2="${k}" ${rgOn(rig, RG_LIMBS[k][2]) ? 'checked' : ''}> ${rgSideName(rig, k)} 아래쪽(${k.startsWith('arm') ? '손목' : '발목'})까지</label>`).join('')}</div>
         <div class="sec"><h3>눈 (깜빡임용)</h3><p class="muted small">하늘색 상자가 눈이에요. 속눈썹 위부터 아래까지 딱 맞게 끌어 맞추면 깜빡임이 자연스러워요. 오른쪽 아래 모서리를 끌면 크기가 바뀌어요.</p>
         ${rig.eyes.map((e, i) => `<label class="chk"><input type="checkbox" data-rge="${i}" ${e.on !== false ? 'checked' : ''}> 눈 ${i + 1}</label>`).join('')}
-        <div class="btnrow"><button class="btn sm" data-rga="eyefind">AI로 눈 다시 찾기</button><button class="btn sm" data-rga="eyeadd" ${rig.eyes.length >= 2 ? 'disabled' : ''}>눈 상자 추가</button>${st.selEye >= 0 && rig.eyes[st.selEye] ? '<button class="btn sm" data-rga="eyedel">고른 눈 지우기</button>' : ''}</div></div>`;
+        <div class="btnrow"><button class="btn sm" data-rga="eyefind">AI로 눈 다시 찾기</button><button class="btn sm" data-rga="eyeadd" ${rig.eyes.length >= 2 ? 'disabled' : ''}>눈 상자 추가</button>${st.selEye >= 0 && rig.eyes[st.selEye] ? '<button class="btn sm" data-rga="eyedel">고른 눈 지우기</button>' : ''}</div></div>
+        <div class="sec"><h3>입 (입 벌리기·말하기용)</h3><p class="muted small">분홍 상자가 입이에요. 입술 선(벌린 입이면 입 전체)에 딱 맞게 맞춰 주세요.${rig.mouth && rig.mouth.est ? ' <b>입을 또렷이 찾지 못해 어림한 자리예요.</b>' : ''}</p>
+        ${rig.mouth ? `<label class="chk"><input type="checkbox" data-rgmo="on" ${rig.mouth.on !== false ? 'checked' : ''}> 입 쓰기</label><div class="grid2 rg-g"><span>입 모양</span><span><select data-rgmo="type"><option value="line" ${rig.mouth.type !== 'open' ? 'selected' : ''}>다문 입 (선)</option><option value="open" ${rig.mouth.type === 'open' ? 'selected' : ''}>벌린 입</option></select></span><span title="다문 입을 벌렸을 때 보이는 입속 색">입속 색</span><span><input type="color" data-rgmo="col" value="#${(rig.mouth.col || [110, 40, 45]).map(v => Math.round(v).toString(16).padStart(2, '0')).join('')}"></span></div>` : ''}
+        <div class="btnrow"><button class="btn sm" data-rga="mouthfind">입 다시 찾기</button>${rig.mouth ? '<button class="btn sm" data-rga="mouthdel">입 상자 지우기</button>' : '<button class="btn sm" data-rga="mouthadd">입 상자 추가</button>'}</div></div>`;
     } else {
       const L = rig.layers.find(l => l.id === st.selLayer) || base();
       h += `<div class="sec"><h3>부위 나누기</h3><p class="muted small">몸 앞에 겹친 팔, 앞머리, 꼬리처럼 <b>따로 움직이고 싶은 곳</b>을 붓으로 칠한 뒤 '떼어 내기'를 눌러요. 떼어 낸 자리는 AI가 메워요. 안 나눠도 움직일 수 있어요.</p>
         <div class="seg"><button class="btn sm ${st.brush === 'add' ? 'on' : ''}" data-rgb="add">칠하기</button><button class="btn sm ${st.brush === 'sub' ? 'on' : ''}" data-rgb="sub" title="Alt를 누른 채 칠해도 돼요">지우기</button></div>
         <div class="grid2 rg-g" style="margin-top:6px">${rng('붓 크기', 'data-rgbs', st.bsize, 8, 240, 1, '[ ] 키로도 바꿔요')}</div>
         <div class="btnrow"><button class="btn sm" data-rga="sam" title="대충 칠한 곳을 AI가 물체 윤곽에 맞춰 줘요">AI로 윤곽 맞추기</button><button class="btn sm" data-rga="pmclear">칠한 것 지우기</button></div>
-        <div class="btnrow"><button class="btn sm primary" data-rga="split">떼어 내기 (새 부위)</button></div>
+        <div class="btnrow"><button class="btn sm primary" data-rga="split">떼어 내기 (새 부위)</button><button class="btn sm" data-rga="newchar" title="붙어 있는 다른 캐릭터를 칠한 뒤 누르면, 뼈대를 따로 가진 새 캐릭터가 돼요">새 캐릭터로 떼기</button></div>
         <div class="btnrow"><button class="btn sm" data-rga="carve" title="캐릭터가 아닌데 같이 따진 곳을 배경으로 돌려보내요">캐릭터에서 빼기</button><button class="btn sm" data-rga="uncarve" title="캐릭터인데 빠진 곳을 원래 그림에서 가져와요">캐릭터에 넣기</button></div></div>
         <div class="sec"><h3>부위 목록</h3><p class="muted small">위에 있을수록 앞에 그려요.</p><div class="rg-layers">${[...rig.layers].sort((x, y) => (y.z || 0) - (x.z || 0)).map(l => `<div class="rg-ly ${l.id === L.id ? 'on' : ''}" data-rgly="${l.id}"><button class="ic" data-rgeye="${l.id}" title="보이기·숨기기">${l.hide ? '○' : '●'}</button><span class="nm">${esc(l.name)}</span><button class="ic" data-rgup="${l.id}" title="앞으로">▲</button><button class="ic" data-rgdn="${l.id}" title="뒤로">▼</button></div>`).join('')}</div>
         <label class="chk"><input type="checkbox" data-rga2="solo" ${st.solo ? 'checked' : ''}> 고른 부위만 보기</label>
@@ -833,12 +976,13 @@ function rgWindow(rig, from) {
     side.innerHTML = h;
   }
   const editPose = fn => { const k = keyHere(true); fn(k.p); dirty(); };
-  side.addEventListener('pointerdown', e => { if (e.target.matches('input[type=range]')) snap(); });
+  side.addEventListener('pointerdown', e => { if (e.target.matches('input[type=range], input[type=color]')) snap(); });
   side.addEventListener('input', e => {
     const t = e.target, v = +t.value;
     if (t.dataset.rgau) { A().auto[t.dataset.rgau] = v; dirty(); }
     else if (t.dataset.rgj && st.sel) editPose(p => { if (t.dataset.rgj === 'r') p.r[st.sel] = v * Math.PI / 180; else p.s[st.sel] = v / 100; });
-    else if (t.dataset.rgw) editPose(p => { if (t.dataset.rgw === 'sc') p.sc = v / 100; else if (t.dataset.rgw === 'rot') p.rot = v * Math.PI / 180; else p.blink = v / 100; });
+    else if (t.dataset.rgw) editPose(p => { if (t.dataset.rgw === 'sc') p.sc = v / 100; else if (t.dataset.rgw === 'rot') p.rot = v * Math.PI / 180; else if (t.dataset.rgw === 'mouth') p.mouth = v / 100; else p.blink = v / 100; });
+    else if (t.dataset.rgmo === 'col' && rig.mouth) { const hx = t.value.replace('#', ''); rig.mouth.col = [0, 2, 4].map(i => parseInt(hx.slice(i, i + 2), 16)); dirty(); }
     else if (t.dataset.rgp) { const pin = rig.pins.find(q => q.id === st.selPin); if (pin) { pin.r = v; for (const L of rig.layers) if (L.mesh) rgPinWeights(rig, L); dirty(); } }
     else if (t.dataset.rgbs !== undefined) { st.bsize = v; }
   });
@@ -846,11 +990,13 @@ function rgWindow(rig, from) {
     const t = e.target;
     if (t.dataset.rgl || t.dataset.rgl2) { snap(); const ids = RG_LIMBS[t.dataset.rgl || t.dataset.rgl2], from0 = t.dataset.rgl ? 1 : 2; if (t.dataset.rgl) rig.joints[ids[0]].on = true; for (let i = from0; i < ids.length; i++) rig.joints[ids[i]].on = t.checked; if (t.checked) fixLimb(ids); rig.ver++; renderSide(); dirty(); }
     else if (t.dataset.rge) { snap(); rig.eyes[+t.dataset.rge].on = t.checked; dirty(); }
+    else if (t.dataset.rgmo === 'on' && rig.mouth) { snap(); rig.mouth.on = t.checked; dirty(); }
+    else if (t.dataset.rgmo === 'type' && rig.mouth) { snap(); rig.mouth.type = t.value; dirty(); }
     else if (t.dataset.rga2 === 'solo') { st.solo = t.checked; dirty(); }
     else if (t.dataset.rgfollow !== undefined) { const L = rig.layers.find(l => l.id === st.selLayer); if (!L || L.base) return; snap(); L.follow = t.value || null; if (L.follow) L.bind = []; rig.ver++; renderSide(); dirty(); }
   });
   // 켠 팔·다리의 관절이 한 점에 뭉쳐 있으면 보기 좋게 펴 놓아요
-  const fixLimb = ids => { for (let i = 1; i < ids.length; i++) { const a = rig.joints[ids[i - 1]], b = rig.joints[ids[i]]; if (Math.hypot(a.x - b.x, a.y - b.y) < U0 * 0.08) { b.x = clamp(a.x + (ids[0][0] === 'a' ? 1 : -1) * U0 * 0.08, 2, rig.W - 2); b.y = clamp(a.y + U0 * (i === 3 ? 0.15 : 0.4), 2, rig.H - 2); } } };
+  const fixLimb = ids => { for (let i = 1; i < ids.length; i++) { const a = rig.joints[ids[i - 1]], b = rig.joints[ids[i]]; if (Math.hypot(a.x - b.x, a.y - b.y) < rgUnit(rig) * 0.08) { b.x = clamp(a.x + (ids[0][0] === 'a' ? 1 : -1) * rgUnit(rig) * 0.08, 2, rig.W - 2); b.y = clamp(a.y + rgUnit(rig) * (i === 3 ? 0.15 : 0.4), 2, rig.H - 2); } } };
   const pmMask = () => { if (!st.pm || !st.pmAny) return null; const c = newCanvas(rig.W, rig.H), g = c.getContext('2d', { willReadFrequently: true }); g.imageSmoothingQuality = 'high'; g.drawImage(st.pm, 0, 0, rig.W, rig.H); const d = g.getImageData(0, 0, rig.W, rig.H).data, M = new Uint8ClampedArray(rig.W * rig.H); let n = 0; for (let i = 0; i < M.length; i++) { M[i] = clamp((d[i * 4 + 3] - 64) * 2, 0, 255); if (M[i] > 128) n++; } return n > 20 ? M : null; };
   const pmFrom = M => { const c = newCanvas(rig.W, rig.H), g = c.getContext('2d'), id = g.createImageData(rig.W, rig.H); for (let i = 0; i < M.length; i++) { id.data[i * 4] = 255; id.data[i * 4 + 1] = 60; id.data[i * 4 + 2] = 160; id.data[i * 4 + 3] = M[i]; } g.putImageData(id, 0, 0); const pg = st.pm.getContext('2d'); pg.clearRect(0, 0, st.pm.width, st.pm.height); pg.drawImage(c, 0, 0, st.pm.width, st.pm.height); st.pmAny = true; };
   const busy = async (title, fn) => { // 오래 걸리는 일: 이 창 위에 진행 표시
@@ -863,8 +1009,9 @@ function rgWindow(rig, from) {
     if (b && (b.dataset.rgup || b.dataset.rgdn)) { const up = !!b.dataset.rgup, id = b.dataset.rgup || b.dataset.rgdn, ord = [...rig.layers].sort((x, y) => (x.z || 0) - (y.z || 0)), i = ord.findIndex(l => l.id === id), j = i + (up ? 1 : -1); if (j < 0 || j >= ord.length) return; snap(); [ord[i], ord[j]] = [ord[j], ord[i]]; ord.forEach((l, k) => { l.z = k; }); renderSide(); dirty(); return; }
     if (ly && !b) { st.selLayer = ly.dataset.rgly; renderSide(); dirty(); return; }
     if (!b) return;
+    if (b.dataset.rgc) { const c = chars().find(q => q.cid === b.dataset.rgc); if (c) { switchChar(c); renderSide(); } return; }
     if (b.dataset.rgb) { st.brush = b.dataset.rgb; renderSide(); return; }
-    if (b.dataset.rgmv) { const mv = rgMoveKeys(rig, b.dataset.rgmv); if (!mv) return; if (A().keys.length > 1 && !(await rgAsk('시간 막대에 저장해 둔 자세들이 견본으로 바뀌어요. 계속할까요?'))) return; snap(); A().dur = mv.dur; A().keys = mv.keys; A().loop = true; st.selKey = 0; st.t = 0; syncTime(); renderSide(); if (!st.playing) togglePlay(); return; }
+    if (b.dataset.rgmv) { const mv = rgMoveKeys(rig, b.dataset.rgmv); if (!mv) return; if (A().keys.length > 1 && !(await rgAsk('시간 막대에 저장해 둔 자세들이 견본으로 바뀌어요. 계속할까요?'))) return; snap(); A().keys = mv.keys; if (chars().length < 2 || mv.dur > A().dur) setDur(mv.dur); else if (mv.dur < A().dur) { const n = Math.max(1, Math.round(A().dur / mv.dur)), ks = []; for (let r = 0; r < n; r++) for (const k of mv.keys) ks.push({ t: Math.round((k.t + r * mv.dur) * A().dur / (n * mv.dur) * 1000) / 1000, e: k.e, p: rgPoseCopy(k.p) }); A().keys = ks; } for (const c of chars()) c.anim.loop = true; st.selKey = 0; st.t = 0; syncTime(); renderSide(); if (!st.playing) togglePlay(); return; }
     const act = b.dataset.rga; if (!act) return;
     if (act === 'pose0') { snap(); editPose(p => { Object.assign(p, rgPose0()); }); renderSide(); }
     else if (act === 'pintool') { st.tool = st.tool === 'pin' ? 'move' : 'pin'; renderSide(); if (st.tool === 'pin') toast('핀을 꽂을 곳(머리카락 끝·옷자락 등)을 눌러 주세요'); }
@@ -872,21 +1019,43 @@ function rgWindow(rig, from) {
     else if ((act === 'zfront' || act === 'zback') && st.sel) { const l = rgLimbOf(st.sel); if (!l) return; snap(); rig.zs[l] = act === 'zfront' ? 2 : -2; for (const L of rig.layers) if (L.mesh) rgSortTris(rig, L); dirty(); }
     else if (act === 'pin0') { snap(); editPose(p => { delete p.pins[st.selPin]; }); }
     else if (act === 'pindel') { snap(); rig.pins = rig.pins.filter(q => q.id !== st.selPin); for (const k of A().keys) delete k.p.pins[st.selPin]; st.selPin = null; for (const L of rig.layers) if (L.mesh) rgPinWeights(rig, L); renderSide(); dirty(); }
-    else if (act === 'auto0') { snap(); for (const k of ['breath', 'sway', 'head', 'bounce', 'wind', 'follow', 'blink']) A().auto[k] = 0; renderSide(); dirty(); }
+    else if (act === 'auto0') { snap(); for (const k of ['breath', 'sway', 'head', 'bounce', 'wind', 'follow', 'blink', 'talk']) A().auto[k] = 0; renderSide(); dirty(); }
     else if (act === 'auto1') { snap(); Object.assign(A().auto, rgNewAnim().auto); if (!rig.eyes.length) A().auto.blink = 0; renderSide(); dirty(); }
     else if (act === 'repose') busy('뼈대를 다시 찾는 중…', async tk => { const bx = rgBBox(rgAlpha(base(), rig.W, rig.H), rig.W, rig.H, 100) || { x: 0, y: 0, w: rig.W, h: rig.H }; const K = await rgPoseRun(rig.src, rig.W, rig.H, bx, tk), sk = rgSkeleton(K, rig.W, rig.H, bx); snap(); rig.joints = sk.joints; rig.autoSk = sk.auto; rig.conf = sk.conf; rig.ver++; if (!sk.auto) toast('AI가 뼈대를 찾지 못해서 기본 뼈대를 놓았어요. 끌어서 맞춰 주세요.', 4200); });
     else if (act === 'eyefind') busy('눈을 찾는 중…', async tk => { const bx = rgBBox(rgAlpha(base(), rig.W, rig.H), rig.W, rig.H, 100) || { x: 0, y: 0, w: rig.W, h: rig.H }; const ey = await rgFindEyes(rig.src, rig.W, rig.H, { joints: rig.joints, auto: true }, bx, tk); snap(); rig.eyes = ey; st.selEye = -1; toast(ey.length ? `눈 ${ey.length}개를 찾았어요` : '눈을 찾지 못했어요. 눈 상자를 직접 추가해 주세요.'); });
     else if (act === 'eyeadd') { snap(); const J = rig.joints, s = Math.max(16, Math.hypot(J.head.x - J.neck.x, J.head.y - J.neck.y) * 0.3); rig.eyes.push({ x: (J.head.x + J.neck.x) / 2 - s / 2 + (rig.eyes.length ? s * 1.4 : -s * 0.7), y: (J.head.y + J.neck.y) / 2 - s * 0.35, w: s, h: s * 0.7, on: true }); st.selEye = rig.eyes.length - 1; renderSide(); dirty(); }
     else if (act === 'eyedel') { snap(); rig.eyes.splice(st.selEye, 1); st.selEye = -1; renderSide(); dirty(); }
+    else if (act === 'cfront' || act === 'cback') { const ord = [...chars()].sort((x, y) => (x.cz || 0) - (y.cz || 0)), i = ord.indexOf(rig), j = i + (act === 'cfront' ? 1 : -1); if (j < 0 || j >= ord.length) { toast(act === 'cfront' ? '이미 맨 앞이에요' : '이미 맨 뒤예요'); return; } snap(); [ord[i], ord[j]] = [ord[j], ord[i]]; ord.forEach((c, k) => { c.cz = k; }); dirty(); }
+    else if (act === 'crename') { const v = await rgPrompt('캐릭터 이름', rig.cname); if (v) { snap(); rig.cname = v.slice(0, 20); renderSide(); } }
+    else if (act === 'mouthfind') { const mo = rgFindMouth(main.src, main.W, main.H, rig.eyes.filter(e => e.on !== false)); if (!mo) { toast('입을 찾으려면 눈 상자 두 개가 있어야 해요. 입 상자를 직접 추가해도 돼요.', 4200); return; } snap(); rig.mouth = mo; renderSide(); dirty(); toast(mo.est ? '입을 또렷이 찾지 못해 어림한 자리에 놓았어요. 끌어서 맞춰 주세요.' : '입을 찾았어요'); }
+    else if (act === 'mouthadd') { snap(); const J = rig.joints, s = Math.max(14, Math.hypot(J.head.x - J.neck.x, J.head.y - J.neck.y) * 0.28); rig.mouth = { x: J.neck.x - s / 2, y: J.neck.y - s * 1.1, w: s, h: Math.max(4, s * 0.16), on: true, type: 'line', col: [120, 40, 45] }; st.selEye = 'm'; renderSide(); dirty(); }
+    else if (act === 'mouthdel') { snap(); rig.mouth = null; if (st.selEye === 'm') st.selEye = -1; renderSide(); dirty(); }
+    else if (act === 'newchar') {
+      const M = pmMask(); if (!M) { toast('먼저 따로 떼어 낼 캐릭터를 붓으로 칠해 주세요 (AI로 윤곽 맞추기를 쓰면 편해요)', 4200); return; } if (chars().length >= 4) { toast('캐릭터는 4명까지 나눌 수 있어요'); return; }
+      busy('새 캐릭터로 나누는 중…', async tk => {
+        const before = shot(), N = await rgSplit(rig, base(), M, '몸 전체', tk); if (!N) { toast('칠한 곳에 캐릭터가 거의 없어요'); return; }
+        rig.layers.splice(rig.layers.indexOf(N), 1); rig.ver++;
+        const bx = rgBBox(rgAlpha(N, main.W, main.H), main.W, main.H, 100) || { x: 0, y: 0, w: main.W, h: main.H }; let K = null, eyes = [];
+        try { K = await rgPoseRun(main.src, main.W, main.H, bx, tk); } catch (e) { console.warn(e); }
+        const sk = rgSkeleton(K, main.W, main.H, bx); try { eyes = await rgFindEyes(main.src, main.W, main.H, sk, bx, tk); } catch (e) { console.warn(e); }
+        const c = rgNewChar(main, N.tex, sk, eyes, chars().length); c.bg = main.bg; c.out = main.out; c.anim.dur = main.anim.dur; c.anim.loop = main.anim.loop; c.cz = Math.max(...chars().map(q => q.cz || 0)) + 1; c.cname = '캐릭터 ' + (chars().length + 1);
+        main.more = [...(main.more || []), c]; st.undo.push(before); st.redo.length = 0; st.pm.getContext('2d').clearRect(0, 0, st.pm.width, st.pm.height); st.pmAny = false; switchChar(c);
+        toast(`'${c.cname}'(으)로 따로 나눴어요.${sk.auto ? '' : ' 뼈대를 찾지 못해 기본 뼈대를 놓았으니 ① 뼈대 맞추기에서 맞춰 주세요.'}`, 5000);
+      });
+    }
     else if (act === 'pmclear') { if (st.pm) st.pm.getContext('2d').clearRect(0, 0, st.pm.width, st.pm.height); st.pmAny = false; dirty(); }
-    else if (act === 'sam') { const M = pmMask(); if (!M) { toast('먼저 맞출 곳을 붓으로 대충 칠해 주세요'); return; } busy('AI가 윤곽을 맞추는 중…', async tk => { const N = await rgSamRefine(rig, M, tk); if (!N) { toast('윤곽을 맞추지 못했어요. 칠한 그대로 쓰거나 조금 더 칠해 보세요.'); return; } pmFrom(N); }); }
+    else if (act === 'sam') { const M = pmMask(); if (!M) { toast('먼저 맞출 곳을 붓으로 대충 칠해 주세요'); return; } busy('AI가 윤곽을 맞추는 중…', async tk => { const N = await rgSamRefine(rig, M, tk); if (!N) { toast('윤곽을 맞추지 못했어요. 칠한 그대로 쓰거나 조금 더 칠해 보세요.'); return; }
+      // 칠한 곳의 안쪽은 AI가 빼먹어도 그대로 두고, 칠한 곳에서 멀리 벗어난 곳은 버려요 (가장자리만 AI 윤곽을 따라가요)
+      const n = M.length, f = new Float32Array(n); for (let i = 0; i < n; i++) f[i] = M[i] / 255; const bl = dpBox(f, rig.W, rig.H, Math.max(4, Math.round(Math.max(rig.W, rig.H) / 110))); let lost = 0, tot = 0;
+      for (let i = 0; i < n; i++) { if (M[i] > 128) { tot++; if (N[i] < 128) lost++; } N[i] = bl[i] > 0.97 ? 255 : bl[i] < 0.03 ? 0 : N[i]; }
+      pmFrom(N); if (tot && lost / tot > 0.35) toast('AI가 윤곽을 잘 못 잡은 곳은 칠한 그대로 뒀어요. 가장자리를 붓으로 다듬어 주세요.', 4200); }); }
     else if (act === 'split' || act === 'carve' || act === 'uncarve') {
       const M = pmMask(); if (!M) { toast('먼저 붓으로 칠해 주세요'); return; }
       const L = act === 'uncarve' ? (rig.layers.find(l => l.id === st.selLayer) || base()) : base();
       busy(act === 'split' ? '부위를 떼어 내는 중…' : '고치는 중…', async tk => {
         const before = shot();
         if (act === 'split') { const name = '부위 ' + rig.layers.length, N = await rgSplit(rig, L, M, name, tk); if (!N) { toast('칠한 곳에 캐릭터가 거의 없어요'); return; } st.undo.push(before); st.redo.length = 0; st.selLayer = N.id; toast(`'${N.name}'을(를) 떼어 냈어요. ③ 움직임 만들기에서 움직여 보세요.${N.bind.length ? '' : ' 뼈가 없는 부위라 가까운 관절을 따라가요.'}`, 4200); }
-        else { await rgCarve(rig, L, M, act === 'uncarve', tk); st.undo.push(before); st.redo.length = 0; }
+        else { await rgCarve(rig, L, M, act === 'uncarve', tk); for (const c of chars()) c.bg = rig.bg; st.undo.push(before); st.redo.length = 0; }
         st.pm.getContext('2d').clearRect(0, 0, st.pm.width, st.pm.height); st.pmAny = false;
       });
     }
@@ -899,7 +1068,7 @@ function rgWindow(rig, from) {
   const hitJoint = q => { const P = st.ev && st.ev.P; if (!P) return null; let best = null, bd = (13 * dpr() / st.view.k) ** 2; for (const id of RG_IDS) { if (!P[id]) continue; const d = (P[id].x - q.x) ** 2 + (P[id].y - q.y) ** 2; if (d < bd) { bd = d; best = id; } } return best; };
   const hitPin = q => { let best = null, bd = (13 * dpr() / st.view.k) ** 2; for (const p of rig.pins) { const w = pinPos(p), d = (w.x - q.x) ** 2 + (w.y - q.y) ** 2; if (d < bd) { bd = d; best = p; } } return best; };
   // 화면에서 누른 곳이 원래 그림의 어디인지 (지금 자세로 옮겨진 그물에서 거꾸로 찾기)
-  const pickRest = q => { for (const L of [...rig.layers].sort((a, b) => (b.z || 0) - (a.z || 0))) { const me = L.mesh; if (!me || L.hide) continue; const O = me.out, I = me.I, V = me.V, A2 = rgAlpha(L, rig.W, rig.H); for (let t = I.length - 3; t >= 0; t -= 3) { const a = I[t], b = I[t + 1], c = I[t + 2], x1 = O[a * 2], y1 = O[a * 2 + 1], x2 = O[b * 2], y2 = O[b * 2 + 1], x3 = O[c * 2], y3 = O[c * 2 + 1], den = (y2 - y3) * (x1 - x3) + (x3 - x2) * (y1 - y3); if (Math.abs(den) < 1e-9) continue; const u = ((y2 - y3) * (q.x - x3) + (x3 - x2) * (q.y - y3)) / den, v = ((y3 - y1) * (q.x - x3) + (x1 - x3) * (q.y - y3)) / den, w = 1 - u - v; if (u < 0 || v < 0 || w < 0) continue; const rx = u * V[a * 2] + v * V[b * 2] + w * V[c * 2], ry = u * V[a * 2 + 1] + v * V[b * 2 + 1] + w * V[c * 2 + 1], ix = clamp(Math.round(rx), 0, rig.W - 1), iy = clamp(Math.round(ry), 0, rig.H - 1); if (A2[iy * rig.W + ix] > 30) return { x: rx, y: ry, L }; } } return null; };
+  const pickRest = (q, c0) => { const rig = c0 || cur(); for (const L of [...rig.layers].sort((a, b) => (b.z || 0) - (a.z || 0))) { const me = L.mesh; if (!me || L.hide) continue; const O = me.out, I = me.I, V = me.V, A2 = rgAlpha(L, rig.W, rig.H); for (let t = I.length - 3; t >= 0; t -= 3) { const a = I[t], b = I[t + 1], c = I[t + 2], x1 = O[a * 2], y1 = O[a * 2 + 1], x2 = O[b * 2], y2 = O[b * 2 + 1], x3 = O[c * 2], y3 = O[c * 2 + 1], den = (y2 - y3) * (x1 - x3) + (x3 - x2) * (y1 - y3); if (Math.abs(den) < 1e-9) continue; const u = ((y2 - y3) * (q.x - x3) + (x3 - x2) * (q.y - y3)) / den, v = ((y3 - y1) * (q.x - x3) + (x1 - x3) * (q.y - y3)) / den, w = 1 - u - v; if (u < 0 || v < 0 || w < 0) continue; const rx = u * V[a * 2] + v * V[b * 2] + w * V[c * 2], ry = u * V[a * 2 + 1] + v * V[b * 2 + 1] + w * V[c * 2 + 1], ix = clamp(Math.round(rx), 0, rig.W - 1), iy = clamp(Math.round(ry), 0, rig.H - 1); if (A2[iy * rig.W + ix] > 30) return { x: rx, y: ry, L }; } } return null; };
   const paint = (q0, q1, sub) => { if (!st.pm) st.pm = newCanvas(Math.round(rig.W / 2), Math.round(rig.H / 2)); const g = st.pm.getContext('2d'), s = st.pm.width / rig.W, r = st.bsize / 2 * dpr() / st.view.k; g.globalCompositeOperation = sub ? 'destination-out' : 'source-over'; g.strokeStyle = g.fillStyle = 'rgb(255,60,160)'; g.lineWidth = r * 2 * s; g.lineCap = g.lineJoin = 'round'; g.beginPath(); g.moveTo(q0.x * s, q0.y * s); g.lineTo(q1.x * s + 0.01, q1.y * s); g.stroke(); g.globalCompositeOperation = 'source-over'; if (!sub) st.pmAny = true; dirty(); };
   const invLin = (M, dx, dy) => { const det = M[0] * M[3] - M[1] * M[2] || 1; return [(M[3] * dx - M[2] * dy) / det, (-M[1] * dx + M[0] * dy) / det]; };
   ov.addEventListener('pointerdown', e => {
@@ -908,18 +1077,22 @@ function rgWindow(rig, from) {
     if (e.button !== 0) return;
     if (st.playing) { st.playing = false; syncPlay(); }
     if (st.mode === 'part') { st.drag = { kind: 'paint', last: q, sub: e.altKey || st.brush === 'sub' }; paint(q, q, st.drag.sub); return; }
+    // 다른 캐릭터를 눌렀으면 그 캐릭터로 바꿔요
+    if (chars().length > 1 && st.tool !== 'pin' && !hitJoint(q) && !(st.mode === 'pose' && hitPin(q))) { const cs = chars(), tolC = (13 * dpr() / st.view.k) ** 2; let to = null; for (let ci = 0; ci < cs.length && !to; ci++) { if (cs[ci] === rig || !st.evs || !st.evs[ci]) continue; const Q = st.evs[ci].P; for (const id of RG_IDS) if (Q[id] && (Q[id].x - q.x) ** 2 + (Q[id].y - q.y) ** 2 < tolC) { to = cs[ci]; break; } } if (!to && !pickRest(q)) for (const c of [...cs].sort((x, y) => (y.cz || 0) - (x.cz || 0))) if (c !== rig && pickRest(q, c)) { to = c; break; } if (to) switchChar(to); }
     if (st.mode === 'bone') {
+      if (rig.mouth) { const ey = rig.mouth, tol = 9 * dpr() / st.view.k; if (Math.abs(q.x - ey.x - ey.w) < tol && Math.abs(q.y - ey.y - ey.h) < tol) { snap(); st.selEye = 'm'; st.drag = { kind: 'mouthSize', x: q.x, y: q.y }; renderSide(); return; } }
       for (let i = rig.eyes.length - 1; i >= 0; i--) { const ey = rig.eyes[i], tol = 9 * dpr() / st.view.k; if (Math.abs(q.x - ey.x - ey.w) < tol && Math.abs(q.y - ey.y - ey.h) < tol) { snap(); st.selEye = i; st.drag = { kind: 'eyeSize', i, x: q.x, y: q.y, w: ey.w, h: ey.h }; renderSide(); return; } }
       const j = hitJoint(q);
       if (j) { snap(); st.sel = j; st.drag = { kind: 'rest', id: j, x: q.x, y: q.y, tree: e.shiftKey }; dirty(); return; }
       for (let i = rig.eyes.length - 1; i >= 0; i--) { const ey = rig.eyes[i]; if (q.x > ey.x && q.x < ey.x + ey.w && q.y > ey.y && q.y < ey.y + ey.h) { snap(); st.selEye = i; st.drag = { kind: 'eyeMove', i, x: q.x, y: q.y }; renderSide(); dirty(); return; } }
+      if (rig.mouth) { const ey = rig.mouth; if (q.x > ey.x && q.x < ey.x + ey.w && q.y > ey.y - 3 && q.y < ey.y + ey.h + 3) { snap(); st.selEye = 'm'; st.drag = { kind: 'mouthMove', x: q.x, y: q.y }; renderSide(); dirty(); return; } }
       st.drag = { kind: 'pan', cx: q.cx, cy: q.cy, ox: st.view.ox, oy: st.view.oy }; return;
     }
     const pin = hitPin(q);
     if (pin) { snap(); st.selPin = pin.id; st.sel = null; keyHere(true); st.drag = { kind: 'pin', pin, x: q.x, y: q.y }; renderSide(); dirty(); return; }
     const j = hitJoint(q);
     if (j && st.tool !== 'pin') { snap(); st.sel = j; st.selPin = null; keyHere(true); st.drag = { kind: 'joint', id: j, x: q.x, y: q.y, ctrl: e.ctrlKey || e.metaKey, alt: e.altKey }; renderSide(); dirty(); return; }
-    if (st.tool === 'pin') { const r = pickRest(q); if (!r) { toast('캐릭터 위를 눌러 주세요'); return; } snap(); const p = { id: 'n' + uid(), x: r.x, y: r.y, r: Math.round(U0 * 0.4) }; rig.pins.push(p); for (const L of rig.layers) if (L.mesh) rgPinWeights(rig, L); st.selPin = p.id; st.sel = null; st.tool = 'move'; renderSide(); dirty(); return; }
+    if (st.tool === 'pin') { const r = pickRest(q); if (!r) { toast('캐릭터 위를 눌러 주세요'); return; } snap(); const p = { id: 'n' + uid(), x: r.x, y: r.y, r: Math.round(rgUnit(rig) * 0.4) }; rig.pins.push(p); for (const L of rig.layers) if (L.mesh) rgPinWeights(rig, L); st.selPin = p.id; st.sel = null; st.tool = 'move'; renderSide(); dirty(); return; }
     st.sel = null; st.selPin = null; renderSideSoon();
     st.drag = { kind: 'pan', cx: q.cx, cy: q.cy, ox: st.view.ox, oy: st.view.oy }; dirty();
   });
@@ -931,6 +1104,8 @@ function rgWindow(rig, from) {
     const dx = q.x - D.x, dy = q.y - D.y; D.x = q.x; D.y = q.y;
     if (D.kind === 'rest') { const ids = D.tree ? RG_IDS.filter(k => { for (let p = k; p; p = rgPar(p)) if (p === D.id) return true; return false; }) : [D.id]; for (const k of ids) { rig.joints[k].x = clamp(rig.joints[k].x + dx, 0, rig.W); rig.joints[k].y = clamp(rig.joints[k].y + dy, 0, rig.H); } D.moved = true; dirty(); return; }
     if (D.kind === 'eyeMove') { const ey = rig.eyes[D.i]; ey.x += dx; ey.y += dy; dirty(); return; }
+    if (D.kind === 'mouthMove') { rig.mouth.x += dx; rig.mouth.y += dy; rig.mouth.est = false; dirty(); return; }
+    if (D.kind === 'mouthSize') { rig.mouth.w = Math.max(6, rig.mouth.w + dx); rig.mouth.h = Math.max(3, rig.mouth.h + dy); rig.mouth.est = false; dirty(); return; }
     if (D.kind === 'eyeSize') { const ey = rig.eyes[D.i]; ey.w = Math.max(6, ey.w + dx); ey.h = Math.max(4, ey.h + dy); dirty(); return; }
     const key = keyHere(true), p = key.p, mats = rgMats(rig, p);
     if (D.kind === 'pin') { const w = pinPos(D.pin), Mj = w.L ? mats.M[RG_IDS[w.L.mesh.JI[w.vi * 4]]] : null, v = Mj ? invLin(Mj, dx, dy) : [dx, dy], o = p.pins[D.pin.id] || [0, 0]; p.pins[D.pin.id] = [o[0] + v[0], o[1] + v[1]]; dirty(); return; }
@@ -980,7 +1155,7 @@ function rgWindow(rig, from) {
   oS.value = sizes.includes(rig.out.size) ? rig.out.size : sizes[sizes.length - 1]; rig.out.size = +oS.value; oF.value = rig.out.fps; oB.value = rig.out.bg; oC.value = rig.out.color; $('#rgOColW', m).style.display = rig.out.bg === 'color' ? '' : 'none';
   oS.addEventListener('change', () => { rig.out.size = +oS.value; }); oF.addEventListener('change', () => { rig.out.fps = +oF.value; syncTime(); });
   oB.addEventListener('change', () => { rig.out.bg = oB.value; $('#rgOColW', m).style.display = oB.value === 'color' ? '' : 'none'; dirty(); }); oC.addEventListener('input', () => { rig.out.color = oC.value; dirty(); });
-  const keep = async () => { try { await rgStore(rig, from.key); } catch (e) { console.warn('rgStore', e); } };
+  const keep = async () => { try { await rgStore(main, from.key); } catch (e) { console.warn('rgStore', e); } };
   const shut = () => { cancelAnimationFrame(raf); raf = 0; ro.disconnect(); window.removeEventListener('keydown', key, true); window.removeEventListener('keyup', keyUp, true); rgGLFree(R); closeModal(); };
   $('#rgClose', m).addEventListener('click', async () => { if (st.busy) return; st.busy = true; tip.textContent = '작업을 보관하는 중…'; tip.style.display = 'block'; await keep(); shut(); toast('하던 작업을 보관했어요. 같은 그림에서 다시 열면 이어서 할 수 있어요.', 3600); });
   $('#rgGo', m).addEventListener('click', async () => {
@@ -988,19 +1163,22 @@ function rgWindow(rig, from) {
     if (px > 380e6 && !(await rgAsk(`${n}장을 ${rig.out.size}px로 만들면 컴퓨터가 버거울 수 있어요. 크기나 초당 장 수를 줄이는 게 좋아요. 그래도 만들까요?`))) return;
     st.busy = true; st.playing = false; await keep(); shut();
     const tk = czProgress('움직임을 그리는 중');
-    try { const frames = await rgRenderFrames(rig, rig.out, tk); tk.done(); await from.onFrames(frames, rig.out.fps, from.key); }
+    try { const frames = await rgRenderFrames(main, main.out, tk); tk.done(); await from.onFrames(frames, rig.out.fps, from.key); }
     catch (e) { tk.done(); if (String(e && e.message) !== 'stop') toast('만들지 못했어요. ' + czErrText(e), 5000); }
   });
   if (from.onStill) $('#rgStill', m).addEventListener('click', async () => {
     if (st.busy) return; st.busy = true; const t = st.mode === 'pose' ? st.t : 0; await keep(); shut();
-    try { const fr = await rgRenderFrames(rig, { size: maxSide, fps: rig.out.fps, bg: 'fill', t }, null, true); await from.onStill(fr[0], rig); }
+    try { const fr = await rgRenderFrames(main, { size: maxSide, fps: main.out.fps, bg: 'fill', t }, null, true); await from.onStill(fr[0], main); }
     catch (e) { toast('만들지 못했어요. ' + czErrText(e), 5000); }
   });
   setMode(st.mode); syncTime(); syncPlay(); resize();
-  if (rig.autoSk === false) toast('AI가 뼈대를 찾지 못했어요. ① 뼈대 맞추기에서 관절을 그림에 맞춰 주세요.', 5200);
-  else if (rig.autoParts && rig.autoParts.length) { toast(`몸 앞에 겹친 ${rig.autoParts.join(', ')}은(는) 따로 움직이게 떼어 놨어요. (② 부위 나누기에서 다시 합칠 수 있어요)`, 5600); rig.autoParts = null; }
+  const nC = chars().length, noSk = chars().filter(c => c.autoSk === false);
+  if (nC > 1) toast(`캐릭터 ${nC}명을 따로 나눴어요. 그림에서 캐릭터를 누르면 그 캐릭터를 움직일 수 있어요.${noSk.length ? ' ' + noSk.map(c => c.cname).join(', ') + '은(는) 뼈대를 찾지 못했으니 ① 뼈대 맞추기에서 맞춰 주세요.' : ''}`, 6500);
+  else if (rig.autoSk === false) toast('AI가 뼈대를 찾지 못했어요. ① 뼈대 맞추기에서 관절을 그림에 맞춰 주세요.', 5200);
+  else if (main.autoParts && main.autoParts.length) toast(`몸 앞에 겹친 ${main.autoParts.join(', ')}은(는) 따로 움직이게 떼어 놨어요. (② 부위 나누기에서 다시 합칠 수 있어요)`, 5600);
   else if ((rig.conf || 0) < 0.45) toast('뼈대가 조금 어긋났을 수 있어요. ① 뼈대 맞추기에서 확인해 보세요.', 4600);
-  window.__rg = { rig, st, setMode, setT, dirty, render: () => render(performance.now()) }; // 시험용
+  main.autoParts = null;
+  window.__rg = { get rig() { return rig; }, main, chars, switchChar, st, setMode, setT, dirty, render: () => render(performance.now()) }; // 시험용
 }
 // 이 창 위에 뜨는 작은 물음·입력 창 (modal()은 창을 하나만 띄워서 따로 만들어요)
 function rgMini(html, onMount) {

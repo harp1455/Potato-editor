@@ -53,6 +53,9 @@ SRC = {  # 원본: 주소 + sha256 (주소 내용이 바뀌면 멈춰요)
     # 캐릭터 움직이기: 애니 눈 찾기(눈 깜빡임 자리) — deepghs/anime_eye_detection v1.0_n (YOLOv8n)
     'eye_n': {'url': HF.format(repo='deepghs/anime_eye_detection', rev='ba69e3ee3b0b23e7c948994e182f06cd46e534f1', path='eye_detect_v1.0_n/model.onnx'),
               'sha256': 'a96515cdf4ca0a4caf56778d93ba7fc28b4582727ff32645844cd89d39cdee29'},
+    # 캐릭터 움직이기: 애니 사람 찾기(캐릭터가 몇 명인지·어디 있는지) — deepghs/anime_person_detection v1.1_n (YOLOv8n, MIT)
+    'person_n': {'url': HF.format(repo='deepghs/anime_person_detection', rev='e39c744c22432ad01f91dd254fe2b02c8d878b8c', path='person_detect_v1.1_n/model.onnx'),
+                 'sha256': '6fcdfc6af18b3a26aca62aad0e00faffbeea23413abf868808d2d98d399999c9'},
 }
 # 편집기 안 이름(id) ← 원본, 변환, 팩 파일 이름, 어느 팩
 FILES = [
@@ -74,6 +77,7 @@ FILES = [
     ('czM_tdet', 'ppocr4det', None, 'ppocr-det-v4.onnx.gz', 'text'),
     ('czM_pose', 'dwpose', 'fp16w', 'dwpose-l-384.onnx.gz', 'rig'),
     ('czM_eye', 'eye_n', 'fp16w', 'anime-eye-n.onnx.gz', 'rig'),
+    ('czM_person', 'person_n', 'fp16w', 'anime-person-n.onnx.gz', 'rig'),
 ]
 PACKS = {'base': {'label': '기본 팩', 'desc': "AI 실행 도구, 찾기 모델, '빠르게' 모양 모델, 윤곽 따기"},
          'precise': {'label': '정밀 팩', 'desc': "'정밀하게' 모양 모델"},
@@ -84,7 +88,7 @@ PACKS = {'base': {'label': '기본 팩', 'desc': "AI 실행 도구, 찾기 모�
          'interp': {'label': 'AI 중간 장면 팩', 'desc': '움짤 장면 사이를 새로 그려 부드럽게 하는 RIFE 모델 (애니용 v4.9)'},
          'depth': {'label': 'AI 깊이 팩', 'desc': '그림의 앞뒤 거리를 재는 Depth Anything V2 모델 (배경 흐림·입체 움짤)'},
          'text': {'label': 'AI 글자 찾기 팩', 'desc': '그림 속 글자 자리를 찾는 PP-OCR 모델 (페이지 번역에서 글자 부분만 보낼 때)'},
-         'rig': {'label': 'AI 캐릭터 뼈대 팩', 'desc': '캐릭터의 관절과 눈 자리를 찾는 모델 (캐릭터 움직이기)'}}
+         'rig': {'label': 'AI 캐릭터 뼈대 팩', 'desc': '캐릭터의 관절과 눈 자리, 캐릭터가 몇 명인지 찾는 모델 (캐릭터 움직이기)'}}
 sha = lambda b: hashlib.sha256(b).hexdigest()
 
 

@@ -22,6 +22,8 @@
       바꾼 점: 가중치를 16비트로 줄여 저장
   - deepghs/anime_eye_detection v1.0_n (애니 눈 찾기) : OpenRAIL (https://huggingface.co/deepghs/anime_eye_detection)  ※ 설치판 AI 캐릭터 뼈대 팩
       바꾼 점: 가중치를 16비트로 줄여 저장. Ultralytics YOLO 계열 구조예요 (아래 참고와 같아요)
+  - deepghs/anime_person_detection v1.1_n (애니 사람 찾기) : MIT License (https://huggingface.co/deepghs/anime_person_detection)  ※ 설치판 AI 캐릭터 뼈대 팩
+      바꾼 점: 가중치를 16비트로 줄여 저장. Ultralytics YOLO 계열 구조
   - mp4-muxer 5.2.2 : Copyright (c) 2023 Vanilagy, MIT License (https://github.com/Vanilagy/mp4-muxer)  ※ 움짤 MP4 저장
   - Animate.css 4.1.1 : Copyright (c) 2020 Daniel Eden, MIT License (https://github.com/animate-css/animate.css)  ※ 움짤 글자 움직임
       바꾼 점: @keyframes를 숫자 데이터로 옮겨 캔버스에서 계산
