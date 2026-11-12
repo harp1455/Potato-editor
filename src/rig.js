@@ -241,6 +241,7 @@ function rgBuildLayer(rig, L) {
     if (best && cn) { const q = nearIn(cellOf(best.px, best.py), Math.max(gw, gh)); use = [{ id: best.id, segs: segsOf(best.id), seeds: q >= 0 ? [q] : [], cover: 0, stuck: true }]; L.stuck = best.id; }
   } else L.stuck = null;
   const edgeC = L.base && use.length ? rgEdgeCells(rig, inC) : [];
+  if (L.base) rig.edgeOn = edgeC.length > 0;
   if (edgeC.length) use.push({ id: 'edge', segs: [], seeds: [], cover: 1, R: 2, noD: true });
   for (const j of use) {
     if (j.noD) { j.D = new Float32Array(nC).fill(Infinity); continue; }
@@ -294,7 +295,8 @@ function rgBuildLayer(rig, L) {
   const vw = gw + 1, vid = new Int32Array(vw * (gh + 1)).fill(-1), VX = [], VY = [];
   for (let y = 0; y < gh; y++) for (let x = 0; x < gw; x++) if (in2[y * gw + x]) for (const [ax, ay] of [[0, 0], [1, 0], [0, 1], [1, 1]]) { const v = (y + ay) * vw + x + ax; if (vid[v] < 0) { vid[v] = VX.length; VX.push((x + ax) * gx); VY.push((y + ay) * gy); } }
   const nV = VX.length, V = new Float32Array(nV * 2), JI = new Uint8Array(nV * 4), JW = new Float32Array(nV * 4), loose = new Float32Array(nV), dist = new Float32Array(nV), tris = [], triJ = [];
-  const acc = new Float32Array(nJ);
+  const acc = new Float32Array(nJ), limbIds = new Set(Object.values(RG_LIMBS).flat());
+  const softK = use.map(j => { if (j.id === 'fix' || j.id === 'edge') return 0; const c = rgChainOf(rig, j.id); if (c) return c.soft || (c.auto && c.soft !== false) ? 1 : 0; return limbIds.has(j.id) ? 0 : 1; });
   for (let y = 0; y <= gh; y++) for (let x = 0; x <= gw; x++) {
     const i = vid[y * vw + x]; if (i < 0) continue; V[i * 2] = VX[i]; V[i * 2 + 1] = VY[i];
     acc.fill(0); let n = 0, rl = 0, fr = 0, ew = 0;
@@ -303,7 +305,7 @@ function rgBuildLayer(rig, L) {
     const ord = [...acc.keys()].sort((a, b) => acc[b] - acc[a]).slice(0, 4); let s = 0; for (const k of ord) s += acc[k];
     for (let q = 0; q < 4; q++) { const k = ord[q]; if (k === undefined || !(acc[k] > 0)) { JI[i * 4 + q] = RG_IX.fix; JW[i * 4 + q] = 0; continue; } JI[i * 4 + q] = RG_IX[use[k].id]; JW[i * 4 + q] = s > 0 ? acc[k] / s : (q ? 0 : 1); }
     if (!(s > 0)) { JI[i * 4] = nJ ? RG_IX[use[0].id] : RG_IX.fix; JW[i * 4] = 1; }
-    loose[i] = rgSmooth(1.25, 3.4, rl / n) * Math.max(0, 1 - 2.5 * ew / n); dist[i] = fr / n;
+    let sf = 0; for (let k = 0; k < nJ; k++) sf += acc[k] * softK[k]; loose[i] = rgSmooth(1.25, 3.4, rl / n) * Math.max(0, 1 - 2.5 * ew / n) * (s > 0 ? clamp(sf / s, 0, 1) : 0); dist[i] = fr / n;
   }
   for (let y = 0; y < gh; y++) for (let x = 0; x < gw; x++) {
     if (!in2[y * gw + x]) continue; const a = vid[y * vw + x], b = vid[y * vw + x + 1], c = vid[(y + 1) * vw + x], d = vid[(y + 1) * vw + x + 1];
@@ -412,9 +414,20 @@ function rgPoseAt(rig, t, noAuto) {
 /* ---- 관절 행렬 [a, b, c, d, e, f]: x' = a·x + c·y + e, y' = b·x + d·y + f ---- */
 const rgMul = (A, B) => [A[0] * B[0] + A[2] * B[1], A[1] * B[0] + A[3] * B[1], A[0] * B[2] + A[2] * B[3], A[1] * B[2] + A[3] * B[3], A[0] * B[4] + A[2] * B[5] + A[4], A[1] * B[4] + A[3] * B[5] + A[5]];
 const rgRS = (px, py, r, s) => { const c = Math.cos(r) * s, n = Math.sin(r) * s; return [c, n, -n, c, px - c * px + n * py, py - n * px - c * py]; };
+// 화면 끝을 붙잡는 그림에서 전체를 옮기는 움직임(떨림·뛰기 등)이 있으면, 가장자리가 안 드러나게 키울 배율
+function rgCover(rig) {
+  const a = rig.anim, U = rgUnit(rig), R = rig.joints.root; let mx = 0, my = 0, k = 1;
+  if (a.auto.shake) { mx += U * 0.004 * a.auto.shake / 50; my += U * 0.003 * a.auto.shake / 50; }
+  let kx = 0, ky = 0;
+  for (const key of a.keys) { const p = key.p, rot = Math.abs(p.rot || 0), sc = p.sc || 1, far = Math.max(R.x, rig.W - R.x) + Math.max(R.y, rig.H - R.y);
+    kx = Math.max(kx, Math.abs(p.tx || 0) + rot * far * 0.6 + Math.max(0, 1 - sc) * Math.max(R.x, rig.W - R.x)); ky = Math.max(ky, Math.abs(p.ty || 0) + rot * far * 0.6 + Math.max(0, 1 - sc) * Math.max(R.y, rig.H - R.y)); }
+  mx += kx; my += ky;
+  return Math.min(1.5, Math.max(1 + 2 * mx / rig.W, 1 + 2 * my / rig.H));
+}
 function rgMats(rig, p) { // → { M: 관절마다 행렬, P: 관절의 지금 자리 }
   const J = rig.joints, M = {}, P = {}, R = J.root;
-  const G = rgMul([1, 0, 0, 1, p.tx, p.ty], rgRS(R.x, R.y, p.rot, p.sc));
+  let G = rgMul([1, 0, 0, 1, p.tx, p.ty], rgRS(R.x, R.y, p.rot, p.sc));
+  if (rig.edgeOn) { const k = rgCover(rig); if (k > 1.0005) G = rgMul(rgRS(rig.W / 2, rig.H / 2, 0, k), G); M.edge = G; }
   M.fix = G; // 내 뼈가 없는 나머지 몸: 전체 옮기기만
   const one = id => {
     if (!rgOn(rig, id)) return; const par = rgPar(id, rig), B = par ? M[par] : G, j = J[id], d = p.d[id]; if (!B || !j) return;
@@ -882,9 +895,10 @@ function rgEnclosedGrid(rig, rem, M) {
   for (let c = 0; c < gw * gh; c++) { part[c] = cp[c] > cn[c] * 0.3 ? 1 : 0; body[c] = cb[c] > cn[c] * 0.5 ? 1 : 0; }
   const E = new Float32Array(gw * gh), R = Math.max(gw, gh), dirs = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, 1], [1, -1], [-1, -1]];
   for (let y = 0; y < gh; y++) for (let x = 0; x < gw; x++) {
-    const c = y * gw + x; if (!part[c]) continue; let hit = 0;
-    for (const [dx, dy] of dirs) for (let s = 1; s < R; s++) { const xx = x + dx * s, yy = y + dy * s; if (xx < 0 || yy < 0 || xx >= gw || yy >= gh) break; const q = yy * gw + xx; if (body[q]) { hit++; break; } if (!part[q]) break; }
-    E[c] = hit >= 6 ? 1 : hit === 5 ? 0.5 : 0;
+    const c = y * gw + x; if (!part[c]) continue; let hit = 0, off = 0;
+    for (const [dx, dy] of dirs) for (let s = 1; s < R; s++) { const xx = x + dx * s, yy = y + dy * s; if (xx < 0 || yy < 0 || xx >= gw || yy >= gh) { off++; break; } const q = yy * gw + xx; if (body[q]) { hit++; break; } if (!part[q]) break; }
+    // 화면 밖으로 이어지는 방향은 빼고 세요 (화면 끝에 걸친 부위도 몸 위에 있으면 메우게)
+    const val = 8 - Math.min(off, 4), need = val * 0.75; E[c] = hit >= need ? 1 : hit >= need - 1 ? 0.5 : 0;
   }
   // 칸 → 픽셀 (부드럽게)
   const c1 = newCanvas(gw, gh), g1 = c1.getContext('2d'), id = g1.createImageData(gw, gh); for (let i = 0; i < gw * gh; i++) { id.data[i * 4] = id.data[i * 4 + 1] = id.data[i * 4 + 2] = 255; id.data[i * 4 + 3] = E[i] * 255; } g1.putImageData(id, 0, 0);
@@ -894,9 +908,14 @@ function rgEnclosedGrid(rig, rem, M) {
 }
 async function rgSplit(rig, L, M, name, tk, chars) {
   const { W, H } = rig, n = W * H, id = rgTexPx(L, W, H), d = id.data, part = new ImageData(W, H), pd = part.data, rem = new Uint8Array(n); let cnt = 0;
-  for (let i = 0; i < n; i++) { const j = i * 4, a = d[j + 3], m = M[i] / 255, pa = Math.round(a * m); if (pa > 0) { pd[j] = d[j]; pd[j + 1] = d[j + 1]; pd[j + 2] = d[j + 2]; pd[j + 3] = pa; if (pa > 128) cnt++; } rem[i] = Math.round(a * (1 - m)); }
+  // 남는 그림 쪽은 떼어 낸 모양보다 조금 더 넓게 지워요: 부위의 테두리 선이 점선처럼 남지 않게 (넓힌 띠는 둘레에 맞게 다시 메워요)
+  const M0 = M, m01 = new Float32Array(n); for (let i = 0; i < n; i++) m01[i] = M0[i] > 96 ? 1 : 0;
+  const grown = dpBox(m01, W, H, Math.max(2, Math.round(Math.max(W, H) / 180))); M = new Uint8ClampedArray(n); for (let i = 0; i < n; i++) M[i] = grown[i] > 0.04 ? 255 : M0[i];
+  for (let i = 0; i < n; i++) { const j = i * 4, a = d[j + 3], pa = Math.round(a * M0[i] / 255); if (pa > 0) { pd[j] = d[j]; pd[j + 1] = d[j + 1]; pd[j + 2] = d[j + 2]; pd[j + 3] = pa; if (pa > 128) cnt++; } rem[i] = Math.round(a * (1 - M[i] / 255)); }
   if (cnt < 30) return null;
-  const enc = rgEnclosed(rig, rem, M); let en = 0; for (let i = 0; i < n; i++) if (enc[i] > 0.5) en++;
+  const enc = rgEnclosed(rig, rem, M);
+  { // 메울 곳의 가장자리가 반쯤 비쳐서 점선처럼 보이지 않게: 메울 곳을 조금 넓혀 꽉 채워요
+    const e1 = new Float32Array(n); for (let i = 0; i < n; i++) e1[i] = enc[i] > 0.35 ? 1 : 0; const eg = dpBox(e1, W, H, Math.max(3, Math.round(Math.max(W, H) / 150))); for (let i = 0; i < n; i++) if (M[i] > 128 && eg[i] > 0.08) enc[i] = 1; } let en = 0; for (let i = 0; i < n; i++) if (enc[i] > 0.5) en++;
   // 남은 그림: 떼어 낸 자리 중 몸이 이어질 곳은 메워요 (배경을 메운 그림 위에 얹어 놓고 둘레에 맞게)
   const bgd = rig.bg.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, W, H).data, comp = new Uint8ClampedArray(n * 4);
   for (let i = 0; i < n; i++) { const j = i * 4, a = rem[i] / 255; comp[j] = d[j] * a + bgd[j] * (1 - a); comp[j + 1] = d[j + 1] * a + bgd[j + 1] * (1 - a); comp[j + 2] = d[j + 2] * a + bgd[j + 2] * (1 - a); comp[j + 3] = 255; }
@@ -909,7 +928,7 @@ async function rgSplit(rig, L, M, name, tk, chars) {
   for (let i = 0; i < n; i++) { const j = i * 4, e = enc[i]; if (e > 0.02) { d[j] = filled[j]; d[j + 1] = filled[j + 1]; d[j + 2] = filled[j + 2]; fm[i] = Math.round(e * 255); } d[j + 3] = Math.max(rem[i], Math.round(e * 255)); }
   const oldFill = L.fillM; rgSetTex(L, id); L.fillM = oldFill; rgAddFill(L, fm, n);
   // 새로 드러난 배경(떼어 낸 자리 중 몸으로 메우지 않은 곳)도 가까이에서 다시 메워요
-  try { const R = new Uint8ClampedArray(n); let rn = 0; for (let i = 0; i < n; i++) if (M[i] > 128 && enc[i] < 0.5 && pd[i * 4 + 3] > 128) { R[i] = 255; rn++; } if (rn > 60) { tk && tk.set('드러난 배경을 다시 메우는 중…', 0.8); await rgRefillBg(rig, R, chars || [rig], tk); } } catch (e) { if (String(e && e.message) === 'stop') throw e; console.warn('rgRefillBg', e); }
+  try { const R = new Uint8ClampedArray(n); let rn = 0; for (let i = 0; i < n; i++) if (M[i] > 128 && enc[i] < 0.5) { R[i] = 255; rn++; } if (rn > 60) { tk && tk.set('드러난 배경을 다시 메우는 중…', 0.8); await rgRefillBg(rig, R, chars || [rig], tk); } } catch (e) { if (String(e && e.message) === 'stop') throw e; console.warn('rgRefillBg', e); }
   const N = { id: 'p' + uid(), name: name || '부위', z: Math.max(...rig.layers.map(l => l.z || 0)) + 1, bind: [], follow: null }; rgSetTex(N, part);
   // 이 부위 안을 지나가는 뼈는 이 부위가 가져가요
   const A = rgAlpha(N, W, H);
@@ -934,8 +953,9 @@ function rgMerge(rig, L) { // 부위를 다시 몸에 합치기
   rig.layers.splice(rig.layers.indexOf(L), 1); rig.ver++;
 }
 // 칠한 곳을 AI(MobileSAM)로 물체 윤곽에 맞추기. M: 0~255 → 새 M (못 하면 null)
-async function rgSamRefine(rig, M, tk) {
+async function rgSamRefine(rig, M, tk, grow) {
   const { W, H } = rig, b = rgBBox(M, W, H, 128); if (!b) return null;
+  if (grow) { const g = Math.max(b.w, b.h) * grow, x0 = Math.max(0, b.x - g), y0 = Math.max(0, b.y - g), x1 = Math.min(W, b.x + b.w + g), y1 = Math.min(H, b.y + b.h + g); b.x = x0; b.y = y0; b.w = x1 - x0; b.h = y1 - y0; } // 뼈를 따라 그은 띠보다 넉넉하게 봐요 (손가락·끝이 잘리지 않게)
   const E = await rgSamEnc(rig, tk), { s, tw, th } = E, plane = tw * th;
   // 칠한 곳을 줄여 본 것 + 그 안쪽 깊은 점 몇 개를 '이것'으로
   const mc = newCanvas(tw, th), mg = mc.getContext('2d', { willReadFrequently: true }), full = newCanvas(W, H), fg = full.getContext('2d'), fid = fg.createImageData(W, H);
@@ -1297,6 +1317,7 @@ function rgWindow(main, from) {
         ${st.draft ? `<p class="small"><b>${esc(RG_CHAIN_KINDS[st.draft.kind].name)}</b>: ${esc(rgDraftName(st.draft))}</p><div class="btnrow"><button class="btn sm primary" data-rga="chainok" ${st.draft.pts.length < 2 ? 'disabled' : ''} title="Enter">여기까지 (${st.draft.pts.length}점)</button><button class="btn sm" data-rga="chainno" title="Esc">취소</button></div>`
         : `${rig.stdOff ? '' : `<div class="btnrow"><button class="btn sm primary" data-rga="autobones" title="머리카락 다발·꼬리·옷자락·귀처럼 몸에서 늘어진 곳을 찾아 뼈를 넣고, 저절로 흔들리게 해요">✨ 늘어진 곳에 뼈 자동으로 넣기</button>${(rig.chains || []).some(c => c.auto) ? '<button class="btn sm" data-rga="autobones0">자동 뼈 지우기</button>' : ''}</div>`}<div class="btnrow">${Object.entries(RG_CHAIN_KINDS).map(([k, v]) => `<button class="btn sm" data-rgch="${k}" title="${esc(v.pts.slice(0, k === 'free' ? 2 : 9).join(' → '))}${k === 'free' ? ' … (꼬리·머리카락·옷자락·물건 등, 2~6점)' : ''}">${k === 'free' ? '그 밖의 것' : esc(v.name)}</button>`).join('')}</div>`}
         ${cs.map(c => `<div class="rg-ly ${c.ids.includes(st.sel) ? 'on' : ''}" data-rgchsel="${c.id}"><span style="color:#9b6fe0;padding:0 4px">●</span><span class="nm">${esc(c.name)} <span class="muted small">${c.ids.length}점</span></span><button class="ic" data-rgchsplit="${c.id}" title="이 뼈 부분을 AI로 따로 떼어 내요. 팔·다리가 몸 위에 겹쳐 있을 때 쓰면 몸이 같이 끌려가지 않아요">✂</button><button class="ic" data-rgchren="${c.id}" title="이름 바꾸기">✎</button><button class="ic" data-rgchdel="${c.id}" title="이 뼈 지우기">✕</button></div>
+          <label class="chk" style="margin-left:10px" title="머리카락·옷자락·꼬리처럼 가벼운 것에만 켜세요. 끄면 뼈 끝 너머까지 단단하게 움직여요"><input type="checkbox" data-rgchsoft="${c.id}" ${c.soft || (c.auto && c.soft !== false) ? 'checked' : ''}> 끝이 나풀거리게</label>
           ${c.ids.includes(st.sel) ? `<div class="btnrow" style="margin-left:10px"><button class="btn sm" data-rga="chpadd" ${c.ids.length >= 6 ? 'disabled' : ''} title="고른 점 바로 뒤에 점을 하나 더 넣어요 (끝점이면 그 너머로 늘려요). 한 뼈에 6점까지">점 넣기</button><button class="btn sm" data-rga="chpdel" ${c.ids.length <= 2 ? 'disabled' : ''} title="고른 점을 빼서 뼈를 줄여요">이 점 빼기</button></div>` : ''}
           ${rig.stdOff ? '' : `<div class="grid2 rg-g" style="margin:2px 0 6px 10px"><span class="small">붙일 곳</span><span><select data-rgchat="${c.id}"><option value="">제자리에 고정</option>${RG_STD.filter(i => rgOn(rig, i)).map(i => `<option value="${i}" ${c.attach === i ? 'selected' : ''}>${esc(selName(i))}</option>`).join('')}</select></span></div>`}`).join('')}</div>
         <div class="sec"><h3>화면 끝 붙잡기</h3><label class="chk"><input type="checkbox" data-rgedge ${(() => { const b = base(); return b && b.mesh && b.mesh.joints.includes('edge') ? 'checked' : rig.edgePin === true ? 'checked' : ''; })()}> 화면 끝에 닿은 곳은 제자리에 붙잡기</label><p class="muted small">얼굴 위주나 몸 일부만 나온 그림은 켜 두세요. 움직여도 그림 가장자리가 벌어지지 않아요. (캐릭터가 화면 끝에 많이 닿아 있으면 알아서 켜져요)</p></div>
@@ -1350,7 +1371,8 @@ function rgWindow(main, from) {
   });
   side.addEventListener('change', async e => {
     const t = e.target;
-    if (t.dataset.rgedge !== undefined) { snap(); rig.edgePin = t.checked; rig.ver++; dirty(); }
+    if (t.dataset.rgchsoft) { const c = (rig.chains || []).find(q => q.id === t.dataset.rgchsoft); if (!c) return; snap(); c.soft = t.checked; rig.ver++; dirty(); }
+    else if (t.dataset.rgedge !== undefined) { snap(); rig.edgePin = t.checked; rig.ver++; dirty(); }
     else if (t.dataset.rgcut !== undefined) { snap(); const was = rgBase(rig), now = t.value; rig.cut = now === 'root' ? null : now;
       // 새 뿌리 점이 옛 뿌리보다 아래쪽(골반 쪽)이면 겹쳐 있을 수 있으니 조금 벌려 줘요
       const ti = RG_TORSO.indexOf(now), J = rig.joints; for (let i = RG_TORSO.indexOf(was) - 1; i >= ti; i--) { const a = J[RG_TORSO[i]], b = J[RG_TORSO[i + 1]]; if (Math.hypot(a.x - b.x, a.y - b.y) < rgUnit(rig) * 0.06) { const c = J[RG_TORSO[Math.min(4, i + 2)]], dx = b.x - c.x, dy = b.y - c.y, l = Math.hypot(dx, dy) || 1, st2 = rgUnit(rig) * 0.18; a.x = clamp(b.x + (l > 1 ? dx / l : 0) * st2, 2, rig.W - 2); a.y = clamp(b.y + (l > 1 ? dy / l : 1) * st2, 2, rig.H - 2); } }
@@ -1396,7 +1418,7 @@ function rgWindow(main, from) {
         const cv = newCanvas(W, H), g = cv.getContext('2d', { willReadFrequently: true }); g.strokeStyle = '#fff'; g.lineWidth = len * 0.26; g.lineCap = g.lineJoin = 'round'; g.beginPath(); ids.forEach((id, i) => { const q = rig.joints[id]; i ? g.lineTo(q.x, q.y) : g.moveTo(q.x, q.y); }); g.stroke();
         const d = g.getImageData(0, 0, W, H).data, A = rgAlpha(L0, W, H), M = new Uint8ClampedArray(W * H); let am = 0; for (let i = 0; i < M.length; i++) { M[i] = d[i * 4 + 3] > 128 && A[i] > 128 ? 255 : 0; if (M[i]) am++; }
         if (am < 40) { toast('뼈가 캐릭터 위에 있지 않아요'); return; }
-        let N = await rgSamRefine(rig, M, tk), an = 0; if (N) { for (let i = 0; i < N.length; i++) { if (A[i] < 20) N[i] = 0; if (N[i] > 128) an++; } }
+        let N = await rgSamRefine(rig, M, tk, 0.3), an = 0; if (N) { for (let i = 0; i < N.length; i++) { if (A[i] < 20) N[i] = 0; if (N[i] > 128) an++; } }
         // AI 윤곽이 너무 크거나(몸 전체) 작으면, 뼈를 따라 그은 띠를 그대로 써요
         if (!N || an > am * 3.5 || an < am * 0.5) N = M; else { const f = new Float32Array(M.length); for (let i = 0; i < M.length; i++) f[i] = M[i] / 255; const bl = dpBox(f, W, H, Math.max(3, Math.round(len * 0.05))); for (let i = 0; i < N.length; i++) if (bl[i] > 0.97) N[i] = Math.max(N[i], A[i]); }
         const before = shot(), P = await rgSplit(rig, L0, N, c.name, tk, chars()); if (!P) { toast('떼어 낼 곳을 찾지 못했어요'); return; }
