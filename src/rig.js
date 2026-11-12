@@ -265,7 +265,7 @@ function rgBuildLayer(rig, L) {
     const cc = near[y * gw + x]; let bk = 0, bw = -1; for (let k = 0; k < nJ; k++) if (Wt[cc * nJ + k] > bw) { bw = Wt[cc * nJ + k]; bk = k; }
     const jid = nJ ? use[bk].id : 'fix'; triJ.push(jid, jid);
   }
-  L.mesh = { nV, V, JI, JW, loose, dist, tris, triJ, inC, nearC: near, joints: use.map(j => j.id), out: new Float32Array(nV * 2), pinW: null, ver: rig.ver };
+  L.mesh = { relC: rel, nV, V, JI, JW, loose, dist, tris, triJ, inC, nearC: near, joints: use.map(j => j.id), out: new Float32Array(nV * 2), pinW: null, ver: rig.ver };
   rgSortTris(rig, L); rgPinWeights(rig, L);
   return L.mesh;
 }
@@ -335,6 +335,10 @@ function rgBlinkAuto(rig, t) { // 0~1 (1 = 감음)
   else { const k = Math.floor(t / P); for (const q of [k - 1, k]) if (q >= 0) v = Math.max(v, shape(t - (q + 0.45 + 0.3 * (rgHash(q + 1) - 0.5)) * P)); }
   return v;
 }
+// 내 뼈 자동 움직임의 종류: 이름, 한 번 오가는 시간(초)
+const RG_AM = { sway: { name: '흔들기', per: 2.2 }, wave: { name: '물결', per: 1.8 }, bend: { name: '굽혔다 펴기', per: 2.4 }, pump: { name: '앞뒤로', per: 1.2 }, shake: { name: '떨림', per: 0.22 } };
+// 자동 움직임 한 번에 맞추기
+const RG_STYLES = { calm: ['잔잔하게', { breath: 40, sway: 15, head: 15, bounce: 0, wind: 25, follow: 40, arms: 10, hip: 0, shake: 0, jig: 15, speed: 80 }, 22], live: ['살아 있게', { breath: 60, sway: 40, head: 40, bounce: 0, wind: 50, follow: 60, arms: 35, hip: 15, shake: 0, jig: 40, speed: 100 }, 40], active: ['활발하게', { breath: 70, sway: 70, head: 60, bounce: 25, wind: 70, follow: 80, arms: 65, hip: 45, shake: 0, jig: 60, speed: 130 }, 62], hard: ['거칠게', { breath: 100, sway: 55, head: 45, bounce: 0, wind: 60, follow: 90, arms: 40, hip: 60, shake: 40, jig: 80, speed: 170 }, 85] };
 // 그 시각의 자세 = 저장한 자세 + 자동 움직임(숨쉬기·몸 흔들기·고개)
 function rgPoseAt(rig, t, noAuto) {
   const p = rgKeyPose(rig, t); if (noAuto) return p;
@@ -342,6 +346,18 @@ function rgPoseAt(rig, t, noAuto) {
   if (a.breath) { const w = rgOmega(rig, 3.4), k = (0.5 - 0.5 * Math.cos(w * t)) * U * 0.02 * a.breath / 50; mv('chest', 0, -k); mv('aSho', 0, -k * 0.35); mv('bSho', 0, -k * 0.35); p.s.chest = (p.s.chest || 1) * (1 + 0.012 * a.breath / 50 * (0.5 - 0.5 * Math.cos(w * t))); }
   if (a.sway) { const w = rgOmega(rig, 4.6), k = 0.028 * a.sway / 50; add('waist', k * Math.sin(w * t)); add('neck', -k * 0.7 * Math.sin(w * t - 0.5)); mv('root', U * 0.012 * a.sway / 50 * Math.sin(w * t), 0); }
   if (a.head) { const w = rgOmega(rig, 5.4), k = 0.05 * a.head / 50; add('neck', k * Math.sin(w * t + 1.1)); mv('head', 0, U * 0.006 * a.head / 50 * Math.sin(2 * w * t)); }
+  if (a.arms) { const w = rgOmega(rig, 3.8), k = 0.045 * a.arms / 50; add('aSho', k * Math.sin(w * t + 0.4)); add('aElb', k * 0.8 * Math.sin(w * t - 0.5)); add('bSho', -k * Math.sin(w * t + 1.3)); add('bElb', -k * 0.8 * Math.sin(w * t + 0.4)); add('aWri', k * 0.6 * Math.sin(w * t - 1.2)); add('bWri', -k * 0.6 * Math.sin(w * t - 0.3)); }
+  if (a.hip) { const w = rgOmega(rig, 2.4), k = a.hip / 50, sn = Math.sin(w * t); mv('root', U * 0.03 * k * sn, -U * 0.008 * k * Math.cos(2 * w * t)); add('root', 0.03 * k * sn); add('waist', -0.045 * k * Math.sin(w * t - 0.35)); add('neck', 0.012 * k * Math.sin(w * t - 0.9)); }
+  if (a.shake) { const w = rgOmega(rig, 0.13), w2 = rgOmega(rig, 0.19), k = U * 0.004 * a.shake / 50, env = 0.65 + 0.35 * Math.sin(rgOmega(rig, 1.7) * t); p.tx += k * env * Math.sin(w * t); p.ty += k * 0.7 * env * Math.sin(w2 * t + 1); add('neck', 0.004 * a.shake / 50 * env * Math.sin(w2 * t)); }
+  for (const c of rig.chains || []) { // 내 뼈마다 넣은 자동 움직임 (뿌리에서 끝으로 물결처럼 늦게)
+    const m = c.am; if (!m || !m.kind || !m.amt || !RG_AM[m.kind]) continue; const ids = c.ids.filter(id => rgOn(rig, id) && rig.joints[id]); if (ids.length < 2) continue;
+    const k = m.amt / 50 * (m.rev ? -1 : 1), w = rgOmega(rig, RG_AM[m.kind].per * 100 / (m.sp || 100)), ph = (m.ph || 0) / 100 * 2 * Math.PI, n = ids.length - 1, x = w * t - ph;
+    if (m.kind === 'sway') for (let i = 0; i < n; i++) add(ids[i], 0.1 * k * (i ? 1 : 0.7) / (1 + i * 0.2) * Math.sin(x - i * 0.7));
+    else if (m.kind === 'wave') for (let i = 0; i < n; i++) add(ids[i], 0.075 * k * (0.5 + i * 0.5) * Math.sin(x - i * 1.3));
+    else if (m.kind === 'bend') for (let i = 0; i < n; i++) add(ids[i], 0.2 * k * (i ? 1 : 0.5) * (0.5 - 0.5 * Math.cos(x - i * 0.25)));
+    else if (m.kind === 'pump') { const a0 = rig.joints[ids[0]], b0 = rig.joints[ids[n]], l = Math.hypot(b0.x - a0.x, b0.y - a0.y) || 1, sn = Math.sin(x), e = Math.sign(sn) * Math.pow(Math.abs(sn), 0.8) * 0.13 * k * l; mv(ids[0], (b0.x - a0.x) / l * e, (b0.y - a0.y) / l * e); for (let i = 1; i < n; i++) add(ids[i], 0.03 * k * Math.sin(x - 0.9 - i * 0.5)); }
+    else if (m.kind === 'shake') { const s1 = Math.sin(x), s2 = Math.sin(1.47 * x + 1); add(ids[0], 0.02 * k * s1); for (let i = 1; i < n; i++) add(ids[i], 0.028 * k * Math.sin(x - i * 1.1) * (0.7 + 0.3 * s2)); }
+  }
   if (a.bounce) { const w = rgOmega(rig, 1.1), k = U * 0.03 * a.bounce / 50; p.ty -= k * Math.abs(Math.sin(w * t / 2)); }
   p.blink = Math.max(p.blink || 0, rgBlinkAuto(rig, t));
   if (a.talk) { const A = rig.anim, f = A.loop ? Math.max(1, Math.round(4.6 * A.dur * (a.speed || 100) / 100)) / A.dur : 4.6 * (a.speed || 100) / 100, on = rgHash(Math.floor(t * 1.7) + 7) > 0.22 ? 1 : 0.12, w = Math.pow(Math.abs(Math.sin(Math.PI * f * t)), 0.8) * (0.55 + 0.45 * rgHash(Math.floor(f * t) + 3)); p.mouth = clamp((p.mouth || 0) + w * on * a.talk / 100, -1, 1); }
@@ -377,13 +393,20 @@ function rgSkin(rig, L, t, pose, lagMs, still) {
     const w = rgOmega(rig, 2.6), A = U * 0.05 * a.wind / 50, g = Math.min(rig.W / rig.gw, rig.H / rig.gh);
     for (let i = 0; i < n; i++) { const s = m.loose[i]; if (!s) continue; const ph = m.dist[i] * 0.33 + V[i * 2 + 1] / (U * 2.2), k = A * Math.pow(s, 1.2) * Math.min(1, m.dist[i] * g / (U * 0.5) + 0.25); dx[i] += k * Math.sin(w * t - ph); dy[i] += k * 0.22 * Math.sin(2 * w * t - ph * 1.3 + 0.8); }
   }
+  const fol = a.follow || 0, jig = still ? 0 : (a.jig || 0) / 50 * 9;
+  const at2 = (Fk, i, x, y) => { let ax = 0, ay = 0; for (let q = 0; q < 4; q++) { const w = m.JW[i * 4 + q]; if (!w) continue; const o = m.JI[i * 4 + q] * 6; ax += w * (Fk[o] * x + Fk[o + 2] * y + Fk[o + 4]); ay += w * (Fk[o + 1] * x + Fk[o + 3] * y + Fk[o + 5]); } return [ax, ay]; };
   for (let i = 0; i < n; i++) {
     const x = V[i * 2] + dx[i], y = V[i * 2 + 1] + dy[i]; let ox = 0, oy = 0;
     for (let q = 0; q < 4; q++) { const w = m.JW[i * 4 + q]; if (!w) continue; const o = m.JI[i * 4 + q] * 6; ox += w * (F[o] * x + F[o + 2] * y + F[o + 4]); oy += w * (F[o + 1] * x + F[o + 3] * y + F[o + 5]); }
     if (F2 && m.loose[i] > 0.02) { // 늦게 따라오기: 멀리 늘어진 곳일수록 더 예전 자세를 따라가요
+      let jx = 0, jy = 0;
+      if (jig && F2.length > 1) { const c1 = at2(F2[0], i, x, y), c2 = at2(F2[1], i, x, y), lim = U * 0.09 * m.loose[i]; jx = clamp(-jig * m.loose[i] * (ox - 2 * c1[0] + c2[0]), -lim, lim); jy = clamp(-jig * m.loose[i] * (oy - 2 * c1[1] + c2[1]), -lim, lim); }
+      if (fol) {
       const lv = m.loose[i] * F2.length, k0 = Math.min(F2.length - 1, Math.floor(lv)), tt = lv - k0;
       const at = (Fk) => { let ax = 0, ay = 0; for (let q = 0; q < 4; q++) { const w = m.JW[i * 4 + q]; if (!w) continue; const o = m.JI[i * 4 + q] * 6; ax += w * (Fk[o] * x + Fk[o + 2] * y + Fk[o + 4]); ay += w * (Fk[o + 1] * x + Fk[o + 3] * y + Fk[o + 5]); } return [ax, ay]; };
       const A0 = k0 === 0 ? [ox, oy] : at(F2[k0 - 1]), A1 = at(F2[k0]); ox = A0[0] + (A1[0] - A0[0]) * tt; oy = A0[1] + (A1[1] - A0[1]) * tt;
+      }
+      ox += jx; oy += jy;
     }
     O[i * 2] = ox; O[i * 2 + 1] = oy;
   }
@@ -391,8 +414,8 @@ function rgSkin(rig, L, t, pose, lagMs, still) {
 }
 // 한 시각의 모든 것: 자세, 행렬, 뒤따라오기용 예전 행렬
 function rgEval(rig, t, fixedPose) {
-  const pose = fixedPose || rgPoseAt(rig, t), cur = rgMats(rig, pose), lags = [{ M: cur.M, pose }], f = rig.anim.auto.follow || 0;
-  if (f && !fixedPose) for (let k = 1; k <= 3; k++) { const tp = t - k * 0.07 * f / 50, ok = rig.anim.loop || tp >= 0, p2 = rgPoseAt(rig, ok ? tp : 0); lags.push({ M: rgMats(rig, p2).M, pose: p2 }); }
+  const pose = fixedPose || rgPoseAt(rig, t), cur = rgMats(rig, pose), lags = [{ M: cur.M, pose }], f0 = rig.anim.auto.follow || 0, f = f0 || (rig.anim.auto.jig ? 50 : 0);
+  if (f && !fixedPose) for (let k = 1; k <= 3; k++) { const tp = t - k * 0.07 * Math.max(f, 25) / 50, ok = rig.anim.loop || tp >= 0, p2 = rgPoseAt(rig, ok ? tp : 0); lags.push({ M: rgMats(rig, p2).M, pose: p2 }); }
   return { pose, M: cur.M, P: cur.P, lags };
 }
 // 끝 관절(손목·발목)을 목표로: 가운데 관절(팔꿈치·무릎)이 알아서 굽어요
@@ -483,7 +506,7 @@ function rgGLDraw(R, main, view, o) {
 }
 
 /* ---- 준비: 그림 → 캐릭터 층 + 메운 배경 + 뼈대 + 눈 ---- */
-const rgNewAnim = () => ({ dur: 3, loop: true, keys: [{ t: 0, e: 'ease', p: rgPose0() }], auto: { breath: 50, sway: 30, head: 30, bounce: 0, wind: 40, follow: 50, blink: 50, talk: 0, speed: 100 } });
+const rgNewAnim = () => ({ dur: 3, loop: true, keys: [{ t: 0, e: 'ease', p: rgPose0() }], auto: { breath: 50, sway: 30, head: 30, bounce: 0, wind: 40, follow: 50, arms: 20, hip: 0, shake: 0, jig: 30, blink: 50, talk: 0, speed: 100 } });
 function rgBBox(A, W, H, thr) { let x0 = W, y0 = H, x1 = -1, y1 = -1; for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (A[y * W + x] > thr) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; } return x1 < 0 ? null : { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 }; }
 // 캐릭터 가장자리에 원래 배경색이 묻어나지 않게: 반투명한 테두리 색을 안쪽 색으로 바꿔요
 function rgCutTex(px, A, W, H) {
@@ -932,11 +955,17 @@ async function rgRestore(key) {
 }
 
 /* ---- 움직임 견본: 지금 자세(맨 앞 저장 자세)를 바탕으로 시간 막대를 채워요 ---- */
-const RG_MOVES = [['nod', '끄덕끄덕'], ['tilt', '갸웃갸웃'], ['lean', '좌우로 흔들'], ['hop', '통통 뛰기'], ['shrug', '으쓱'], ['waveA', '손 흔들기'], ['waveB', '손 흔들기'], ['look', '두리번'], ['cSway', '내 뼈 흔들기'], ['cBend', '내 뼈 굽혔다 펴기']];
+const RG_MOVES = [['nod', '끄덕끄덕'], ['tilt', '갸웃갸웃'], ['lean', '좌우로 흔들'], ['hop', '통통 뛰기'], ['shrug', '으쓱'], ['waveA', '손 흔들기'], ['waveB', '손 흔들기'], ['look', '두리번'], ['pant', '숨 가쁘게'], ['laugh', '웃기'], ['sigh', '한숨·축 처지기'], ['startle', '깜짝 놀라기'], ['shiver', '덜덜 떨기'], ['groove', '리듬 타기'], ['rock', '앞뒤로 세게'], ['jump', '크게 뛰기'], ['walk', '제자리 걷기'], ['cSway', '내 뼈 흔들기'], ['cBend', '내 뼈 굽혔다 펴기'], ['cWave', '내 뼈 물결'], ['cPump', '내 뼈 앞뒤로'], ['cShake', '내 뼈 떨기']];
 // 견본마다 있어야 하는 관절 (없으면 단추를 숨겨요)
-const RG_MOVE_NEED = { nod: ['neck'], tilt: ['neck'], look: ['neck'], lean: ['waist'], shrug: ['aSho', 'bSho'], waveA: ['aWri'], waveB: ['bWri'], hop: [], cSway: null, cBend: null };
-function rgMoveKeys(rig, kind) {
-  const B = rgPoseCopy(rig.anim.keys[0] ? rig.anim.keys[0].p : rgPose0()), U = rgUnit(rig), K = (t, fn, e) => { const p = rgPoseCopy(B); fn && fn(p); return { t, e: e || 'ease', p }; };
+const RG_MOVE_NEED = { nod: ['neck'], tilt: ['neck'], look: ['neck'], lean: ['waist'], shrug: ['aSho', 'bSho'], waveA: ['aWri'], waveB: ['bWri'], hop: [], cSway: null, cBend: null, cWave: null, cPump: null, cShake: null, pant: ['chest'], laugh: ['neck', 'chest'], sigh: ['neck', 'chest'], startle: ['neck'], shiver: [], groove: ['waist'], rock: [], jump: [], walk: ['aKnee', 'bKnee'] };
+// 견본을 세게·약하게: 맨 앞 자세에서 달라진 만큼만 키우거나 줄여요
+function rgMoveAmp(base, mv, amp) {
+  if (amp === 1) return mv; const B = base, f = (b, v) => b + (v - b) * amp;
+  for (const k of mv.keys) { const p = k.p; for (const id of Object.keys(p.r)) p.r[id] = f(B.r[id] || 0, p.r[id]); for (const id of Object.keys(p.s)) p.s[id] = Math.max(0.3, f(B.s[id] || 1, p.s[id])); for (const id of Object.keys(p.d)) { const b = B.d[id] || [0, 0]; p.d[id] = [f(b[0], p.d[id][0]), f(b[1], p.d[id][1])]; } p.tx = f(B.tx, p.tx); p.ty = f(B.ty, p.ty); p.rot = f(B.rot, p.rot); p.sc = Math.max(0.3, f(B.sc, p.sc)); }
+  return mv;
+}
+function rgMoveKeys(rig, kind, base) {
+  const B = rgPoseCopy(base || (rig.anim.keys[0] ? rig.anim.keys[0].p : rgPose0())), U = rgUnit(rig), K = (t, fn, e) => { const p = rgPoseCopy(B); fn && fn(p); return { t, e: e || 'ease', p }; };
   const R = (p, id, v) => { p.r[id] = (p.r[id] || 0) + v; }, D = (p, id, x, y) => { const q = p.d[id] || [0, 0]; p.d[id] = [q[0] + x, q[1] + y]; };
   if (kind === 'nod') return { dur: 2, keys: [K(0), K(0.5, p => { D(p, 'neck', 0, U * 0.035); p.s.neck = (p.s.neck || 1) * 0.97; }), K(1), K(1.5, p => { D(p, 'neck', 0, U * 0.035); p.s.neck = (p.s.neck || 1) * 0.97; })] };
   if (kind === 'tilt') return { dur: 3.2, keys: [K(0), K(0.8, p => R(p, 'neck', 0.13)), K(1.6), K(2.4, p => R(p, 'neck', -0.13))] };
@@ -944,6 +973,26 @@ function rgMoveKeys(rig, kind) {
   if (kind === 'hop') return { dur: 1, keys: [K(0, null, 'out'), K(0.3, p => { p.ty -= U * 0.09; }, 'in'), K(0.6, p => { p.sc *= 0.985; D(p, 'chest', 0, U * 0.012); }), K(0.75)] };
   if (kind === 'shrug') return { dur: 2.4, keys: [K(0), K(0.5, p => { D(p, 'aSho', 0, -U * 0.06); D(p, 'bSho', 0, -U * 0.06); D(p, 'neck', 0, U * 0.012); }), K(1.1, p => { D(p, 'aSho', 0, -U * 0.06); D(p, 'bSho', 0, -U * 0.06); D(p, 'neck', 0, U * 0.012); }), K(1.6)] };
   if (kind === 'waveA' || kind === 'waveB') { const e = kind === 'waveA' ? 'aElb' : 'bElb', w = kind === 'waveA' ? 'aWri' : 'bWri'; return { dur: 1.2, keys: [K(0, p => { R(p, e, 0.3); R(p, w, 0.15); }), K(0.3, p => { R(p, e, -0.3); R(p, w, -0.15); }), K(0.6, p => { R(p, e, 0.3); R(p, w, 0.15); }), K(0.9, p => { R(p, e, -0.3); R(p, w, -0.15); })] }; }
+  const SH = (p, v) => { D(p, 'aSho', 0, -U * v); D(p, 'bSho', 0, -U * v); };
+  if (kind === 'pant') { const up = p => { D(p, 'chest', 0, -U * 0.045); SH(p, 0.035); p.s.chest = (p.s.chest || 1) * 1.035; D(p, 'neck', 0, -U * 0.008); R(p, 'neck', -0.015); }; return { dur: 1, keys: [K(0, p => { D(p, 'chest', 0, U * 0.01); }, 'out'), K(0.42, up, 'ease'), K(0.55, up, 'in')] }; }
+  if (kind === 'laugh') { const n = 8, dur = 1.6, keys = []; for (let f = 0; f < n; f++) keys.push(K(dur * f / n, p => { const u = f % 2 === 0; R(p, 'neck', 0.05 + (u ? 0.025 : 0)); D(p, 'chest', 0, u ? -U * 0.035 : U * 0.008); SH(p, u ? 0.045 : 0.01); D(p, 'neck', 0, u ? -U * 0.012 : 0); p.ty += u ? -U * 0.008 : 0; })); return { dur, keys }; }
+  if (kind === 'sigh') { const dn = p => { D(p, 'chest', 0, U * 0.04); D(p, 'neck', 0, U * 0.03); R(p, 'neck', 0.07); SH(p, -0.035); p.s.chest = (p.s.chest || 1) * 0.975; }; return { dur: 4.4, keys: [K(0), K(1.1, p => { D(p, 'chest', 0, -U * 0.04); SH(p, 0.03); p.s.chest = (p.s.chest || 1) * 1.03; R(p, 'neck', -0.03); }), K(2.2, dn), K(3.5, dn)] }; }
+  if (kind === 'startle') { const j = (p, a) => { p.ty -= U * 0.05 * a; SH(p, 0.08 * a); D(p, 'neck', 0, -U * 0.02 * a); p.s.neck = (p.s.neck || 1) * (1 + 0.03 * a); R(p, 'waist', -0.02 * a); }; return { dur: 2.4, keys: [K(0, null, 'out'), K(0.12, p => j(p, 1)), K(0.3, p => j(p, 0.7)), K(0.42, p => j(p, 0.85)), K(1.1, p => j(p, 0.6)), K(1.9)] }; }
+  if (kind === 'shiver') { const n = 10, dur = 1, keys = []; for (let f = 0; f < n; f++) keys.push(K(dur * f / n, p => { const sg = f % 2 ? 1 : -1, a = 0.7 + 0.3 * Math.sin(f * 1.9); p.tx += sg * U * 0.012 * a; R(p, 'neck', sg * 0.012 * a); SH(p, 0.04); D(p, 'aSho', sg * U * 0.006, 0); D(p, 'bSho', sg * U * 0.006, 0); }, 'linear')); return { dur, keys }; }
+  if (kind === 'groove') { const side = (p, sg) => { R(p, 'waist', sg * 0.08); D(p, 'root', sg * U * 0.035, 0); R(p, 'neck', -sg * 0.06); R(p, 'aSho', sg * 0.1); R(p, 'bSho', sg * 0.1); R(p, 'aElb', -sg * 0.12); R(p, 'bElb', -sg * 0.12); }, dip = (p, sg) => { p.ty += U * 0.03; R(p, 'waist', sg * 0.02); D(p, 'chest', 0, U * 0.012); }; return { dur: 2, keys: [K(0, p => side(p, -1)), K(0.25, p => dip(p, -1)), K(0.5, p => side(p, 1)), K(0.75, p => dip(p, 1)), K(1, p => side(p, -1)), K(1.25, p => dip(p, -1)), K(1.5, p => side(p, 1)), K(1.75, p => dip(p, 1))] }; }
+  if (kind === 'rock') return { dur: 0.9, keys: [K(0, p => { p.tx -= U * 0.05; p.rot -= 0.02; R(p, 'neck', 0.045); D(p, 'chest', 0, U * 0.01); }, 'ease'), K(0.45, p => { p.tx += U * 0.06; p.rot += 0.025; R(p, 'neck', -0.055); D(p, 'chest', 0, -U * 0.018); SH(p, 0.015); }, 'ease')] };
+  if (kind === 'jump') return { dur: 1.6, keys: [K(0, null, 'ease'), K(0.3, p => { p.sc *= 0.96; p.ty += U * 0.05; SH(p, -0.02); R(p, 'aElb', 0.1); R(p, 'bElb', -0.1); }, 'out'), K(0.62, p => { p.ty -= U * 0.24; p.sc *= 1.02; SH(p, 0.06); D(p, 'neck', 0, -U * 0.012); }, 'in'), K(0.95, p => { p.sc *= 0.965; p.ty += U * 0.04; SH(p, -0.03); D(p, 'chest', 0, U * 0.02); }, 'out'), K(1.2)] };
+  if (kind === 'walk') { const st = (p, sg) => { const u = sg > 0 ? 'a' : 'b', o = sg > 0 ? 'b' : 'a'; R(p, u + 'Hip', 0.16); R(p, u + 'Knee', -0.3); R(p, o + 'Hip', -0.05); R(p, u + 'Sho', -0.12); R(p, o + 'Sho', 0.12); R(p, u + 'Elb', -0.08); R(p, o + 'Elb', 0.08); R(p, 'waist', sg * 0.025); p.ty -= U * 0.02; }, mid = p => { p.ty += U * 0.012; }; return { dur: 1.2, keys: [K(0, p => st(p, 1)), K(0.3, mid), K(0.6, p => st(p, -1)), K(0.9, mid)] }; }
+  if (kind === 'cWave' || kind === 'cPump' || kind === 'cShake') {
+    const cs = (rig.chains || []).filter(c => c.ids.length > 1 && rgOn(rig, c.ids[1])); if (!cs.length) return null;
+    const n = kind === 'cShake' ? 10 : 8, dur = kind === 'cWave' ? 1.8 : kind === 'cPump' ? 1 : 0.8, keys = [];
+    for (let f = 0; f < n; f++) keys.push(K(dur * f / n, p => { for (const c of cs) { const x = 2 * Math.PI * f / n, m = c.ids.length - 1;
+      if (kind === 'cWave') c.ids.slice(0, -1).forEach((id, i) => R(p, id, 0.1 * (0.5 + i * 0.5) * Math.sin(x - i * 1.3)));
+      else if (kind === 'cPump') { const a0 = rig.joints[c.ids[0]], b0 = rig.joints[c.ids[m]], l = Math.hypot(b0.x - a0.x, b0.y - a0.y) || 1, e = Math.sin(x) * 0.14 * l; D(p, c.ids[0], (b0.x - a0.x) / l * e, (b0.y - a0.y) / l * e); c.ids.slice(1, -1).forEach((id, i) => R(p, id, 0.035 * Math.sin(x - 0.9 - i * 0.5))); }
+      else c.ids.slice(0, -1).forEach((id, i) => R(p, id, (f % 2 ? 1 : -1) * 0.03 * (i ? 1.3 : 1) * (0.7 + 0.3 * Math.sin(f * 1.9 + i))));
+    } }, 'linear'));
+    return { dur, keys };
+  }
   if (kind === 'cSway' || kind === 'cBend') { // 내 뼈마다: 뿌리부터 끝으로 갈수록 조금씩 늦게 (물결처럼)
     const cs = (rig.chains || []).filter(c => c.ids.length > 1 && rgOn(rig, c.ids[1])); if (!cs.length) return null;
     const n = 8, dur = kind === 'cSway' ? 2 : 2.4, keys = [];
@@ -952,6 +1001,35 @@ function rgMoveKeys(rig, kind) {
   }
   if (kind === 'look') return { dur: 4, keys: [K(0), K(0.7, p => { D(p, 'neck', -U * 0.03, 0); R(p, 'neck', -0.05); }), K(1.7, p => { D(p, 'neck', -U * 0.03, 0); R(p, 'neck', -0.05); }), K(2.4, p => { D(p, 'neck', U * 0.03, 0); R(p, 'neck', 0.05); }), K(3.4, p => { D(p, 'neck', U * 0.03, 0); R(p, 'neck', 0.05); })] };
   return null;
+}
+// 늘어진 곳(머리카락 다발·꼬리·옷자락·귀 등)을 찾아 뼈를 알아서 넣기 → 새로 넣은 뼈들
+function rgAutoBones(rig, max) {
+  const L = rig.layers.find(l => l.base); if (!L || rig.stdOff) return [];
+  const m = L.mesh && L.mesh.ver === rig.ver && L.mesh.relC ? L.mesh : rgBuildLayer(rig, L), { gw, gh, W, H } = rig, gx = W / gw, gy = H / gh, g = Math.min(gx, gy), nC = gw * gh, inC = m.inC, U = rgUnit(rig);
+  const seeds = []; for (let c = 0; c < nC; c++) if (inC[c] && m.relC[c] < 1.35) seeds.push(c); if (!seeds.length) return [];
+  const D = rgGeo(inC, gw, gh, seeds), minL = Math.max(5, U * 0.2 / g), taken = new Uint8Array(nC), ord = [];
+  for (let c = 0; c < nC; c++) if (inC[c] && D[c] !== Infinity && D[c] >= minL) ord.push(c); ord.sort((a, b) => D[b] - D[a]);
+  const used = new Set((rig.chains || []).flatMap(c => c.ids)), free = RG_X.filter(x => !used.has(x)), made = [];
+  // 이미 내 뼈가 지나가는 곳은 건너뛰어요
+  const mark = (cx, cy, r) => { for (let y = Math.max(0, Math.floor(cy - r)); y <= Math.min(gh - 1, cy + r); y++) for (let x = Math.max(0, Math.floor(cx - r)); x <= Math.min(gw - 1, cx + r); x++) if ((x - cx) * (x - cx) + (y - cy) * (y - cy) <= r * r) taken[y * gw + x] = 1; };
+  for (const c of rig.chains || []) for (let i = 1; i < c.ids.length; i++) { const a = rig.joints[c.ids[i - 1]], b = rig.joints[c.ids[i]]; if (!a || !b) continue; for (let t = 0; t <= 1; t += 0.1) mark((a.x + (b.x - a.x) * t) / gx, (a.y + (b.y - a.y) * t) / gy, Math.max(3, minL * 0.6)); }
+  for (const tip of ord) {
+    if (made.length >= max || free.length < 3) break; if (taken[tip]) continue;
+    const path = [tip]; let cur = tip, guard = 0;
+    while (D[cur] > 0 && guard++ < 4000) { const x = cur % gw, y = (cur / gw) | 0; let best = -1, bd = D[cur]; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const xx = x + dx, yy = y + dy; if ((!dx && !dy) || xx < 0 || yy < 0 || xx >= gw || yy >= gh) continue; const q = yy * gw + xx; if (inC[q] && D[q] < bd) { bd = D[q]; best = q; } } if (best < 0) break; cur = best; path.push(cur); }
+    if (D[cur] > 0 || path.length < minL) { mark(tip % gw, (tip / gw) | 0, 3); continue; }
+    if (path.slice(0, Math.ceil(path.length * 0.7)).some(q => taken[q])) { mark(tip % gw, (tip / gw) | 0, 3); continue; } // 이미 뼈를 넣은 다발과 같은 줄기
+    const len = path.length * g, np = len > U * 0.75 && free.length >= 4 ? 4 : 3, pts = [];
+    for (let i = 0; i < np; i++) { const f = 0.72 - (i / (np - 1)) * 0.66, q = path[Math.min(path.length - 1, Math.round(f * (path.length - 1)))]; pts.push({ x: (q % gw + 0.5) * gx, y: (((q / gw) | 0) + 0.5) * gy }); }
+    let attach = null, bd = 1e18; for (const id of RG_STD) { if (!rgOn(rig, id)) continue; for (const kid of rgKids(rig, id)) { if (!RG_J[kid]) continue; const r = rgSegDist(pts[0].x, pts[0].y, rig.joints[id], rig.joints[kid]); if (r.d < bd) { bd = r.d; attach = r.t > 0.85 && rgKids(rig, kid).some(q => RG_J[q]) ? kid : id; } } }
+    const ids = free.splice(0, np); ids.forEach((id, i) => { rig.joints[id] = { x: pts[i].x, y: pts[i].y, on: true }; });
+    if (!rig.chains) rig.chains = []; const no = rig.chains.filter(q => q.auto).length + 1;
+    const ch = { id: 'k' + uid(), kind: 'free', name: '자동 뼈 ' + no, attach, ids, z: attach ? RG_J[attach][2] : 0, auto: true, am: { kind: len > U * 0.75 ? 'wave' : 'sway', amt: 40, sp: Math.round(85 + 30 * rgHash(no * 3.1)), ph: Math.round(100 * rgHash(no * 7.7)) } };
+    rig.chains.push(ch); made.push(ch);
+    const w = Math.max(3, path.length * 0.38); for (const q of path) mark(q % gw, (q / gw) | 0, w);
+  }
+  if (made.length) rig.ver++;
+  return made;
 }
 // 화면에서 어느 쪽 팔·다리인지 (이름표용)
 const rgSideName = (rig, limb) => { const mine = rig.joints[RG_LIMBS[limb][0]], oth = rig.joints[RG_LIMBS[limb.slice(0, 3) + (limb.endsWith('A') ? 'B' : 'A')][0]]; return (mine.x < oth.x ? '왼쪽 ' : '오른쪽 ') + (limb.startsWith('arm') ? '팔' : '다리'); };
@@ -1087,7 +1165,7 @@ function rgWindow(main, from) {
 
   /* 시간 막대 */
   const keyAt = (t, tol) => A().keys.findIndex(k => Math.abs(k.t - t) <= (tol || 0.5 / rig.out.fps));
-  const keyHere = make => { let i = keyAt(st.t); if (i < 0 && make) { const k = { t: clamp(frameT(st.t), 0, A().dur), e: 'ease', p: rgKeyPose(rig, st.t) }; A().keys.push(k); A().keys.sort((a, b) => a.t - b.t); i = A().keys.indexOf(k); syncTime(); } if (i >= 0) st.selKey = i; return i >= 0 ? A().keys[i] : null; };
+  const keyHere = make => { if (make) st.mvBase = null; let i = keyAt(st.t); if (i < 0 && make) { const k = { t: clamp(frameT(st.t), 0, A().dur), e: 'ease', p: rgKeyPose(rig, st.t) }; A().keys.push(k); A().keys.sort((a, b) => a.t - b.t); i = A().keys.indexOf(k); syncTime(); } if (i >= 0) st.selKey = i; return i >= 0 ? A().keys[i] : null; };
   const syncClock = () => { $('#rgClock', m).textContent = `${st.t.toFixed(2)} / ${A().dur.toFixed(2)}초`; $('#rgPh', m).style.left = (st.t / A().dur * 100) + '%'; };
   const syncPlay = () => { $('#rgPlay', m).textContent = st.playing ? '❚❚ 멈춤' : '▶ 재생'; };
   function syncTime() {
@@ -1157,15 +1235,21 @@ function rgWindow(main, from) {
       h += `<div class="sec"><h3>전체</h3><div class="grid2 rg-g">${rng('크기', 'data-rgw="sc"', Math.round(p.sc * 100), 50, 160)}${rng('기울기', 'data-rgw="rot"', Math.round(p.rot * 180 / Math.PI), -90, 90)}${rig.eyes.some(e => e.on !== false) ? rng('눈 감기', 'data-rgw="blink"', Math.round((p.blink || 0) * 100), 0, 100, 1, '이 시각에 눈을 얼마나 감을지 (윙크·졸린 눈)') : ''}${hasMouth ? rng('입 벌리기', 'data-rgw="mouth"', Math.round((p.mouth || 0) * 100), rig.mouth.type === 'open' ? -100 : 0, 100, 1, '이 시각에 입을 얼마나 벌릴지. 원래 벌린 입은 왼쪽으로 밀면 다물어요') : ''}</div>${rig.mouth ? '' : '<p class="muted small" style="margin-top:6px">입 벌리기는 ① 뼈대 맞추기에서 입 상자를 넣으면 쓸 수 있어요.</p>'}</div>`;
       h += `<div class="sec"><h3>자동 움직임</h3><p class="muted small">저장한 자세 위에 저절로 더해져요. 0이면 꺼져요.</p><div class="grid2 rg-g">
         ${rng('숨쉬기', 'data-rgau="breath"', a.breath, 0, 100)}${rng('몸 흔들기', 'data-rgau="sway"', a.sway, 0, 100)}${rng('고개', 'data-rgau="head"', a.head, 0, 100)}${rng('통통 튀기', 'data-rgau="bounce"', a.bounce, 0, 100)}
+        ${rig.stdOff ? '' : rng('팔 흔들림', 'data-rgau="arms"', a.arms || 0, 0, 100, 1, '팔이 가만히 있지 않고 조금씩 흔들려요') + rng('골반 흔들기', 'data-rgau="hip"', a.hip || 0, 0, 100, 1, '골반이 좌우로 움직이고 윗몸이 균형을 잡아요')}${rng('떨림', 'data-rgau="shake"', a.shake || 0, 0, 100, 1, '온몸이 잘게 떨려요')}${rng('출렁임', 'data-rgau="jig"', a.jig || 0, 0, 100, 1, '움직임이 바뀔 때 머리카락 끝·옷자락이 한 박자 더 출렁여요')}
         ${rng('살랑임', 'data-rgau="wind"', a.wind, 0, 100, 1, '머리카락 끝·옷자락처럼 몸에서 먼 곳이 바람에 살랑거려요')}${rng('늦게 따라오기', 'data-rgau="follow"', a.follow, 0, 100, 1, '몸이 움직일 때 머리카락·옷자락이 조금 늦게 따라와요')}
         ${rig.eyes.some(e => e.on !== false) ? rng('눈 깜빡임', 'data-rgau="blink"', a.blink, 0, 100, 1, '클수록 자주 깜빡여요') : ''}${hasMouth ? rng('말하기', 'data-rgau="talk"', a.talk || 0, 0, 100, 1, '말하는 것처럼 입을 뻥긋거려요. 클수록 크게 벌려요') : ''}${rng('빠르기', 'data-rgau="speed"', a.speed, 40, 250)}</div>
-        <div class="btnrow"><button class="btn sm" data-rga="auto0">모두 끄기</button><button class="btn sm" data-rga="auto1">기본값</button></div></div>`;
-      h += `<div class="sec"><h3>움직임 견본</h3><p class="muted small">누르면 맨 앞 자세를 바탕으로 시간 막대를 채워요.</p><div class="btnrow">${RG_MOVES.filter(([k]) => RG_MOVE_NEED[k] === null ? (rig.chains || []).some(c => c.ids.length > 1) : rig.stdOff ? k === 'hop' : RG_MOVE_NEED[k].every(id => rgOn(rig, id))).map(([k, l]) => `<button class="btn sm" data-rgmv="${k}">${l}${/^wave/.test(k) ? ' (' + rgSideName(rig, k === 'waveA' ? 'armA' : 'armB').replace(' 팔', '') + ')' : ''}</button>`).join('')}</div></div>`;
+        <div class="btnrow"><button class="btn sm" data-rga="auto0">모두 끄기</button><button class="btn sm" data-rga="auto1">기본값</button></div>
+        <p class="muted small" style="margin-top:8px">한 번에 맞추기</p><div class="btnrow">${Object.entries(RG_STYLES).map(([k, v]) => `<button class="btn sm" data-rgsty="${k}">${v[0]}</button>`).join('')}</div>
+        ${rig.stdOff ? '' : `<div class="btnrow"><button class="btn sm primary" data-rga="automagic" title="머리카락 다발·꼬리·옷자락처럼 늘어진 곳에 뼈를 알아서 넣고, 자동 움직임을 '살아 있게'로 맞춰요">✨ 알아서 움직이게</button></div>`}</div>`;
+      const cs2 = (rig.chains || []).filter(c => c.ids.length > 1);
+      if (cs2.length) h += `<div class="sec"><h3>내 뼈 자동 움직임</h3><p class="muted small">뼈마다 저절로 움직이게 해요. 저장한 자세 위에 더해져요.</p>${cs2.map(c => { const am = c.am || {}, on = am.kind && RG_AM[am.kind], open = on && (c.ids.includes(st.sel) || cs2.length <= 2); return `<div class="grid2 rg-g" style="margin-bottom:4px"><span class="small" data-rgchsel="${c.id}" style="cursor:pointer${c.ids.includes(st.sel) ? ';font-weight:700' : ''}">${esc(c.name)}</span><span><select data-rgcamk="${c.id}"><option value="">없음</option>${Object.entries(RG_AM).map(([k, v]) => `<option value="${k}" ${am.kind === k ? 'selected' : ''}>${v.name}</option>`).join('')}</select></span>
+        ${on ? rng('크기', `data-rgcam="${c.id}" data-k="amt"`, am.amt === undefined ? 50 : am.amt, 0, 100) : ''}${open ? rng('빠르기', `data-rgcam="${c.id}" data-k="sp"`, am.sp || 100, 30, 300) + rng('엇박', `data-rgcam="${c.id}" data-k="ph"`, am.ph || 0, 0, 100, 1, '다른 뼈와 박자를 어긋나게 해요') + `<span class="small">방향</span><span><label class="chk"><input type="checkbox" data-rgcamr="${c.id}" ${am.rev ? 'checked' : ''}> 반대로</label></span>` : ''}</div>`; }).join('')}${cs2.some(c => c.am && c.am.kind) && cs2.length > 2 ? '<p class="muted small">이름을 누르면 빠르기·엇박·방향도 바꿀 수 있어요.</p>' : ''}</div>`;
+      h += `<div class="sec"><h3>움직임 견본</h3><p class="muted small">누르면 맨 앞 자세를 바탕으로 시간 막대를 채워요. 자동 움직임과 함께 쓸 수 있어요.</p><div class="grid2 rg-g">${rng('세기', 'data-rgmva', rgUi.mvAmp || 100, 40, 220, 5, '견본을 얼마나 크게 움직일지. 바꾼 뒤 견본을 다시 누르세요')}</div><div class="btnrow">${RG_MOVES.filter(([k]) => RG_MOVE_NEED[k] === null ? (rig.chains || []).some(c => c.ids.length > 1) : rig.stdOff ? !RG_MOVE_NEED[k].length : RG_MOVE_NEED[k].every(id => rgOn(rig, id))).map(([k, l]) => `<button class="btn sm" data-rgmv="${k}">${l}${/^wave/.test(k) ? ' (' + rgSideName(rig, k === 'waveA' ? 'armA' : 'armB').replace(' 팔', '') + ')' : ''}</button>`).join('')}</div></div>`;
     } else if (st.mode === 'bone') {
       const cs = rig.chains || [];
       h += `<div class="sec"><h3>내 뼈 (원하는 곳에만)</h3><p class="muted small">얼굴이 안 보이거나 몸 일부만 나온 그림은, 움직일 곳에만 뼈를 넣으세요. 고른 뒤 그림에서 <b>차례대로</b> 눌러요. 뼈에서 먼 곳은 제자리에 있어요.</p>
         ${st.draft ? `<p class="small"><b>${esc(RG_CHAIN_KINDS[st.draft.kind].name)}</b>: ${esc(rgDraftName(st.draft))}</p><div class="btnrow"><button class="btn sm primary" data-rga="chainok" ${st.draft.pts.length < 2 ? 'disabled' : ''} title="Enter">여기까지 (${st.draft.pts.length}점)</button><button class="btn sm" data-rga="chainno" title="Esc">취소</button></div>`
-        : `<div class="btnrow">${Object.entries(RG_CHAIN_KINDS).map(([k, v]) => `<button class="btn sm" data-rgch="${k}" title="${esc(v.pts.slice(0, k === 'free' ? 2 : 9).join(' → '))}${k === 'free' ? ' … (꼬리·머리카락·옷자락·물건 등, 2~6점)' : ''}">${k === 'free' ? '그 밖의 것' : esc(v.name)}</button>`).join('')}</div>`}
+        : `${rig.stdOff ? '' : `<div class="btnrow"><button class="btn sm primary" data-rga="autobones" title="머리카락 다발·꼬리·옷자락·귀처럼 몸에서 늘어진 곳을 찾아 뼈를 넣고, 저절로 흔들리게 해요">✨ 늘어진 곳에 뼈 자동으로 넣기</button>${(rig.chains || []).some(c => c.auto) ? '<button class="btn sm" data-rga="autobones0">자동 뼈 지우기</button>' : ''}</div>`}<div class="btnrow">${Object.entries(RG_CHAIN_KINDS).map(([k, v]) => `<button class="btn sm" data-rgch="${k}" title="${esc(v.pts.slice(0, k === 'free' ? 2 : 9).join(' → '))}${k === 'free' ? ' … (꼬리·머리카락·옷자락·물건 등, 2~6점)' : ''}">${k === 'free' ? '그 밖의 것' : esc(v.name)}</button>`).join('')}</div>`}
         ${cs.map(c => `<div class="rg-ly ${c.ids.includes(st.sel) ? 'on' : ''}" data-rgchsel="${c.id}"><span style="color:#9b6fe0;padding:0 4px">●</span><span class="nm">${esc(c.name)} <span class="muted small">${c.ids.length}점</span></span><button class="ic" data-rgchsplit="${c.id}" title="이 뼈 부분을 AI로 따로 떼어 내요. 팔·다리가 몸 위에 겹쳐 있을 때 쓰면 몸이 같이 끌려가지 않아요">✂</button><button class="ic" data-rgchren="${c.id}" title="이름 바꾸기">✎</button><button class="ic" data-rgchdel="${c.id}" title="이 뼈 지우기">✕</button></div>
           ${rig.stdOff ? '' : `<div class="grid2 rg-g" style="margin:2px 0 6px 10px"><span class="small">붙일 곳</span><span><select data-rgchat="${c.id}"><option value="">제자리에 고정</option>${RG_STD.filter(i => rgOn(rig, i)).map(i => `<option value="${i}" ${c.attach === i ? 'selected' : ''}>${esc(selName(i))}</option>`).join('')}</select></span></div>`}`).join('')}</div>
         <div class="sec"><h3>사람 모양 뼈대</h3><label class="chk"><input type="checkbox" data-rgstd ${rig.stdOff ? '' : 'checked'}> 사람 모양 뼈대 쓰기</label>
@@ -1206,6 +1290,8 @@ function rgWindow(main, from) {
   side.addEventListener('input', e => {
     const t = e.target, v = +t.value;
     if (t.dataset.rgau) { A().auto[t.dataset.rgau] = v; dirty(); }
+    else if (t.dataset.rgmva !== undefined) rgUi.mvAmp = v;
+    else if (t.dataset.rgcam) { const c = (rig.chains || []).find(q => q.id === t.dataset.rgcam); if (c && c.am) { c.am[t.dataset.k] = v; dirty(); } }
     else if (t.dataset.rgj && st.sel) editPose(p => { if (t.dataset.rgj === 'r') p.r[st.sel] = v * Math.PI / 180; else p.s[st.sel] = v / 100; });
     else if (t.dataset.rgw) editPose(p => { if (t.dataset.rgw === 'sc') p.sc = v / 100; else if (t.dataset.rgw === 'rot') p.rot = v * Math.PI / 180; else if (t.dataset.rgw === 'mouth') p.mouth = v / 100; else p.blink = v / 100; });
     else if (t.dataset.rgmo === 'col' && rig.mouth) { const hx = t.value.replace('#', ''); rig.mouth.col = [0, 2, 4].map(i => parseInt(hx.slice(i, i + 2), 16)); dirty(); }
@@ -1217,6 +1303,8 @@ function rgWindow(main, from) {
     if (t.dataset.rgl || t.dataset.rgl2) { snap(); const ids = RG_LIMBS[t.dataset.rgl || t.dataset.rgl2], from0 = t.dataset.rgl ? 1 : 2; if (t.dataset.rgl) rig.joints[ids[0]].on = true; for (let i = from0; i < ids.length; i++) rig.joints[ids[i]].on = t.checked; if (t.checked) fixLimb(ids); rig.ver++; renderSide(); dirty(); }
     else if (t.dataset.rge) { snap(); rig.eyes[+t.dataset.rge].on = t.checked; dirty(); }
     else if (t.dataset.rgstd !== undefined) { snap(); rig.stdOff = !t.checked; if (st.sel && RG_J[st.sel]) st.sel = null; for (const L of rig.layers) if (L.bind) L.bind = L.bind.filter(id => !RG_J[id] || !rig.stdOff); rig.ver++; renderSide(); dirty(); }
+    else if (t.dataset.rgcamk) { const c = (rig.chains || []).find(q => q.id === t.dataset.rgcamk); if (!c) return; snap(); c.am = Object.assign({ amt: 50, sp: 100, ph: 0 }, c.am || {}, { kind: t.value || null }); renderSide(); dirty(); }
+    else if (t.dataset.rgcamr) { const c = (rig.chains || []).find(q => q.id === t.dataset.rgcamr); if (!c || !c.am) return; snap(); c.am.rev = t.checked; dirty(); }
     else if (t.dataset.rgchat) { const c = (rig.chains || []).find(q => q.id === t.dataset.rgchat); if (!c) return; snap(); c.attach = t.value || null; rig.ver++; renderSide(); dirty(); }
     else if (t.dataset.rgmo === 'on' && rig.mouth) { snap(); rig.mouth.on = t.checked; dirty(); }
     else if (t.dataset.rgmo === 'type' && rig.mouth) { snap(); rig.mouth.type = t.value; dirty(); }
@@ -1270,7 +1358,8 @@ function rgWindow(main, from) {
     if (!b) return;
     if (b.dataset.rgc) { const c = chars().find(q => q.cid === b.dataset.rgc); if (c) { switchChar(c); renderSide(); } return; }
     if (b.dataset.rgb) { st.brush = b.dataset.rgb; renderSide(); return; }
-    if (b.dataset.rgmv) { const mv = rgMoveKeys(rig, b.dataset.rgmv); if (!mv) return; if (A().keys.length > 1 && !(await rgAsk('시간 막대에 저장해 둔 자세들이 견본으로 바뀌어요. 계속할까요?'))) return; snap(); A().keys = mv.keys; if (chars().length < 2 || mv.dur > A().dur) setDur(mv.dur); else if (mv.dur < A().dur) { const n = Math.max(1, Math.round(A().dur / mv.dur)), ks = []; for (let r = 0; r < n; r++) for (const k of mv.keys) ks.push({ t: Math.round((k.t + r * mv.dur) * A().dur / (n * mv.dur) * 1000) / 1000, e: k.e, p: rgPoseCopy(k.p) }); A().keys = ks; } for (const c of chars()) c.anim.loop = true; st.selKey = 0; st.t = 0; syncTime(); renderSide(); if (!st.playing) togglePlay(); return; }
+    if (b.dataset.rgsty) { const S = RG_STYLES[b.dataset.rgsty]; snap(); Object.assign(A().auto, S[1]); for (const c of rig.chains || []) if (c.am && c.am.kind) c.am.amt = S[2]; renderSide(); dirty(); return; }
+    if (b.dataset.rgmv) { const mb = st.mvBase && st.mvBase.rig === rig && st.mvBase.keys === A().keys ? st.mvBase.base : rgPoseCopy(A().keys[0] ? A().keys[0].p : rgPose0()), mv = rgMoveKeys(rig, b.dataset.rgmv, mb); if (!mv) return; rgMoveAmp(mb, mv, (rgUi.mvAmp || 100) / 100); if (A().keys.length > 1 && !(await rgAsk('시간 막대에 저장해 둔 자세들이 견본으로 바뀌어요. 계속할까요?'))) return; snap(); A().keys = mv.keys; if (chars().length < 2 || mv.dur > A().dur) setDur(mv.dur); else if (mv.dur < A().dur) { const n = Math.max(1, Math.round(A().dur / mv.dur)), ks = []; for (let r = 0; r < n; r++) for (const k of mv.keys) ks.push({ t: Math.round((k.t + r * mv.dur) * A().dur / (n * mv.dur) * 1000) / 1000, e: k.e, p: rgPoseCopy(k.p) }); A().keys = ks; } st.mvBase = { rig, keys: A().keys, base: mb }; for (const c of chars()) c.anim.loop = true; st.selKey = 0; st.t = 0; syncTime(); renderSide(); if (!st.playing) togglePlay(); return; }
     const act = b.dataset.rga; if (!act) return;
     if (act === 'pose0') { snap(); editPose(p => { Object.assign(p, rgPose0()); }); renderSide(); }
     else if (act === 'pintool') { st.tool = st.tool === 'pin' ? 'move' : 'pin'; renderSide(); if (st.tool === 'pin') toast('핀을 꽂을 곳(머리카락 끝·옷자락 등)을 눌러 주세요'); }
@@ -1278,7 +1367,12 @@ function rgWindow(main, from) {
     else if ((act === 'zfront' || act === 'zback') && st.sel) { const l = rgLimbOf(st.sel), ch = rgChainOf(rig, st.sel); if (!l && !ch) return; snap(); if (ch) ch.z = act === 'zfront' ? 2 : -2; else rig.zs[l] = act === 'zfront' ? 2 : -2; for (const L of rig.layers) if (L.mesh) rgSortTris(rig, L); dirty(); }
     else if (act === 'pin0') { snap(); editPose(p => { delete p.pins[st.selPin]; }); }
     else if (act === 'pindel') { snap(); rig.pins = rig.pins.filter(q => q.id !== st.selPin); for (const k of A().keys) delete k.p.pins[st.selPin]; st.selPin = null; for (const L of rig.layers) if (L.mesh) rgPinWeights(rig, L); renderSide(); dirty(); }
-    else if (act === 'auto0') { snap(); for (const k of ['breath', 'sway', 'head', 'bounce', 'wind', 'follow', 'blink', 'talk']) A().auto[k] = 0; renderSide(); dirty(); }
+    else if (act === 'auto0') { snap(); for (const k of ['breath', 'sway', 'head', 'bounce', 'wind', 'follow', 'blink', 'talk', 'arms', 'hip', 'shake', 'jig']) A().auto[k] = 0; for (const c of rig.chains || []) if (c.am) c.am.kind = null; renderSide(); dirty(); }
+    else if (act === 'autobones' || act === 'automagic') {
+      snap(); const made = []; for (const r of act === 'automagic' ? chars() : [rig]) { if (!(r.chains || []).some(c => c.auto)) made.push(...rgAutoBones(r, 6)); if (act === 'automagic') { const bl = r.anim.auto.blink, tk = r.anim.auto.talk; Object.assign(r.anim.auto, RG_STYLES.live[1], { blink: bl, talk: tk }); for (const c of r.chains || []) if (c.am && c.am.kind) c.am.amt = RG_STYLES.live[2]; } for (const L of r.layers) L.mesh = null; } renderSide(); dirty();
+      toast(made.length ? `늘어진 곳 ${made.length}군데에 뼈를 넣었어요. 어색한 뼈는 ① 뼈대 맞추기에서 지우거나 점을 끌어 고치세요.` : act === 'automagic' ? "자동 움직임을 '살아 있게'로 맞췄어요. 뼈를 더 넣을 만큼 늘어진 곳은 찾지 못했어요." : '뼈를 넣을 만큼 늘어진 곳을 찾지 못했어요. 내 뼈를 직접 넣어 보세요.', 5200);
+    }
+    else if (act === 'autobones0') { for (const c of (rig.chains || []).filter(q => q.auto)) chainDel(c.id); }
     else if (act === 'auto1') { snap(); Object.assign(A().auto, rgNewAnim().auto); if (!rig.eyes.length) A().auto.blink = 0; renderSide(); dirty(); }
     else if (act === 'repose') busy('뼈대를 다시 찾는 중…', async tk => { const bx = rgBBox(rgAlpha(base(), rig.W, rig.H), rig.W, rig.H, 100) || { x: 0, y: 0, w: rig.W, h: rig.H }; const K = await rgPoseRun(rig.src, rig.W, rig.H, bx, tk), sk = rgSkeleton(K, rig.W, rig.H, bx); snap(); const keep = Object.fromEntries(RG_X.filter(x => rig.joints[x]).map(x => [x, rig.joints[x]])); rig.joints = { ...sk.joints, ...keep }; rig.autoSk = sk.auto; rig.conf = sk.conf; if (sk.auto) rig.stdOff = false; rig.ver++; if (!sk.auto) toast('AI가 뼈대를 찾지 못해서 기본 뼈대를 놓았어요. 끌어서 맞춰 주세요.', 4200); });
     else if (act === 'eyefind') busy('눈을 찾는 중…', async tk => { const bx = rgBBox(rgAlpha(base(), rig.W, rig.H), rig.W, rig.H, 100) || { x: 0, y: 0, w: rig.W, h: rig.H }; const ey = await rgFindEyes(rig.src, rig.W, rig.H, { joints: rig.joints, auto: true }, bx, tk); snap(); rig.eyes = ey; st.selEye = -1; toast(ey.length ? `눈 ${ey.length}개를 찾았어요` : '눈을 찾지 못했어요. 눈 상자를 직접 추가해 주세요.'); });
