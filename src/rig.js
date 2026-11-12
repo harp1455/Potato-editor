@@ -544,6 +544,66 @@ async function rgInstances(sh, A0, people, tk) {
   }
   return out;
 }
+// 선 지도(0~1): 그림의 선·색 경계가 얼마나 또렷한지. w×h 크기로 한 번 계산해 둬요 (선 따라 칠하는 붓, 자동 나누기 점수에 써요)
+function rgEdge(main, w, h) {
+  if (main.edge && main.edge.w === w && main.edge.h === h) return main.edge.e;
+  const c = newCanvas(w, h), g = c.getContext('2d', { willReadFrequently: true }); g.imageSmoothingQuality = 'high'; g.drawImage(main.src, 0, 0, w, h);
+  const d = g.getImageData(0, 0, w, h).data, e = new Float32Array(w * h);
+  for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) { let m = 0; const i = (y * w + x) * 4; for (let ch = 0; ch < 3; ch++) { const gx = d[i + 4 + ch] - d[i - 4 + ch] + 0.5 * (d[i + 4 - w * 4 + ch] - d[i - 4 - w * 4 + ch] + d[i + 4 + w * 4 + ch] - d[i - 4 + w * 4 + ch]), gy = d[i + w * 4 + ch] - d[i - w * 4 + ch] + 0.5 * (d[i + w * 4 - 4 + ch] - d[i - w * 4 - 4 + ch] + d[i + w * 4 + 4 + ch] - d[i - w * 4 + 4 + ch]), v = Math.abs(gx) + Math.abs(gy); if (v > m) m = v; } e[y * w + x] = clamp((m - 24) / 150, 0, 1); }
+  main.edge = { w, h, e }; return e;
+}
+// 붙어 있는 두 캐릭터 자동 나누기(가까운 구도용): 몸 곳곳을 찍어 SAM에 '이 점이 든 큰 덩어리'를 물어보고,
+// 여러 점에서 똑같이 나온 덩어리(= 진짜 한 사람일 가능성이 큼) 중 선 경계가 또렷하고 양쪽 살색이 다른 것을 골라요 → 그 덩어리(0~255) 또는 null
+async function rgAutoTwo(rig, tk) {
+  const { W, H } = rig, base = rig.layers.find(l => l.base), A = rgAlpha(base, W, H), E = await rgSamEnc(rig, tk), { s, tw, th } = E, plane = tw * th;
+  const lc = newCanvas(tw, th), lg = lc.getContext('2d', { willReadFrequently: true }); lg.imageSmoothingQuality = 'high'; lg.drawImage(base.tex, 0, 0, tw, th);
+  const ad = lg.getImageData(0, 0, tw, th).data, blob = new Uint8Array(plane); let nb = 0; for (let i = 0; i < plane; i++) if (ad[i * 4 + 3] > 128) { blob[i] = 1; nb++; }
+  if (nb < plane * 0.02) return null;
+  lg.clearRect(0, 0, tw, th); lg.drawImage(rig.src, 0, 0, tw, th); const px = lg.getImageData(0, 0, tw, th).data, edge = rgEdge(rig, tw, th);
+  // 찍을 점: 몸 안쪽 깊은 곳부터 서로 떨어지게
+  const seeds = [], work = blob.slice(), minR = 0.075 * Math.max(tw, th);
+  for (let k = 0; k < 14; k++) { const dp = czDeepest(work, tw, th); if (!dp || dp[0] < 0 || dp[1] < 5) break; const i = dp[0], x = i % tw, y = (i / tw) | 0, r = Math.max(minR, dp[1] * 1.15); seeds.push([x, y]); for (let yy = Math.max(0, Math.floor(y - r)); yy < Math.min(th, y + r); yy++) for (let xx = Math.max(0, Math.floor(x - r)); xx < Math.min(tw, x + r); xx++) if ((xx - x) * (xx - x) + (yy - y) * (yy - y) < r * r) work[yy * tw + xx] = 0; }
+  if (seeds.length < 3) return null;
+  // 견줄 때는 3칸마다 한 점만
+  const ST = 3, gw = Math.floor(tw / ST), gh = Math.floor(th / ST), gi = []; for (let y = 0; y < gh; y++) for (let x = 0; x < gw; x++) if (blob[y * ST * tw + x * ST]) gi.push(y * ST * tw + x * ST);
+  const cands = [];
+  for (let si = 0; si < seeds.length; si++) {
+    if (tk && tk.stop) throw new Error('stop'); tk && tk.set(`캐릭터 경계를 찾는 중… ${si + 1} / ${seeds.length}`);
+    const r = await rgSamAsk(E, [[seeds[si][0], seeds[si][1], 1]], null);
+    for (let k = 0; k < r.nm; k++) { if (r.iou && r.iou[k] < 0.55) continue; const bits = new Uint8Array(gi.length); let a = 0; for (let j = 0; j < gi.length; j++) if (r.m[k * plane + gi[j]] > 0) { bits[j] = 1; a++; } const f = a / gi.length; if (f < 0.14 || f > 0.86) continue; cands.push({ si, bits, a, f, full: r.m.slice(k * plane, (k + 1) * plane) }); }
+  }
+  if (!cands.length) return null;
+  const iouOf = (p, q) => { let it = 0; for (let j = 0; j < p.bits.length; j++) if (p.bits[j] && q.bits[j]) it++; const same = it / (p.a + q.a - it), pa = p.a, qa = gi.length - q.a, it2 = pa - it; return [same, it2 / (pa + qa - it2)]; }; // [같은 쪽끼리, 반대쪽과]
+  const scored = [];
+  for (const c of cands) {
+    const sup = new Map(); for (const o of cands) { if (o === c) continue; const [a1, a2] = iouOf(c, o); if (a1 > 0.72) sup.set(o.si, { o, flip: false }); else if (a2 > 0.72 && !sup.has(o.si)) sup.set(o.si, { o, flip: true }); }
+    sup.delete(c.si);
+    // 경계의 선 세기, 양쪽 색 차이
+    let es = 0, en = 0; const in1 = new Uint8Array(plane); for (let j = 0; j < gi.length; j++) if (c.bits[j]) in1[gi[j]] = 1;
+    const m1 = [0, 0, 0], m2 = [0, 0, 0]; let n1 = 0, n2 = 0;
+    for (let j = 0; j < gi.length; j++) { const i = gi[j], q = i * 4; if (c.bits[j]) { m1[0] += px[q]; m1[1] += px[q + 1]; m1[2] += px[q + 2]; n1++; } else { m2[0] += px[q]; m2[1] += px[q + 1]; m2[2] += px[q + 2]; n2++; }
+      for (const o of [ST, ST * tw]) { const i2 = i + o; if (i2 >= plane || !blob[i2] || in1[i2] === in1[i]) continue; let mx = 0; for (let t = 0; t <= ST; t++) { const p = i + (o === ST ? t : t * tw); for (const dd of [0, -1, 1, -tw, tw]) { const v = edge[p + dd] || 0; if (v > mx) mx = v; } } es += mx; en++; } }
+    const eg = en ? es / en : 0, tone = n1 && n2 ? Math.min(1, Math.hypot(m1[0] / n1 - m2[0] / n2, m1[1] / n1 - m2[1] / n2, m1[2] / n1 - m2[2] / n2) / 55) : 0, bal = 1 - Math.abs(c.f - 0.5) * 0.8;
+    if (eg < 0.18) continue;
+    scored.push({ c, sup, eg, tone, sc: (Math.min(sup.size, 5) + 1) * (0.35 + eg) * (0.8 + 0.3 * tone) * bal });
+  }
+  scored.sort((a, b) => b.sc - a.sc);
+  // 서로 다른 후보만 몇 개 (같은 덩어리·그 반대쪽은 한 번만)
+  const picks = []; for (const q of scored) { if (picks.every(p => { const [a1, a2] = iouOf(p.c, q.c); return a1 < 0.72 && a2 < 0.72; })) picks.push(q); if (picks.length >= 4) break; }
+  const out = [];
+  for (const best of picks) {
+    // 같은 덩어리를 가리킨 답들을 모아 다수결
+    const votes = new Float32Array(plane), all = [{ o: best.c, flip: false }, ...best.sup.values()]; for (const { o, flip } of all) for (let i = 0; i < plane; i++) if (blob[i] && ((o.full[i] > 0) !== flip)) votes[i]++;
+    const bin = new Uint8Array(plane); for (let i = 0; i < plane; i++) bin[i] = blob[i] && votes[i] > all.length / 2 ? 1 : 0;
+    const up = rgUpMask(bin, tw, th, W, H), M = new Uint8ClampedArray(W * H); let a1 = 0, a0 = 0; for (let i = 0; i < M.length; i++) { M[i] = A[i] > 20 ? up[i] : 0; if (A[i] > 128) { if (M[i] > 128) a1++; else a0++; } }
+    if (a1 < (a1 + a0) * 0.1 || a0 < (a1 + a0) * 0.1) continue;
+    // 얼굴(눈)이 있는 쪽은 지금 캐릭터로 남기고, 반대쪽을 새 캐릭터 후보로
+    const eyeIn = (rig.eyes || []).filter(e => M[clamp(Math.round(e.y + e.h / 2), 0, H - 1) * W + clamp(Math.round(e.x + e.w / 2), 0, W - 1)] > 128).length, flip = rig.eyes && rig.eyes.length ? eyeIn * 2 > rig.eyes.length : a1 > a0;
+    if (flip) for (let i = 0; i < M.length; i++) M[i] = A[i] > 20 ? 255 - M[i] : 0;
+    out.push({ M, votes: all.length, edge: best.eg, tone: best.tone });
+  }
+  return out.length ? out : null;
+}
 // 다른 캐릭터(M: 0~255)에 가려진 자리 중 이 캐릭터 몸이 이어질 곳을 메워요 → 떨어뜨려 움직여도 구멍이 안 보이게
 async function rgFillBehind(sh, tex, M, tk) {
   const { W, H } = sh, n = W * H, id = tex.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, W, H), d = id.data, rem = new Uint8Array(n); for (let i = 0; i < n; i++) rem[i] = d[i * 4 + 3];
@@ -809,7 +869,7 @@ function rgWindow(main, from) {
   let rig = main; // 지금 고치는 캐릭터
   const chars = () => rgChars(main), maxSide = Math.max(main.W, main.H);
   main.out = Object.assign({ size: Math.min(1080, maxSide), fps: 24, bg: 'fill', color: '#ffffff' }, main.out || {}); for (const c of chars()) { c.out = main.out; c.anim.dur = main.anim.dur; c.anim.loop = main.anim.loop; if (c.anim.auto.talk === undefined) c.anim.auto.talk = 0; }
-  const st = { mode: rig.autoSk === false ? 'bone' : 'pose', t: 0, playing: false, sel: null, selPin: null, selKey: 0, selLayer: 'body', selEye: -1, tool: 'move', brush: 'add', bsize: 60, view: { k: 1, ox: 0, oy: 0 }, undo: [], redo: [], ev: null, drag: null, pm: null, pmAny: false, solo: false, busy: false };
+  const st = { mode: rig.autoSk === false ? 'bone' : 'pose', t: 0, playing: false, sel: null, selPin: null, selKey: 0, selLayer: 'body', selEye: -1, tool: 'move', brush: 'smart', bsize: 60, view: { k: 1, ox: 0, oy: 0 }, undo: [], redo: [], ev: null, drag: null, pm: null, pmAny: false, solo: false, busy: false };
   const sizes = [...new Set([480, 720, 1080, 1440, maxSide].filter(v => v <= maxSide))].sort((a, b) => a - b);
   const m = modal(`<div class="rg">
     <div class="rg-head"><h2>캐릭터 움직이기</h2>
@@ -874,6 +934,7 @@ function rgWindow(main, from) {
     g.strokeStyle = 'rgba(120,130,150,.55)'; g.lineWidth = 1; g.strokeRect(X(0) + 0.5, Y(0) + 0.5, rig.W * st.view.k, rig.H * st.view.k);
     if (st.mode === 'part') {
       if (st.pm && st.pmAny) { g.save(); g.globalAlpha = 0.5; g.imageSmoothingEnabled = true; g.drawImage(st.pm, X(0), Y(0), rig.W * st.view.k, rig.H * st.view.k); g.restore(); }
+      if (st.pmTmp && st.tmpAny) { g.save(); g.globalAlpha = 0.22; g.drawImage(st.pmTmp, X(0), Y(0), rig.W * st.view.k, rig.H * st.view.k); g.restore(); }
       if (st.cur) { g.beginPath(); g.arc(st.cur.x, st.cur.y, st.bsize / 2 * d, 0, 7); g.strokeStyle = '#fff'; g.lineWidth = 1.5 * d; g.stroke(); g.strokeStyle = 'rgba(0,0,0,.6)'; g.lineWidth = 0.75 * d; g.stroke(); }
     }
     if (!rgUi.skel && !(st.mode === 'bone')) return;
@@ -962,11 +1023,12 @@ function rgWindow(main, from) {
         <div class="btnrow"><button class="btn sm" data-rga="mouthfind">입 다시 찾기</button>${rig.mouth ? '<button class="btn sm" data-rga="mouthdel">입 상자 지우기</button>' : '<button class="btn sm" data-rga="mouthadd">입 상자 추가</button>'}</div></div>`;
     } else {
       const L = rig.layers.find(l => l.id === st.selLayer) || base();
-      h += `<div class="sec"><h3>부위 나누기</h3><p class="muted small">몸 앞에 겹친 팔, 앞머리, 꼬리처럼 <b>따로 움직이고 싶은 곳</b>을 붓으로 칠한 뒤 '떼어 내기'를 눌러요. 떼어 낸 자리는 AI가 메워요. 안 나눠도 움직일 수 있어요.</p>
-        <div class="seg"><button class="btn sm ${st.brush === 'add' ? 'on' : ''}" data-rgb="add">칠하기</button><button class="btn sm ${st.brush === 'sub' ? 'on' : ''}" data-rgb="sub" title="Alt를 누른 채 칠해도 돼요">지우기</button></div>
+      h += `<div class="sec"><h3>부위 나누기</h3><p class="muted small">몸 앞에 겹친 팔, 앞머리, 꼬리처럼 <b>따로 움직이고 싶은 곳</b>을 붓으로 칠한 뒤 '떼어 내기'를 눌러요. 떼어 낸 자리는 AI가 메워요. 안 나눠도 움직일 수 있어요.<br>캐릭터 둘이 한 덩어리로 따졌다면 '붙어 있는 캐릭터 찾기'를 눌러 보세요.</p>
+        <div class="seg"><button class="btn sm ${st.brush === 'smart' ? 'on' : ''}" data-rgb="smart" title="붓이 그림의 선을 넘지 않고 선 안쪽만 채워요. 대충 그어도 선에 맞춰져요">선 따라 칠하기</button><button class="btn sm ${st.brush === 'add' ? 'on' : ''}" data-rgb="add" title="그은 그대로 칠해요">그대로 칠하기</button><button class="btn sm ${st.brush === 'sub' ? 'on' : ''}" data-rgb="sub" title="Alt를 누른 채 칠해도 돼요">지우기</button></div>
         <div class="grid2 rg-g" style="margin-top:6px">${rng('붓 크기', 'data-rgbs', st.bsize, 8, 240, 1, '[ ] 키로도 바꿔요')}</div>
         <div class="btnrow"><button class="btn sm" data-rga="sam" title="대충 칠한 곳을 AI가 물체 윤곽에 맞춰 줘요">AI로 윤곽 맞추기</button><button class="btn sm" data-rga="pmclear">칠한 것 지우기</button></div>
         <div class="btnrow"><button class="btn sm primary" data-rga="split">떼어 내기 (새 부위)</button><button class="btn sm" data-rga="newchar" title="붙어 있는 다른 캐릭터를 칠한 뒤 누르면, 뼈대를 따로 가진 새 캐릭터가 돼요">새 캐릭터로 떼기</button></div>
+        <div class="btnrow"><button class="btn sm" data-rga="autotwo" title="캐릭터 둘이 바짝 붙어 한 덩어리로 따졌을 때: AI가 한 명으로 보이는 곳을 찾아 칠해 줘요. 맞으면 '새 캐릭터로 떼기'를, 아니면 한 번 더 눌러 다른 후보를 보세요">붙어 있는 캐릭터 찾기 (AI)${st.two && st.two.list.length > 1 ? ` · 후보 ${st.two.i + 1}/${st.two.list.length}` : ''}</button></div>
         <div class="btnrow"><button class="btn sm" data-rga="carve" title="캐릭터가 아닌데 같이 따진 곳을 배경으로 돌려보내요">캐릭터에서 빼기</button><button class="btn sm" data-rga="uncarve" title="캐릭터인데 빠진 곳을 원래 그림에서 가져와요">캐릭터에 넣기</button></div></div>
         <div class="sec"><h3>부위 목록</h3><p class="muted small">위에 있을수록 앞에 그려요.</p><div class="rg-layers">${[...rig.layers].sort((x, y) => (y.z || 0) - (x.z || 0)).map(l => `<div class="rg-ly ${l.id === L.id ? 'on' : ''}" data-rgly="${l.id}"><button class="ic" data-rgeye="${l.id}" title="보이기·숨기기">${l.hide ? '○' : '●'}</button><span class="nm">${esc(l.name)}</span><button class="ic" data-rgup="${l.id}" title="앞으로">▲</button><button class="ic" data-rgdn="${l.id}" title="뒤로">▼</button></div>`).join('')}</div>
         <label class="chk"><input type="checkbox" data-rga2="solo" ${st.solo ? 'checked' : ''}> 고른 부위만 보기</label>
@@ -1031,16 +1093,26 @@ function rgWindow(main, from) {
     else if (act === 'mouthadd') { snap(); const J = rig.joints, s = Math.max(14, Math.hypot(J.head.x - J.neck.x, J.head.y - J.neck.y) * 0.28); rig.mouth = { x: J.neck.x - s / 2, y: J.neck.y - s * 1.1, w: s, h: Math.max(4, s * 0.16), on: true, type: 'line', col: [120, 40, 45] }; st.selEye = 'm'; renderSide(); dirty(); }
     else if (act === 'mouthdel') { snap(); rig.mouth = null; if (st.selEye === 'm') st.selEye = -1; renderSide(); dirty(); }
     else if (act === 'newchar') {
-      const M = pmMask(); if (!M) { toast('먼저 따로 떼어 낼 캐릭터를 붓으로 칠해 주세요 (AI로 윤곽 맞추기를 쓰면 편해요)', 4200); return; } if (chars().length >= 4) { toast('캐릭터는 4명까지 나눌 수 있어요'); return; }
+      const M = pmMask(); if (!M) { toast('먼저 따로 떼어 낼 캐릭터를 붓으로 칠해 주세요 (붙어 있는 캐릭터 찾기를 쓰면 편해요)', 4200); return; } if (chars().length >= 4) { toast('캐릭터는 4명까지 나눌 수 있어요'); return; }
       busy('새 캐릭터로 나누는 중…', async tk => {
-        const before = shot(), N = await rgSplit(rig, base(), M, '몸 전체', tk); if (!N) { toast('칠한 곳에 캐릭터가 거의 없어요'); return; }
+        const before = shot(), old = rig, N = await rgSplit(rig, base(), M, '몸 전체', tk); if (!N) { toast('칠한 곳에 캐릭터가 거의 없어요'); return; }
         rig.layers.splice(rig.layers.indexOf(N), 1); rig.ver++;
-        const bx = rgBBox(rgAlpha(N, main.W, main.H), main.W, main.H, 100) || { x: 0, y: 0, w: main.W, h: main.H }; let K = null, eyes = [];
-        try { K = await rgPoseRun(main.src, main.W, main.H, bx, tk); } catch (e) { console.warn(e); }
-        const sk = rgSkeleton(K, main.W, main.H, bx); try { eyes = await rgFindEyes(main.src, main.W, main.H, sk, bx, tk); } catch (e) { console.warn(e); }
-        const c = rgNewChar(main, N.tex, sk, eyes, chars().length); c.bg = main.bg; c.out = main.out; c.anim.dur = main.anim.dur; c.anim.loop = main.anim.loop; c.cz = Math.max(...chars().map(q => q.cz || 0)) + 1; c.cname = '캐릭터 ' + (chars().length + 1);
-        main.more = [...(main.more || []), c]; st.undo.push(before); st.redo.length = 0; st.pm.getContext('2d').clearRect(0, 0, st.pm.width, st.pm.height); st.pmAny = false; switchChar(c);
-        toast(`'${c.cname}'(으)로 따로 나눴어요.${sk.auto ? '' : ' 뼈대를 찾지 못해 기본 뼈대를 놓았으니 ① 뼈대 맞추기에서 맞춰 주세요.'}`, 5000);
+        const W = main.W, H = main.H, found = async (tex, hint) => { const bx = rgBBox(rgAlpha({ tex }, W, H), W, H, 100) || { x: 0, y: 0, w: W, h: H }; let K = null, eyes = []; const only = newCanvas(W, H), og = only.getContext('2d', { willReadFrequently: true }); og.fillStyle = '#8a8a8a'; og.fillRect(0, 0, W, H); og.drawImage(tex, 0, 0); /* 이 캐릭터만 보이는 그림으로 찾아요 */ try { K = await rgPoseRun(only, W, H, bx, tk); } catch (e) { console.warn(e); } const sk = rgSkeleton(K, W, H, bx); try { eyes = await rgFindEyes(only, W, H, sk, bx, tk); } catch (e) { console.warn(e); } const A2 = rgAlpha({ tex }, W, H); eyes = eyes.filter(e => A2[clamp(Math.round(e.y + e.h / 2), 0, H - 1) * W + clamp(Math.round(e.x + e.w / 2), 0, W - 1)] > 100); return { sk, eyes }; };
+        tk.set('새 캐릭터의 뼈대를 찾는 중…'); const f = await found(N.tex), c = rgNewChar(main, N.tex, f.sk, f.eyes, chars().length); c.bg = main.bg; c.out = main.out; c.anim.dur = main.anim.dur; c.anim.loop = main.anim.loop; c.cz = Math.max(...chars().map(q => q.cz || 0)) + 1; c.cname = '캐릭터 ' + (chars().length + 1);
+        // 남은 캐릭터도 뼈대를 못 찾았던 거라면 자기 몸만 보고 다시 찾아요 (둘이 한 덩어리일 때는 AI가 헷갈려요)
+        if (old.autoSk === false) { tk.set('남은 캐릭터의 뼈대를 다시 찾는 중…'); const g2 = await found(base().tex); if (g2.sk.auto) { old.joints = g2.sk.joints; old.autoSk = true; old.conf = g2.sk.conf; } if (g2.eyes.length) { old.eyes = g2.eyes; old.mouth = rgFindMouth(main.src, W, H, g2.eyes); } old.ver++; }
+        else { const A2 = rgAlpha(base(), W, H); old.eyes = old.eyes.filter(e => A2[clamp(Math.round(e.y + e.h / 2), 0, H - 1) * W + clamp(Math.round(e.x + e.w / 2), 0, W - 1)] > 100); }
+        main.more = [...(main.more || []), c]; st.undo.push(before); st.redo.length = 0; st.pm.getContext('2d').clearRect(0, 0, st.pm.width, st.pm.height); st.pmAny = false; st.two = null; switchChar(c);
+        const bad = [old, c].filter(q => q.autoSk === false).map(q => q.cname);
+        toast(`'${c.cname}'(으)로 따로 나눴어요.${bad.length ? ' ' + bad.join(', ') + '은(는) 뼈대를 찾지 못해 기본 뼈대를 놓았으니 ① 뼈대 맞추기에서 맞춰 주세요.' : ''}`, 5600);
+      });
+    }
+    else if (act === 'autotwo') {
+      if (st.two && st.two.of === rig && st.two.ver === rig.ver && st.two.list.length > 1) { st.two.i = (st.two.i + 1) % st.two.list.length; if (!st.pm) st.pm = newCanvas(Math.round(rig.W / 2), Math.round(rig.H / 2)); pmFrom(st.two.list[st.two.i].M); renderSide(); dirty(); toast(`후보 ${st.two.i + 1} / ${st.two.list.length}이에요. 맞으면 '새 캐릭터로 떼기'를 눌러 주세요.`); return; }
+      busy('붙어 있는 캐릭터를 찾는 중…', async tk => {
+        const list = await rgAutoTwo(rig, tk); if (!list) { toast('나눌 곳을 찾지 못했어요. 한 명을 붓으로 칠한 뒤 \'새 캐릭터로 떼기\'를 눌러 주세요.', 5000); return; }
+        st.two = { of: rig, ver: rig.ver, list, i: 0 }; if (!st.pm) st.pm = newCanvas(Math.round(rig.W / 2), Math.round(rig.H / 2)); pmFrom(list[0].M);
+        toast(`분홍색으로 칠한 곳이 다른 캐릭터로 보이는 곳이에요. 맞으면 '새 캐릭터로 떼기'를 누르세요.${list.length > 1 ? ' 아니면 한 번 더 눌러 다른 후보를 보거나' : ' 아니면'} 붓으로 고쳐 주세요.`, 7000);
       });
     }
     else if (act === 'pmclear') { if (st.pm) st.pm.getContext('2d').clearRect(0, 0, st.pm.width, st.pm.height); st.pmAny = false; dirty(); }
@@ -1070,13 +1142,27 @@ function rgWindow(main, from) {
   // 화면에서 누른 곳이 원래 그림의 어디인지 (지금 자세로 옮겨진 그물에서 거꾸로 찾기)
   const pickRest = (q, c0) => { const rig = c0 || cur(); for (const L of [...rig.layers].sort((a, b) => (b.z || 0) - (a.z || 0))) { const me = L.mesh; if (!me || L.hide) continue; const O = me.out, I = me.I, V = me.V, A2 = rgAlpha(L, rig.W, rig.H); for (let t = I.length - 3; t >= 0; t -= 3) { const a = I[t], b = I[t + 1], c = I[t + 2], x1 = O[a * 2], y1 = O[a * 2 + 1], x2 = O[b * 2], y2 = O[b * 2 + 1], x3 = O[c * 2], y3 = O[c * 2 + 1], den = (y2 - y3) * (x1 - x3) + (x3 - x2) * (y1 - y3); if (Math.abs(den) < 1e-9) continue; const u = ((y2 - y3) * (q.x - x3) + (x3 - x2) * (q.y - y3)) / den, v = ((y3 - y1) * (q.x - x3) + (x1 - x3) * (q.y - y3)) / den, w = 1 - u - v; if (u < 0 || v < 0 || w < 0) continue; const rx = u * V[a * 2] + v * V[b * 2] + w * V[c * 2], ry = u * V[a * 2 + 1] + v * V[b * 2 + 1] + w * V[c * 2 + 1], ix = clamp(Math.round(rx), 0, rig.W - 1), iy = clamp(Math.round(ry), 0, rig.H - 1); if (A2[iy * rig.W + ix] > 30) return { x: rx, y: ry, L }; } } return null; };
   const paint = (q0, q1, sub) => { if (!st.pm) st.pm = newCanvas(Math.round(rig.W / 2), Math.round(rig.H / 2)); const g = st.pm.getContext('2d'), s = st.pm.width / rig.W, r = st.bsize / 2 * dpr() / st.view.k; g.globalCompositeOperation = sub ? 'destination-out' : 'source-over'; g.strokeStyle = g.fillStyle = 'rgb(255,60,160)'; g.lineWidth = r * 2 * s; g.lineCap = g.lineJoin = 'round'; g.beginPath(); g.moveTo(q0.x * s, q0.y * s); g.lineTo(q1.x * s + 0.01, q1.y * s); g.stroke(); g.globalCompositeOperation = 'source-over'; if (!sub) st.pmAny = true; dirty(); };
+  // 선 따라 칠하기: 그은 선의 가운데에서 퍼져 나가되, 그림의 선(경계)은 넘기 힘들게 → 붓 크기 안에서 선 안쪽만 채워져요
+  const tmpPaint = (q0, q1) => { if (!st.pmTmp) st.pmTmp = newCanvas(Math.round(rig.W / 2), Math.round(rig.H / 2)); const g = st.pmTmp.getContext('2d'), s = st.pmTmp.width / rig.W, r = st.bsize / 2 * dpr() / st.view.k; g.strokeStyle = 'rgb(255,60,160)'; g.lineWidth = r * 2 * s; g.lineCap = g.lineJoin = 'round'; g.beginPath(); g.moveTo(q0.x * s, q0.y * s); g.lineTo(q1.x * s + 0.01, q1.y * s); g.stroke(); st.tmpAny = true; dirty(); };
+  const smartFill = D => {
+    if (!st.pm) st.pm = newCanvas(Math.round(rig.W / 2), Math.round(rig.H / 2));
+    const w = st.pm.width, h = st.pm.height, s = w / rig.W, E = rgEdge(main, w, h), r = Math.max(2.5, D.r * s), rc = Math.max(1, r * 0.3), bud = Math.max(2, r - rc), pts = D.pts.map(p => [p[0] * s, p[1] * s]);
+    let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9; for (const [x, y] of pts) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
+    x0 = Math.max(0, Math.floor(x0 - r - 2)); y0 = Math.max(0, Math.floor(y0 - r - 2)); x1 = Math.min(w - 1, Math.ceil(x1 + r + 2)); y1 = Math.min(h - 1, Math.ceil(y1 + r + 2)); const bw = x1 - x0 + 1, bh = y1 - y0 + 1; if (bw < 1 || bh < 1) return;
+    const dist = new Float32Array(bw * bh).fill(Infinity), hp = { d: new Float32Array(bw * bh * 8 + 16), v: new Int32Array(bw * bh * 8 + 16), n: 0, od: 0 };
+    const seed = (x, y) => { for (let yy = Math.max(y0, Math.floor(y - rc)); yy <= Math.min(y1, Math.ceil(y + rc)); yy++) for (let xx = Math.max(x0, Math.floor(x - rc)); xx <= Math.min(x1, Math.ceil(x + rc)); xx++) { if ((xx - x) * (xx - x) + (yy - y) * (yy - y) > rc * rc) continue; const k = (yy - y0) * bw + xx - x0; if (dist[k] > 0) { dist[k] = 0; rgHeapPush(hp, 0, k); } } };
+    for (let i = 0; i < pts.length; i++) { const a = pts[Math.max(0, i - 1)], b = pts[i], n = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]))); for (let t = 0; t <= n; t++) seed(a[0] + (b[0] - a[0]) * t / n, a[1] + (b[1] - a[1]) * t / n); }
+    while (hp.n) { const k = rgHeapPop(hp), d = hp.od; if (d > dist[k]) continue; const x = k % bw, y = (k / bw) | 0; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { if (!dx && !dy) continue; const xx = x + dx, yy = y + dy; if (xx < 0 || yy < 0 || xx >= bw || yy >= bh) continue; const q = yy * bw + xx, e = E[(yy + y0) * w + xx + x0], nd = d + (dx && dy ? 1.4142 : 1) * (1 + e * e * bud * 1.6); if (nd <= bud && nd < dist[q]) { dist[q] = nd; rgHeapPush(hp, nd, q); } } }
+    const c = newCanvas(bw, bh), g = c.getContext('2d'), id = g.createImageData(bw, bh); for (let k = 0; k < bw * bh; k++) if (dist[k] <= bud) { id.data[k * 4] = 255; id.data[k * 4 + 1] = 60; id.data[k * 4 + 2] = 160; id.data[k * 4 + 3] = 255; } g.putImageData(id, 0, 0);
+    const pg = st.pm.getContext('2d'); pg.globalCompositeOperation = D.sub ? 'destination-out' : 'source-over'; pg.drawImage(c, x0, y0); pg.globalCompositeOperation = 'source-over'; if (!D.sub) st.pmAny = true;
+  };
   const invLin = (M, dx, dy) => { const det = M[0] * M[3] - M[1] * M[2] || 1; return [(M[3] * dx - M[2] * dy) / det, (-M[1] * dx + M[0] * dy) / det]; };
   ov.addEventListener('pointerdown', e => {
     if (st.busy) return; const q = toRig(e); ov.setPointerCapture(e.pointerId); e.preventDefault();
     if (e.button === 1 || e.button === 2 || st.space) { st.drag = { kind: 'pan', cx: q.cx, cy: q.cy, ox: st.view.ox, oy: st.view.oy }; return; }
     if (e.button !== 0) return;
     if (st.playing) { st.playing = false; syncPlay(); }
-    if (st.mode === 'part') { st.drag = { kind: 'paint', last: q, sub: e.altKey || st.brush === 'sub' }; paint(q, q, st.drag.sub); return; }
+    if (st.mode === 'part') { const smart = st.brush === 'smart' || (st.brush === 'sub' && e.shiftKey); st.drag = { kind: 'paint', last: q, sub: e.altKey || st.brush === 'sub', smart, pts: [[q.x, q.y]], r: st.bsize / 2 * dpr() / st.view.k }; st.two = null; if (smart) tmpPaint(q, q); else paint(q, q, st.drag.sub); return; }
     // 다른 캐릭터를 눌렀으면 그 캐릭터로 바꿔요
     if (chars().length > 1 && st.tool !== 'pin' && !hitJoint(q) && !(st.mode === 'pose' && hitPin(q))) { const cs = chars(), tolC = (13 * dpr() / st.view.k) ** 2; let to = null; for (let ci = 0; ci < cs.length && !to; ci++) { if (cs[ci] === rig || !st.evs || !st.evs[ci]) continue; const Q = st.evs[ci].P; for (const id of RG_IDS) if (Q[id] && (Q[id].x - q.x) ** 2 + (Q[id].y - q.y) ** 2 < tolC) { to = cs[ci]; break; } } if (!to && !pickRest(q)) for (const c of [...cs].sort((x, y) => (y.cz || 0) - (x.cz || 0))) if (c !== rig && pickRest(q, c)) { to = c; break; } if (to) switchChar(to); }
     if (st.mode === 'bone') {
@@ -1100,7 +1186,7 @@ function rgWindow(main, from) {
     const q = toRig(e), D = st.drag; st.cur = { x: q.cx, y: q.cy };
     if (!D) { if (st.mode === 'part') dirty(); return; }
     if (D.kind === 'pan') { st.view.ox = D.ox + q.cx - D.cx; st.view.oy = D.oy + q.cy - D.cy; dirty(); return; }
-    if (D.kind === 'paint') { paint(D.last, q, D.sub); D.last = q; return; }
+    if (D.kind === 'paint') { if (D.smart) { tmpPaint(D.last, q); D.pts.push([q.x, q.y]); } else paint(D.last, q, D.sub); D.last = q; return; }
     const dx = q.x - D.x, dy = q.y - D.y; D.x = q.x; D.y = q.y;
     if (D.kind === 'rest') { const ids = D.tree ? RG_IDS.filter(k => { for (let p = k; p; p = rgPar(p)) if (p === D.id) return true; return false; }) : [D.id]; for (const k of ids) { rig.joints[k].x = clamp(rig.joints[k].x + dx, 0, rig.W); rig.joints[k].y = clamp(rig.joints[k].y + dy, 0, rig.H); } D.moved = true; dirty(); return; }
     if (D.kind === 'eyeMove') { const ey = rig.eyes[D.i]; ey.x += dx; ey.y += dy; dirty(); return; }
@@ -1118,7 +1204,7 @@ function rgWindow(main, from) {
       dirty();
     }
   });
-  const endDrag = () => { const D = st.drag; st.drag = null; if (!D) return; if (D.kind === 'rest' && D.moved) { rig.ver++; dirty(); } if (D.kind === 'joint' || D.kind === 'pin') renderSide(); };
+  const endDrag = () => { const D = st.drag; st.drag = null; if (!D) return; if (D.kind === 'paint' && D.smart) { try { smartFill(D); } catch (e) { console.warn('smartFill', e); } if (st.pmTmp) st.pmTmp.getContext('2d').clearRect(0, 0, st.pmTmp.width, st.pmTmp.height); st.tmpAny = false; dirty(); } if (D.kind === 'rest' && D.moved) { rig.ver++; dirty(); } if (D.kind === 'joint' || D.kind === 'pin') renderSide(); };
   ov.addEventListener('pointerup', endDrag); ov.addEventListener('pointercancel', endDrag);
   ov.addEventListener('pointerleave', () => { st.cur = null; if (st.mode === 'part') dirty(); });
   ov.addEventListener('contextmenu', e => e.preventDefault());
