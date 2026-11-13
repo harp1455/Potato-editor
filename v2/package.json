@@ -1,0 +1,14 @@
+{
+  "name": "potato-editor-v2",
+  "version": "2.0.0-alpha.1",
+  "description": "감자 편집기 2.0",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "python3 -I tests/smoke.py"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
+  },
+  "private": true,
+  "type": "module"
+}
