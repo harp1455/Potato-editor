@@ -349,3 +349,5 @@ label.batch-row { cursor: pointer; } .batch-row input[type=checkbox] { accent-co
 .key { display: grid; gap: 4px; padding: 6px 0 6px 8px; border-left: 2px solid var(--potato); } .field-row.wrap { flex-wrap: wrap; }
 
 .help { max-height: 68vh; overflow: auto; display: grid; gap: 6px; } .help h3 { margin: 10px 0 2px; font-size: 13px; }
+
+.link-box { display: grid; gap: 6px; padding: 0 0 10px; margin-bottom: 8px; border-bottom: 1px solid var(--line); }

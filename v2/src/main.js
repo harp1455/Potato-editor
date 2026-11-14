@@ -1,7 +1,7 @@
 import { h, icon, fmtKeys } from './ui/dom.js';
 import { settings } from './core/settings.js';
 import { addCmd, cmds, cmd, run, handleKey, keysOf, keyName, setErrHandler } from './core/cmd.js';
-import { state, boot, onChange, onTick, emit, commit, undo, redo, canUndo, canRedo, saveNow, newProject, openProject, listProjects, deleteProject } from './core/store.js';
+import { state, canvasOf, boot, onChange, onTick, emit, commit, undo, redo, canUndo, canRedo, saveNow, newProject, openProject, listProjects, deleteProject } from './core/store.js';
 import { showMenu, closeMenu, cmdItem, toast, dialog, confirmBox, palette, busy } from './ui/overlay.js';
 import { renderDock, updatePanels, togglePanel, hasPanel, resetLayout } from './ui/dock.js';
 import { PANELS } from './ui/panels.js';
@@ -15,6 +15,7 @@ import { characterRoom, registerCharCmds } from './rooms/character.js';
 import { naiAccount } from './api/nai.js';
 import { registerAiCmds, packsPane } from './ui/aitools.js';
 import { registerNaiTools } from './ui/naitools.js';
+import { linkState, startWatch, stopWatch, sendOut } from './core/link.js';
 import { download } from './core/files.js';
 import { costOf, money, totals, krw } from './core/cost.js';
 import { registerLiquify, makeField, stroke, warp } from './ui/liquify.js';
@@ -64,6 +65,8 @@ function registerCmds() {
   addCmd({ id: 'help.changes', title: '업데이트 기록', menu: '도움말', run: () => { const u = 'https://github.com/harp1455/Potato-editor/releases', T = window.__TAURI__; if (T && T.opener && T.opener.openUrl) T.opener.openUrl(u); else window.open(u, '_blank', 'noopener'); } });
   addCmd({ id: 'help.plan', title: '2.0에서 달라지는 것', menu: '도움말', run: planDialog });
   addCmd({ id: 'help.update', title: '새 판 확인', menu: '도움말', run: () => checkUpdate(false) });
+  addCmd({ id: 'link.watch', title: 'NAIS3 저장 폴더 지켜보기 (켜기·끄기)', menu: 'AI', group: 'link', words: '연동 nais 폴더 자동 가져오기', checked: () => linkState().on, run: () => (linkState().on ? stopWatch() : startWatch(!linkState().name)) });
+  addCmd({ id: 'link.send', title: '지금 그림을 NAIS3로 보내기 (폴더에 저장)', menu: 'AI', group: 'link', keys: 'Ctrl+Shift+E', words: '연동 nais 내보내기', enabled: () => !!canvasOf(), run: () => sendOut(!linkState().out) });
   addCmd({ id: 'tool.swatches', title: '색 견본…', menu: '도구', group: 'color', words: '팔레트 색상 스포이드 palette', run: swatchDialog });
   addCmd({ id: 'help.usage', title: 'API 사용 기록', menu: '도움말', run: usageDialog });
   addCmd({ id: 'help.keys', title: '단축키 보기·바꾸기', menu: '도움말', run: () => settingsDialog('keys') });
@@ -366,5 +369,6 @@ async function start() {
   import('./ui/geminitools.js').then(f => { window.__potato.gem = f; });
   import('./rooms/cut.js').then(f => { window.__potato.cut = f; });
   window.__potato.liq = { makeField, stroke, warp };
+  window.__potato.link = { linkState, startWatch, stopWatch, sendOut };
 }
 start();

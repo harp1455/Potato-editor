@@ -7,6 +7,7 @@ import { flatten, layerFromBlob } from '../rooms/image.js';
 import { NAI_MODELS, NAI_SAMPLERS, NAI_SIZES, NAI_UC, NAI_SPOTS, fitSize, naiGenerate, naiAccount, naiVibe } from '../api/nai.js';
 import { run } from '../core/cmd.js';
 import { toast } from './overlay.js';
+import { linkState, startWatch, stopWatch, sendOut } from '../core/link.js';
 
 const DEF = { model: 'nai-diffusion-4-5-full', prompt: '', negative: '', chars: '', charPos: [], vibe: null, size: 0, steps: 28, scale: 5, sampler: 'k_euler_ancestral', seed: 0, quality: true, uc: 'heavy', cfgRescale: 0, variety: false, strength: 0.5, noise: 0, inStrength: 1, more: false };
 const F = { ...DEF, ...(settings.get('nai') || {}) };
@@ -103,6 +104,14 @@ export const naiPanel = {
     const pick = (label, k, list) => h('label.field', null, h('span.field-name', null, label), h('select.text', { 'aria-label': label, onchange: e => { F[k] = isNaN(+e.target.value) || k !== 'size' ? e.target.value : +e.target.value; keep(); emit(); } }, list.map(([v, t]) => h('option', { value: v, selected: String(F[k]) === String(v) }, t))));
     const numf = (label, k, min, max, step) => h('label.field', null, h('span.field-name', null, label), h('input.num', { type: 'number', min, max, step, 'aria-label': label, ...bind(k, true) }));
     const fit = c ? fitSize(c.w, c.h) : null;
+    // NAIS3 같은 다른 프로그램과 잇기: 토큰이 없어도 쓸 수 있어요
+    const K = linkState();
+    el.append(h('div.link-box', null, h('h3.sec', null, 'NAIS3와 잇기'),
+      h('p.panel-note', null, K.on ? `'${K.name}' 폴더를 지켜보는 중이에요. 새 그림 ${K.got}장을 가져왔어요.` : 'NAIS3에서 뽑은 그림이 저절로 보관함에 들어오게 할 수 있어요. NAIS3 설정의 메인 저장 폴더를 골라 주세요.'),
+      h('div.btn-row', null, K.on ? h('button.btn.small', { onclick: () => stopWatch() }, '지켜보기 멈추기') : h('button.btn.small.primary', { disabled: !K.can, onclick: () => startWatch(!K.name) }, K.name ? `'${K.name}' 지켜보기` : '저장 폴더 고르고 지켜보기'), K.name && !K.on ? h('button.btn.small', { onclick: () => startWatch(true) }, '다른 폴더') : null),
+      h('label.check', null, h('input', { type: 'checkbox', checked: !!settings.get('linkToCanvas'), onchange: e => settings.set('linkToCanvas', e.target.checked) }), '가져온 그림을 지금 그림판에 레이어로도 올리기'),
+      h('div.btn-row', null, h('button.btn.small', { disabled: !c || !K.can, title: '고른 레이어(없으면 그림판 전체)를 PNG로 저장해요. 그 파일을 NAIS3의 인페인트·디렉터·메타데이터 칸에 끌어다 놓으면 돼요.', onclick: () => sendOut(!K.out) }, K.out ? `'${K.out}' 폴더로 보내기` : '지금 그림을 NAIS3로 보내기'), K.out ? h('button.btn.small', { onclick: () => sendOut(true) }, '다른 폴더') : null),
+      !K.can ? h('p.panel-note', null, '이 브라우저는 폴더 잇기를 지원하지 않아요. 설치판이나 크롬·엣지에서 써 주세요.') : null));
     if (!ready) el.append(h('p.empty', null, settings.get('adult') ? 'NovelAI 토큰을 넣으면 편집기 안에서 바로 그림을 만들고 고칠 수 있어요.' : '성인 확인을 마치고 NovelAI 토큰을 넣으면 쓸 수 있어요.'), h('button.btn', { onclick: () => run('app.settings') }, '설정 열기'));
     el.append(...[
       h('label.stack', null, h('span.field-name', null, '프롬프트'), h('textarea.text.area', { rows: 5, placeholder: '1boy, solo, looking at viewer, …', 'aria-label': '프롬프트', ...bind('prompt') })),
