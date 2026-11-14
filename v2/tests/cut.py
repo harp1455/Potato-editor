@@ -63,6 +63,12 @@ with sync_playwright() as pw:
     shot(page, '86-overview'); page.click('.cut-over-pic >> nth=1'); page.keyboard.press('Control+z'); page.keyboard.press('Control+z')
     P(page, "__potato.settings.set('cutStyles', [{ name: '굵은 빨강', type: 'bubble', props: { color: '#cc0000', bw: 9 } }]); __potato.emit()")
     P(page, "(() => { __potato.state.project.activePage = __potato.state.project.pages[0].id; __potato.emit(); })()")
+    # 대사 초안 (흉내 응답): 말풍선 수만큼 받은 대사를 채워요
+    nb = P(page, ELS + ".filter(e => e.type === 'bubble').length")
+    P(page, "(() => { window.__f0 = window.fetch; window.fetch = async (u, o) => { if (!o || !o.body) { window.__odd = String(u).slice(0, 80); return new Response(String(), { status: 404 }); } window.__db = JSON.parse(o.body); return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify(Array.from({ length: %d }, (_, i) => '초안 ' + (i + 1))) }] }, finishReason: 'STOP' }], usageMetadata: {} }), { status: 200 }); }; })()" % nb)
+    assert P(page, "__potato.cut.draftLines(__potato.state.project.pages[0], '둘이 인사해요')") == nb and P(page, ELS + ".find(e => e.type === 'bubble').text") == '초안 1'
+    db = P(page, "__db"); assert 'CRITICAL' in db['systemInstruction']['parts'][0]['text'] and len(db['safetySettings']) == 5 and db['contents'][0]['parts'][0]['inlineData']
+    P(page, "(() => { window.fetch = window.__f0; })()")
     # 효과음: 크게, 기울여서 들어가요
     n1 = P(page, ELS + ".length"); P(page, "__potato.run('cut.sfx')"); sf = P(page, ELS + ".at(-1)"); assert sf['rot'] == -12 and sf['size'] > 80 and page.locator('.vid-side input[aria-label="회전"]').count() == 1
     shot(page, '85-sfx'); page.keyboard.press('Control+z'); assert P(page, ELS + ".length") == n1

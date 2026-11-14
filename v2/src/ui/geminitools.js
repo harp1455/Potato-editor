@@ -1,13 +1,13 @@
 // 제미나이로 하는 일: 더빙(대사 → 목소리), AI 영상(그림 → 움직이는 영상). 요청은 모두 api/gemini.js의 통로를 지나요.
 import { h } from './dom.js';
-import { canvasOf, emit } from '../core/store.js';
+import { canvasOf, layerOf, emit, commit } from '../core/store.js';
 import { settings } from '../core/settings.js';
 import { addCmd, run } from '../core/cmd.js';
-import { speak, animate } from '../api/gemini.js';
+import { speak, animate, generate } from '../api/gemini.js';
 import { runJob } from '../core/ai.js';
-import { flatten } from '../rooms/image.js';
+import { flatten, layerPic, layerFromBlob } from '../rooms/image.js';
 import { download } from '../core/files.js';
-import { dialog, toast } from './overlay.js';
+import { dialog, toast, busy } from './overlay.js';
 
 export const DUB_MODELS = [['gemini-3.8-flash-tts', '3.8 Flash (연기력 좋음)'], ['gemini-3.8-flash-lite-tts', '3.8 Flash-Lite (빠르고 쌈)']];
 const VOICES = [['Charon', '남', '또렷한'], ['Puck', '남', '밝은'], ['Fenrir', '남', '들뜬'], ['Orus', '남', '단단한'], ['Enceladus', '남', '숨소리 섞인'], ['Iapetus', '남', '맑은'], ['Umbriel', '남', '느긋한'], ['Algieba', '남', '부드러운'], ['Algenib', '남', '거친'], ['Rasalgethi', '남', '차분히 설명하는'], ['Alnilam', '남', '단호한'], ['Schedar', '남', '고른'], ['Achird', '남', '친근한'], ['Zubenelgenubi', '남', '편한'], ['Sadachbia', '남', '생기 있는'], ['Sadaltager', '남', '지적인'],
@@ -94,5 +94,32 @@ function videoDialog() {
 }
 
 export function registerGeminiCmds() {
+  addCmd({ id: 'ai.editByText', title: '말로 그림 고치기… (제미나이)', menu: 'AI', group: 'gemini', words: '나노 바나나 편집 수정 edit', enabled: () => !!canvasOf(), run: editDialog });
   addCmd({ id: 'ai.video', title: 'AI 영상 만들기… (제미나이)', menu: 'AI', group: 'gemini', words: '움직이는 영상 omni', enabled: () => !!canvasOf(), run: videoDialog });
+}
+
+// 말로 그림 고치기: 고른 레이어(없으면 그림판 전체)를 보내고, 고친 그림을 새 레이어로 받아요
+export async function editByText(src, text, model) {
+  const k = Math.min(1, 2048 / Math.max(src.width, src.height)), t = document.createElement('canvas'); t.width = Math.round(src.width * k); t.height = Math.round(src.height * k); t.getContext('2d').drawImage(src, 0, 0, t.width, t.height);
+  const r = await generate('edit', model, { contents: [{ role: 'user', parts: [{ inlineData: { mimeType: 'image/png', data: t.toDataURL('image/png').split(',')[1] } }, { text }] }], generationConfig: { responseModalities: ['TEXT', 'IMAGE'] } });
+  const part = (((r.raw.candidates || [])[0] || {}).content || { parts: [] }).parts.find(p => p.inlineData && p.inlineData.data);
+  if (!part) throw new Error(r.text ? '그림 대신 글만 돌아왔어요: ' + r.text.slice(0, 120) : '고친 그림이 돌아오지 않았어요. 모델 이름이 그림을 만드는 모델인지 확인해 주세요.');
+  return new Blob([Uint8Array.from(atob(part.inlineData.data), ch => ch.charCodeAt(0))], { type: part.inlineData.mimeType || 'image/png' });
+}
+function editDialog() {
+  const O = { text: '', model: settings.get('imageModel'), ...(settings.get('editByText') || {}) };
+  const ta = h('textarea.text.area', { rows: 4, 'aria-label': '어떻게 고칠지', placeholder: '예: 머리를 은색으로 바꿔 줘. 배경을 밤 바다로 바꿔 줘.', value: O.text, oninput: e => { O.text = e.target.value; } });
+  const go = async () => {
+    if (!O.text.trim()) { toast('어떻게 고칠지 적어 주세요.', 'err'); return false; }
+    settings.set('editByText', O); const c = canvasOf(), l = layerOf(), b = busy('제미나이가 그림을 고치는 중이에요.');
+    try {
+      const src = l ? await layerPic(l) : await flatten(c), blob = await editByText(src, O.text.trim(), O.model.trim() || settings.get('imageModel')), bmp = await createImageBitmap(blob);
+      const nl = await layerFromBlob(c, blob, (l ? l.name : c.name) + ' 고친 그림', l ? { x: l.x, y: l.y, scale: l.scale * src.width / bmp.width } : { scale: c.w / bmp.width }); bmp.close(); commit('말로 그림 고치기'); b.done('고친 그림을 새 레이어로 올렸어요.'); return nl;
+    } catch (e) { b.done(e.message || '고치지 못했어요.', 'err'); }
+  };
+  dialog({ title: '말로 그림 고치기', body: h('div.vid-form', null,
+    h('p.dlg-text', null, layerOf() ? '고른 레이어를 제미나이에 보내고, 고친 그림을 새 레이어로 받아요. 원래 레이어는 그대로 남아요.' : '그림판 전체를 제미나이에 보내고, 고친 그림을 새 레이어로 받아요.'),
+    ta, h('label.field', null, h('span.field-name.w', null, '모델'), h('input.text', { type: 'text', value: O.model, 'aria-label': '그림 모델', oninput: e => { O.model = e.target.value; } })),
+    h('p.dlg-text', null, '구글의 그림 거름막은 안전 설정으로 끌 수 없어서, 수위 있는 그림은 거절될 수 있어요. 그럴 때는 NovelAI의 고른 곳만 다시 그리기를 써 주세요.')),
+    buttons: [{ label: '취소' }, { label: '고치기', primary: true, run: () => { go(); } }] });
 }

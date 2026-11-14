@@ -164,6 +164,24 @@ function translateDialog() {
   })(); } }] });
 }
 
+// 대사 초안: 페이지 그림과 장면 설명을 보여 주고, 지금 놓인 말풍선 수만큼 대사를 받아 채워요
+export async function draftLines(pg, note) {
+  const bubbles = pg.els.filter(e => e.type === 'bubble'); if (!bubbles.length) throw new Error('먼저 말풍선을 놓아 주세요. 놓인 말풍선 수만큼 대사를 써 줘요.');
+  const c = await pageCanvas({ ...pg, els: pg.els.filter(e => e.type === 'panel') }), k = Math.min(1, 1400 / Math.max(c.width, c.height)), t = document.createElement('canvas'); t.width = Math.round(c.width * k); t.height = Math.round(c.height * k); t.getContext('2d').drawImage(c, 0, 0, t.width, t.height);
+  const spots = bubbles.map((b, i) => `${i + 1}: bubble at x ${Math.round((b.x + b.w / 2) / pg.w * 100)}%, y ${Math.round((b.y + b.h / 2) / pg.h * 100)}% of the page${b.shape === 'cloud' ? ' (thought)' : b.shape === 'shout' ? ' (shout)' : ''}`).join('\n');
+  const r = await generate('write', settings.get('textModel'), {
+    systemInstruction: { parts: [{ text: 'You write dialogue for a comic page. Look at the page image and the scene note, then write one line for each speech bubble listed, in the same language as the scene note (Korean if there is no note). Keep each line short enough to fit a speech bubble. Return ONLY a JSON array of strings, one per bubble, in the listed order.' }] },
+    contents: [{ role: 'user', parts: [{ inlineData: { mimeType: 'image/jpeg', data: t.toDataURL('image/jpeg', 0.9).split(',')[1] } }, { text: `Scene note: ${note || '(none)'}\nBubbles:\n${spots}` }] }], generationConfig: { responseMimeType: 'application/json', temperature: 0.9 } });
+  let out; try { out = JSON.parse(r.text.replace(/^```(?:json)?|```$/g, '').trim()); } catch (_) { throw new Error('제미나이의 답을 읽지 못했어요. 다시 해 주세요.'); }
+  if (!Array.isArray(out)) throw new Error('제미나이의 답이 목록이 아니에요. 다시 해 주세요.');
+  bubbles.forEach((b, i) => { if (typeof out[i] === 'string' && out[i].trim()) b.text = out[i].trim(); });
+  return Math.min(bubbles.length, out.length);
+}
+function draftDialog() {
+  const pg = pageOf(), ta = h('textarea.text.area', { rows: 4, 'aria-label': '장면 설명', placeholder: '예: 오랜만에 만난 두 사람. 한 명은 반가워하고 한 명은 어색해해요. 말투는 반말.', value: settings.get('draftNote') || '' });
+  dialog({ title: '대사 초안', body: h('div.vid-form', null, h('p.dlg-text', null, `이 페이지에 놓인 말풍선 ${pg.els.filter(e => e.type === 'bubble').length}개에 들어갈 대사를 제미나이가 써 줘요. 지금 적힌 대사는 새 대사로 바뀌어요(되돌릴 수 있어요).`), ta),
+    buttons: [{ label: '취소' }, { label: '대사 받기', primary: true, run: () => { settings.set('draftNote', ta.value); (async () => { const b = busy('제미나이가 대사를 쓰는 중이에요.'); try { const n = await draftLines(pg, ta.value.trim()); commit('대사 초안'); b.done(`말풍선 ${n}개에 대사를 채웠어요.`); } catch (e) { b.done(e.message || '대사를 받지 못했어요.', 'err'); } })(); } }] });
+}
 // 그림 속 글자 번역: 페이지 그림을 제미나이에 보여 주고, 글자가 있는 자리와 번역을 받아 그 위에 덮어요
 export async function translateImage(pg, lang) {
   const c = await pageCanvas(pg), k = Math.min(1, 1600 / Math.max(c.width, c.height)), t = document.createElement('canvas'); t.width = Math.round(c.width * k); t.height = Math.round(c.height * k); t.getContext('2d').drawImage(c, 0, 0, t.width, t.height);
@@ -308,6 +326,7 @@ export function registerCutCmds() {
   addCmd({ id: 'cut.delete', title: '요소 지우기', menu: '컷', group: 'el', enabled: has, run: () => { const pg = pageOf(), g = new Set(group().map(e => e.id)); pg.els = pg.els.filter(e => !g.has(e.id)); V.sel = null; commit(g.size > 1 ? `요소 ${g.size}개 지우기` : '요소 지우기'); } });
   addCmd({ id: 'cut.overview', title: '페이지 한눈에 보기…', menu: '컷', words: '전체 목록 순서', enabled: () => pages().length > 0, run: overview });
   addCmd({ id: 'cut.sfx', title: '효과음 글자 넣기', menu: '컷', group: 'el', words: '의성어 쾅 sfx', enabled: on, run: () => { const pg = pageOf(), size = Math.round(pg.w / 7), t = { id: uid('e'), type: 'text', x: Math.round(pg.w / 2 - size), y: Math.round(pg.h / 2 - size / 2), w: size * 2, h: size, text: '쾅!', size, color: '#ffffff', sw: Math.max(4, Math.round(size / 12)), sc: '#111111', bold: true, rot: -12 }; pg.els.push(t); V.sel = t.id; V.tool = 'pick'; commit('효과음 넣기'); } });
+  addCmd({ id: 'cut.draft', title: '대사 초안… (제미나이)', menu: '컷', group: 'ai', words: '대본 글쓰기 write', enabled: () => !!pageOf(), run: draftDialog });
   addCmd({ id: 'cut.translate', title: '대사 번역… (제미나이)', menu: '컷', group: 'ai', words: 'translate 번역', enabled: () => !!pageOf(), run: translateDialog });
   addCmd({ id: 'cut.export', title: '이 페이지를 PNG로', menu: '컷', group: 'out', enabled: () => !!pageOf(), run: async () => { const pg = pageOf(), c = await pageCanvas(pg); download(await new Promise(r => c.toBlob(r, 'image/png')), pg.name + '.png'); toast(`'${pg.name}.png'로 저장했어요.`); } });
   addCmd({ id: 'cut.exportAll', title: '모든 페이지 저장…', menu: '컷', group: 'out', enabled: () => pages().length > 0, run: async () => { const b = busy('페이지를 그리는 중이에요.'), files = []; for (const [i, pg] of pages().entries()) { const c = await pageCanvas(pg); files.push({ name: `${String(i + 1).padStart(3, '0')} ${pg.name}.png`, blob: await new Promise(r => c.toBlob(r, 'image/png')) }); b.set(`페이지를 그리는 중이에요. ${i + 1} / ${pages().length}`); } b.done(''); const r = await saveFiles(files, state.project.name + ' 페이지.zip'); if (r) toast(`페이지 ${files.length}쪽을 저장했어요.`); } });

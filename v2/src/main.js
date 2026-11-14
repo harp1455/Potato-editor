@@ -348,6 +348,8 @@ async function start() {
   import('./core/encode.js').then(f => { window.__potato.enc = f; });
   import('./rooms/video.js').then(f => { window.__potato.video = f; });
   import('./rooms/image.js').then(f => { window.__potato.image = f; });
+  import('./ui/geminitools.js').then(f => { window.__potato.gem = f; });
+  import('./rooms/cut.js').then(f => { window.__potato.cut = f; });
   window.__potato.liq = { makeField, stroke, warp };
 }
 start();

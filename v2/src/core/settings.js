@@ -11,6 +11,7 @@ const DEFAULTS = {
   askedAdult: false,
   apiKey: '',
   textModel: 'gemini-3.8-flash',
+  imageModel: 'gemini-3.1-flash-image',   // 말로 그림 고치기에 쓰는 모델
   hints: true,
   meta: 'strip',            // 저장할 때 NAI 정보: strip = 지우기, keep = 남기기
   naiToken: '',

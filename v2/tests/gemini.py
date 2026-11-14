@@ -58,6 +58,12 @@ with sync_playwright() as pw:
     assert b['model'] == 'gemini-omni-1.1-flash' and b['response_format'] == {'type': 'video', 'aspect_ratio': '16:9', 'resolution': '720p'} and b['generation_config']['video_config']['task'] == 'image_to_video'
     assert b['input'][0]['type'] == 'image' and b['input'][1]['text'].endswith('gentle wind') and 'Animate the scene as described' in b['system_instruction'] and len(b['safety_settings']) == 5
     assert [s['m'] for s in P(page, "__sent")][1:] == ['GET', 'GET']
+    # 말로 그림 고치기: 그림과 말을 보내고(안내문 맨 앞, 안전 설정 5개 끔), 돌아온 그림을 받아요
+    ok = P(page, """(async () => { const png = await new Promise(r => { const c = document.createElement('canvas'); c.width = c.height = 8; c.getContext('2d').fillRect(0, 0, 8, 8); r(c.toDataURL().split(',')[1]); });
+        window.__eb = null; const f = window.fetch; window.fetch = async (u, o) => { window.__eb = { u: String(u), b: JSON.parse(o.body) }; return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: png } }] }, finishReason: 'STOP' }], usageMetadata: {} }), { status: 200 }); };
+        const src = document.createElement('canvas'); src.width = 20; src.height = 10;
+        const blob = await __potato.gem.editByText(src, 'make it blue', 'gemini-3.1-flash-image'); window.fetch = f; return [blob.type, blob.size > 50]; })()""")
+    eb = P(page, "__eb"); assert ok == ['image/png', True] and 'gemini-3.1-flash-image:generateContent' in eb['u'] and eb['b']['generationConfig']['responseModalities'] == ['TEXT', 'IMAGE'] and len(eb['b']['safetySettings']) == 5 and 'CRITICAL' in eb['b']['systemInstruction']['parts'][0]['text'] and eb['b']['contents'][0]['parts'][1]['text'] == 'make it blue'
     # 금액 어림: 요금표에 있는 모델은 원과 달러로, 합계는 오늘·이번 달·전체로 보여요
     P(page, "localStorage.setItem('potato2.usage', JSON.stringify([{ t: Date.now(), kind: 'translate', model: 'gemini-3.8-flash', in: 1000000, out: 0, th: 0 }, { t: Date.now(), kind: 'nai generate', model: 'nai-diffusion-4-5-full', size: '832 × 1216', steps: 28 }]))")
     P(page, "__potato.run('help.usage')"); page.wait_for_selector('.dlg >> text=API 사용 기록')
