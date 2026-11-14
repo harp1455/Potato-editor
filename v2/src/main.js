@@ -61,6 +61,7 @@ function registerCmds() {
   ROOMS.forEach((r, i) => addCmd({ id: 'room.' + r.id, title: r.title + ' 작업실', menu: '작업실', keys: 'Alt+' + (i + 1), checked: () => settings.get('room') === r.id, run: () => settings.set('room', r.id) }));
   addCmd({ id: 'help.plan', title: '2.0에서 달라지는 것', menu: '도움말', run: planDialog });
   addCmd({ id: 'help.update', title: '새 판 확인', menu: '도움말', run: () => checkUpdate(false) });
+  addCmd({ id: 'tool.swatches', title: '색 견본…', menu: '도구', group: 'color', words: '팔레트 색상 스포이드 palette', run: swatchDialog });
   addCmd({ id: 'help.usage', title: 'API 사용 기록', menu: '도움말', run: usageDialog });
   addCmd({ id: 'help.keys', title: '단축키 보기·바꾸기', menu: '도움말', run: () => settingsDialog('keys') });
   setMenuItem(id => cmdItem(cmd(id)));
@@ -138,6 +139,21 @@ function refresh() {
 }
 
 // ---------- 창들 ----------
+// 색 견본: 자주 쓰는 색을 모아 두면 모든 색 고르는 창에 견본으로 나와요
+function swatchList() {
+  let dl = document.getElementById('swatches'); if (!dl) { dl = h('datalist', { id: 'swatches' }); document.body.append(dl); new MutationObserver(ms => { for (const m of ms) for (const n of m.addedNodes) if (n.querySelectorAll) (n.matches('input[type=color]') ? [n] : n.querySelectorAll('input[type=color]')).forEach(i => i.setAttribute('list', 'swatches')); }).observe(document.body, { childList: true, subtree: true }); }
+  dl.replaceChildren(...(settings.get('swatches') || []).map(c => h('option', { value: c })));
+}
+function swatchDialog() {
+  const box = h('div.sw-list'), get = () => settings.get('swatches') || [], set = v => { settings.set('swatches', v.slice(0, 48)); swatchList(); draw(); };
+  const pick = h('input', { type: 'color', value: '#d3a94e', 'aria-label': '넣을 색' });
+  const draw = () => box.replaceChildren(...get().map(c => h('button.sw', { style: `background:${c}`, title: `${c} (누르면 지워요)`, 'aria-label': `${c} 지우기`, onclick: () => set(get().filter(x => x !== c)) })), !get().length && h('p.empty', null, '아직 모아 둔 색이 없어요.'));
+  draw();
+  dialog({ title: '색 견본', body: h('div.vid-form', null, box,
+    h('div.btn-row', null, pick, h('button.btn.small', { onclick: () => set([...new Set([...get(), pick.value.toLowerCase()])]) }, '이 색 넣기'),
+      window.EyeDropper && h('button.btn.small', { title: '화면 아무 곳이나 눌러 그 색을 넣어요', onclick: async () => { try { const r = await new window.EyeDropper().open(); set([...new Set([...get(), r.sRGBHex.toLowerCase()])]); } catch (_) { /* 그만둠 */ } } }, '화면에서 색 뽑기')),
+    h('p.dlg-text', null, '여기 모은 색은 말풍선, 글자, 바탕색처럼 색을 고르는 모든 곳에 견본으로 나와요. 다른 작업에서도 같이 써요.')), buttons: [{ label: '닫기', primary: true }] });
+}
 async function projectsDialog() {
   const list = h('div.proj-list'), find = h('input.text', { type: 'search', placeholder: '작업 이름으로 찾기', 'aria-label': '작업 찾기', oninput: () => draw() });
   const backup = async ids => { const b = busy('백업 파일을 만드는 중이에요.'); try { const { backupZip } = await import('./core/backup.js'), r = await backupZip(ids, (a, n) => b.set(`백업 파일을 만드는 중이에요. ${a} / ${n}`)); download(r.blob, `감자편집기2 백업 ${new Date().toISOString().slice(0, 10)}${ids ? ' ' + (state.project.name || '') : ''}.zip`); b.done(`작업 ${r.count}개를 백업 파일로 저장했어요.`); } catch (e) { b.done('백업하지 못했어요. ' + (e.message || ''), 'err'); } };
@@ -306,6 +322,7 @@ function settingsDialog(tab = 'screen') {
 // ---------- 시작 ----------
 async function start() {
   document.documentElement.dataset.theme = settings.get('theme') === 'light' ? 'light' : 'dark';
+  swatchList();
   setErrHandler(e => { console.error(e); toast(e.message || '문제가 생겼어요.', 'err'); });
   registerCmds(); build();
   await boot();

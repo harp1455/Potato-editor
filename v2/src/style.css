@@ -340,3 +340,5 @@ label.batch-row { cursor: pointer; } .batch-row input[type=checkbox] { accent-co
 .cut-over-item { display: grid; gap: 4px; color: var(--dim); } .cut-over-item.on { color: var(--text); }
 .cut-over-pic { padding: 0; border: 1px solid var(--line); background: #fff; cursor: pointer; display: block; } .cut-over-pic canvas { width: 100%; height: auto; display: block; }
 .cut-over-item.on .cut-over-pic { outline: 2px solid var(--potato); outline-offset: 1px; }
+
+.sw-list { display: flex; flex-wrap: wrap; gap: 6px; min-height: 28px; } .sw { width: 28px; height: 28px; padding: 0; border: 1px solid var(--line); border-radius: 2px; cursor: pointer; } .sw:hover { outline: 2px solid var(--bad); outline-offset: 1px; }

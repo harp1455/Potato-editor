@@ -60,7 +60,16 @@ export const PANELS = {
         return el.append(h('h3.sec', null, '그림판'),
           h('label.field', null, h('span.field-name', null, '이름'), h('input.text', { type: 'text', value: c.name, 'aria-label': '그림판 이름', onchange: e => { c.name = e.target.value.trim() || c.name; commit('그림판 이름 바꾸기'); } })),
           h('div.field-row', null, num('가로', c.w, 1, v => { c.w = Math.max(1, Math.round(v)); commit('그림판 크기'); }, 'px'), num('세로', c.h, 1, v => { c.h = Math.max(1, Math.round(v)); commit('그림판 크기'); }, 'px')),
-          h('p.panel-note', null, '레이어를 고르면 그 레이어의 위치·크기·투명도를 바꿀 수 있어요.'));
+          h('h3.sec', null, '전체 보정'),
+          ...[...ADJ.filter(a => a[0] !== 'blur'), ...TONE].map(([k, label, min, max]) => {
+            const v = (c.adj && c.adj[k]) || 0, out = h('span.field-unit', null, String(v));
+            return h('label.field', null, h('span.field-name.w', null, label), h('input.range', { type: 'range', min, max, value: v, 'aria-label': '전체 ' + label,
+              oninput: e => { (c.adj || (c.adj = {}))[k] = +e.target.value; out.textContent = e.target.value; draw(); },
+              onchange: () => { if (c.adj && !Object.values(c.adj).some(Boolean)) delete c.adj; commit('전체 보정: ' + label); } }), out);
+          }),
+          curveBox(c),
+          h('button.btn.small', { disabled: !c.adj, onclick: () => { delete c.adj; commit('전체 보정 처음으로'); } }, '전체 보정 처음으로'),
+          h('p.panel-note', null, '전체 보정은 모든 레이어 위에 한 번에 입혀져요. 레이어를 고르면 그 레이어만 보정할 수 있어요.'));
       }
       const op = h('input.range', { type: 'range', min: '0', max: '100', value: Math.round(l.opacity * 100), 'aria-label': '불투명도',
         oninput: e => { l.opacity = e.target.value / 100; opv.textContent = e.target.value + '%'; draw(); }, onchange: () => commit('불투명도') });

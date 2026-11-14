@@ -6,7 +6,7 @@ import { importItems } from '../core/library.js';
 import { fromDrop, isImage } from '../core/files.js';
 import { sel, selFor, selRect, selEllipse, selPoly, selWand, selMagic, selNone, selAll, selInvert, selGrow, selBounds } from '../core/select.js';
 import { addCmd, run } from '../core/cmd.js';
-import { toast, showMenu, confirmBox } from '../ui/overlay.js';
+import { toast, showMenu, confirmBox, dialog } from '../ui/overlay.js';
 
 export const view = { tool: 'move', zoom: 1, ox: 0, oy: 0, fitted: null, space: false, mouse: null, draft: null };
 let cv = null, ctx = null, wrap = null, checker = null, ring = null;
@@ -109,6 +109,12 @@ export function paint(g, c, only) {
     g.drawImage(l.maskId ? masked(l, bmp) : bmp, -s.w / 2, -s.h / 2, s.w, s.h);
     g.restore();
   }
+  // 전체 보정: 지금까지 그린 것(그림판 안쪽) 전체에 한 번 더 입혀요. 레이어를 하나만 볼 때는 안 입혀요
+  const f = c.adj && !only ? filterOf({ adj: { ...c.adj, blur: 0 }, scale: 1 }) : 'none';
+  if (f !== 'none') {
+    const t = document.createElement('canvas'); t.width = g.canvas.width; t.height = g.canvas.height; t.getContext('2d').drawImage(g.canvas, 0, 0);
+    g.save(); g.beginPath(); g.rect(0, 0, c.w, c.h); g.clip(); g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = 'copy'; g.filter = f; g.drawImage(t, 0, 0); g.restore();
+  }
 }
 // 가림막: 레이어 그림과 같은 크기의 그림. 불투명한 곳만 레이어가 보여요. 원본 그림은 그대로예요.
 const maskCache = new Map();
@@ -134,6 +140,28 @@ export async function flatten(c, only) {
   await Promise.all(c.layers.map(l => ensureBitmap(l.mediaId)));
   const t = document.createElement('canvas'); t.width = c.w; t.height = c.h;
   paint(t.getContext('2d'), c, only); return t;
+}
+// 안내선: 그림판에 세로(v)·가로(h) 선을 두고, 레이어를 옮길 때 가까우면 달라붙어요. 내보낼 때는 안 나와요
+function drawLines(g) {
+  const c = canvasOf(), L = c && c.lines; if (!L || settings.get('guides') === false) return;
+  g.save(); g.lineWidth = 1 / view.zoom; g.strokeStyle = '#19c3d6'; g.beginPath();
+  for (const x of L.v || []) { g.moveTo(x, 0); g.lineTo(x, c.h); } for (const y of L.h || []) { g.moveTo(0, y); g.lineTo(c.w, y); }
+  g.stroke(); g.restore();
+}
+function snap(l, x, y) {
+  const c = canvasOf(), s = layerSize(l), lim = 6 / view.zoom, L = (settings.get('guides') !== false && c.lines) || {};
+  const near = (pos, size, marks) => { let best = null; for (const m of marks) for (const off of [0, size / 2, size]) { const d = m - (pos + off); if (Math.abs(d) <= lim && (best === null || Math.abs(d) < Math.abs(best))) best = d; } return best === null ? pos : pos + best; };
+  return { x: Math.round(near(x, s.w, [0, c.w / 2, c.w, ...(L.v || [])])), y: Math.round(near(y, s.h, [0, c.h / 2, c.h, ...(L.h || [])])) };
+}
+// 자: 그림판 위쪽과 왼쪽에 픽셀 눈금을 보여요
+function drawRulers(W, H) {
+  const c = canvasOf(); if (!c || !settings.get('rulers')) return;
+  const css = getComputedStyle(document.documentElement), R = 16, step = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000].find(v => v * view.zoom >= 56) || 10000;
+  ctx.save(); ctx.fillStyle = css.getPropertyValue('--strip'); ctx.fillRect(0, 0, W, R); ctx.fillRect(0, 0, R, H);
+  ctx.strokeStyle = css.getPropertyValue('--faint'); ctx.fillStyle = css.getPropertyValue('--dim'); ctx.font = '9px sans-serif'; ctx.lineWidth = 1; ctx.beginPath();
+  for (let v = Math.floor(-view.ox / view.zoom / step) * step; v * view.zoom + view.ox < W; v += step) { const x = Math.round(v * view.zoom + view.ox) + 0.5; if (x < R) continue; ctx.moveTo(x, R - 6); ctx.lineTo(x, R); ctx.fillText(String(v), x + 2, 9); }
+  for (let v = Math.floor(-view.oy / view.zoom / step) * step; v * view.zoom + view.oy < H; v += step) { const y = Math.round(v * view.zoom + view.oy) + 0.5; if (y < R) continue; ctx.moveTo(R - 6, y); ctx.lineTo(R, y); ctx.save(); ctx.translate(9, y + 2); ctx.rotate(-Math.PI / 2); ctx.fillText(String(v), -ctx.measureText(String(v)).width, 0); ctx.restore(); }
+  ctx.stroke(); ctx.fillStyle = css.getPropertyValue('--strip'); ctx.fillRect(0, 0, R, R); ctx.restore();
 }
 function guides(g) {
   const l = layerOf(); if (!l || !l.visible || toolOf().sel) return;
@@ -191,7 +219,8 @@ export function draw() {
   ctx.translate(view.ox, view.oy); ctx.scale(view.zoom, view.zoom);
   paint(ctx, c); ctx.restore();
   drawSel(dpr);
-  ctx.save(); ctx.translate(view.ox, view.oy); ctx.scale(view.zoom, view.zoom); guides(ctx); drawDraft(ctx); ctx.restore();
+  ctx.save(); ctx.translate(view.ox, view.oy); ctx.scale(view.zoom, view.zoom); drawLines(ctx); guides(ctx); drawDraft(ctx); ctx.restore();
+  drawRulers(cv.width / dpr, cv.height / dpr);
 }
 
 // ---- 파일 ----
@@ -218,6 +247,28 @@ export async function exportPng() {
   const a = h('a', { href: URL.createObjectURL(blob), download: c.name + '.png' });
   a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
   toast(`'${c.name}.png'로 내보냈어요.`);
+}
+// 여러 크기·형식으로 한 번에 내보내기
+function exportSet() {
+  const c = canvasOf(), O = { png: true, jpg: false, webp: false, sizes: '100, 50', q: 90, ...(settings.get('exportSet') || {}) };
+  const chk = (k, label) => h('label.check', null, h('input', { type: 'checkbox', checked: !!O[k], onchange: e => { O[k] = e.target.checked; } }), label);
+  const go = async () => {
+    const fmts = [['png', 'image/png'], ['jpg', 'image/jpeg'], ['webp', 'image/webp']].filter(f => O[f[0]]), sizes = [...new Set(String(O.sizes).split(/[,\s]+/).map(Number).filter(v => v >= 1 && v <= 400))];
+    if (!fmts.length || !sizes.length) { toast('형식과 크기를 하나 이상 골라 주세요.', 'err'); return false; }
+    settings.set('exportSet', O);
+    const flat = await flatten(c), files = [];
+    for (const pct of sizes) {
+      const w = Math.max(1, Math.round(c.w * pct / 100)), hh = Math.max(1, Math.round(c.h * pct / 100)), t = document.createElement('canvas'); t.width = w; t.height = hh; const g = t.getContext('2d'); g.imageSmoothingQuality = 'high';
+      for (const [ext, type] of fmts) { g.clearRect(0, 0, w, hh); if (ext === 'jpg') { g.fillStyle = '#fff'; g.fillRect(0, 0, w, hh); } g.drawImage(flat, 0, 0, w, hh); files.push({ name: `${c.name}${sizes.length > 1 || pct !== 100 ? ` ${w}x${hh}` : ''}.${ext}`, blob: await new Promise(r => t.toBlob(r, type, O.q / 100)) }); }
+    }
+    const { saveFiles } = await import('../core/files.js'); await saveFiles(files, c.name + ' 묶음.zip'); toast(`그림 ${files.length}장을 내보냈어요.`);
+  };
+  dialog({ title: '여러 크기·형식으로 내보내기', body: h('div.vid-form', null,
+    h('div.btn-row', null, chk('png', 'PNG'), chk('jpg', 'JPG'), chk('webp', 'WebP')),
+    h('label.field', null, h('span.field-name.w', null, '크기 (%)'), h('input.text', { type: 'text', value: O.sizes, 'aria-label': '크기', oninput: e => { O.sizes = e.target.value; } })),
+    h('label.field', null, h('span.field-name.w', null, '화질'), h('input.range', { type: 'range', min: 40, max: 100, value: O.q, 'aria-label': '화질', oninput: e => { O.q = +e.target.value; } })),
+    h('p.dlg-text', null, `크기는 쉼표로 여러 개를 적어요. 100은 원래 크기(${c.w} × ${c.h})예요. 화질은 JPG와 WebP에만 쓰여요. JPG는 투명한 곳이 흰색이 돼요.`)),
+    buttons: [{ label: '취소' }, { label: '내보내기', primary: true, run: () => { go(); } }] });
 }
 // 그림 파일(Blob)을 보관함에 넣고 레이어로 올려요. hidden이면 보관함 목록에는 안 보여요(레이어 전용)
 export async function layerFromBlob(c, blob, name, { x = 0, y = 0, scale = 1, hidden = false, folder = null } = {}) {
@@ -330,7 +381,7 @@ export const imageRoom = {
         let dx = (ev.clientX - e.clientX) / view.zoom, dy = (ev.clientY - e.clientY) / view.zoom;
         if (ev.shiftKey) { if (Math.abs(dx) > Math.abs(dy)) dy = 0; else dx = 0; }
         if (Math.abs(dx) + Math.abs(dy) > 0) moved = true;
-        l.x = Math.round(x0 + dx); l.y = Math.round(y0 + dy); draw(); emit();
+        const q = ev.altKey || l.rot ? { x: Math.round(x0 + dx), y: Math.round(y0 + dy) } : snap(l, x0 + dx, y0 + dy); l.x = q.x; l.y = q.y; draw(); emit();
       }, () => { if (moved) commit('레이어 옮기기'); });
     });
     cv.addEventListener('pointermove', e => { const r = cv.getBoundingClientRect(); const p = toDoc(e.clientX - r.left, e.clientY - r.top); view.mouse = { x: Math.round(p.x), y: Math.round(p.y) }; tick(); });
@@ -427,6 +478,14 @@ export function registerImageCmds() {
   addCmd({ id: 'sel.shrink', title: '고른 곳 좁히기 (4px)', menu: '고르기', group: 'edge', enabled: hasSel, run: () => selGrow(-4) });
   addCmd({ id: 'sel.toLayer', title: '고른 곳을 새 레이어로', menu: '고르기', group: 'do', keys: 'Ctrl+Shift+J', words: '복사 오려 누끼', enabled: hasSel, run: selToLayer });
   addCmd({ id: 'sel.erase', title: '고른 곳 지우기', menu: '고르기', group: 'do', keys: 'Backspace', enabled: () => hasSel() && hasLayer(), run: selErase });
+  const lineCmd = (id, title, make) => addCmd({ id, title, menu: '보기', group: 'guide', words: '가이드 guide 정렬', enabled: hasCanvas, run: () => { const c = canvasOf(), L = c.lines || { v: [], h: [] }, n = make(c); c.lines = { v: [...new Set([...(L.v || []), ...n.v])], h: [...new Set([...(L.h || []), ...n.h])] }; settings.set('guides', true); commit(title); } });
+  lineCmd('view.guideCenter', '가운데 안내선 넣기', c => ({ v: [Math.round(c.w / 2)], h: [Math.round(c.h / 2)] }));
+  lineCmd('view.guideThirds', '삼등분 안내선 넣기', c => ({ v: [Math.round(c.w / 3), Math.round(c.w * 2 / 3)], h: [Math.round(c.h / 3), Math.round(c.h * 2 / 3)] }));
+  addCmd({ id: 'view.guideAt', title: '안내선을 자리 정해 넣기…', menu: '보기', group: 'guide', enabled: hasCanvas, run: async () => { const { askText } = await import('../ui/overlay.js'), t = await askText('안내선 자리 (예: 세로 300, 가로 120)', '세로 ', '넣기'); if (!t) return; const c = canvasOf(), L = c.lines || { v: [], h: [] }, v = [...(L.v || [])], hh = [...(L.h || [])]; for (const m of t.matchAll(/(세로|가로)\s*(-?\d+)/g)) (m[1] === '세로' ? v : hh).push(+m[2]); c.lines = { v: [...new Set(v)], h: [...new Set(hh)] }; settings.set('guides', true); commit('안내선 넣기'); } });
+  addCmd({ id: 'view.guideShow', title: '안내선 보이기', menu: '보기', group: 'guide', checked: () => settings.get('guides') !== false, enabled: hasCanvas, run: () => { settings.set('guides', settings.get('guides') === false); draw(); } });
+  addCmd({ id: 'view.guideClear', title: '안내선 모두 지우기', menu: '보기', group: 'guide', enabled: () => !!(canvasOf() && canvasOf().lines), run: () => { delete canvasOf().lines; commit('안내선 지우기'); } });
+  addCmd({ id: 'view.rulers', title: '자 보이기', menu: '보기', group: 'guide', words: '눈금 ruler', checked: () => !!settings.get('rulers'), run: () => { settings.set('rulers', !settings.get('rulers')); draw(); } });
+  addCmd({ id: 'file.exportSet', title: '여러 크기·형식으로 내보내기…', menu: '파일', words: '묶음 jpg webp 저장 export', enabled: hasCanvas, run: exportSet });
   addCmd({ id: 'view.fit', title: '화면에 맞추기', menu: '보기', keys: 'Ctrl+0', enabled: hasCanvas, run: fit });
   addCmd({ id: 'view.100', title: '실제 크기 (100%)', menu: '보기', keys: 'Ctrl+1', enabled: hasCanvas, run: () => zoomAt(1 / view.zoom) });
   addCmd({ id: 'view.in', title: '확대', menu: '보기', keys: 'Ctrl+=', enabled: hasCanvas, run: () => zoomAt(1.25) });

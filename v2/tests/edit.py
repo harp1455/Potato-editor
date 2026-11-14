@@ -105,6 +105,17 @@ with sync_playwright() as pw:
     page.mouse.move(vb['x'] + vb['width'] * 0.4, vb['y'] + vb['height'] * 0.5); page.mouse.down(); page.mouse.move(vb['x'] + vb['width'] * 0.6, vb['y'] + vb['height'] * 0.5, steps=6); page.mouse.up()
     shot(page, '32c-liquify'); page.click('.dlg button:has-text("이대로 바꾸기")'); page.wait_for_function("__potato.state.project.canvases[0].layers[0].mediaId !== '%s'" % mid0)
     page.keyboard.press('Control+z'); assert P(page, "__potato.state.project.canvases[0].layers[0].mediaId") == mid0
+    # 전체 보정: 그림판 값이라 합친 그림 전체가 바뀌고, 지우면 돌아와요. 안내선: 옮길 때 달라붙어요
+    f0 = P(page, FLAT); P(page, "(() => { const c = __potato.state.project.canvases[0]; c.adj = { sat: -100, contrast: 40 }; __potato.emit(); })()"); f1 = P(page, FLAT)
+    assert f1[:3] != f0[:3] and abs(f1[0] - f1[1]) < 3 and abs(f1[1] - f1[2]) < 3, (f0, f1)
+    P(page, "(() => { delete __potato.state.project.canvases[0].adj; __potato.emit(); })()"); assert P(page, FLAT)[:3] == f0[:3]
+    P(page, "__potato.run('view.guideThirds')"); assert P(page, "__potato.state.project.canvases[0].lines.v.length") == 2; P(page, "__potato.run('view.rulers')"); shot(page, '32d-guides')
+    P(page, "__potato.run('view.rulers')"); P(page, "__potato.run('view.guideClear')"); assert P(page, "__potato.state.project.canvases[0].lines") is None
+    # 묶음 내보내기: PNG와 JPG, 두 가지 크기 → 네 장
+    P(page, "__potato.settings.set('exportSet', { png: true, jpg: true, webp: false, sizes: '100, 50', q: 80 }); window.showDirectoryPicker = undefined")
+    P(page, "__potato.run('file.exportSet')")
+    with page.expect_download() as dl: page.click('.dlg button:has-text("내보내기")')
+    import zipfile as _z; zn = _z.ZipFile(dl.value.path()).namelist(); assert len(zn) == 4 and sum(n.endswith('.jpg') for n in zn) == 2, zn
     # 가림막: 고른 곳만 보이게 하면 바깥은 투명해지고, 없애면 돌아와요
     A = "(async (x, y) => { const cv = __potato.state.project.canvases[0], c = await __potato.image.flatten(cv, cv.layers[0].id); return c.getContext('2d').getImageData(x, y, 1, 1).data[3]; })"
     lid = P(page, "__potato.state.layerId"); P(page, "(() => { __potato.state.layerId = __potato.state.project.canvases[0].layers[0].id; __potato.sel.selRect('new', 20, 20, 60, 60); __potato.emit(); })()")

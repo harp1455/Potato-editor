@@ -137,6 +137,9 @@ with sync_playwright() as pw:
     with page.expect_file_chooser() as fc: page.click('.dlg >> text=백업 들여오기')
     fc.value.set_files(zp); page.wait_for_selector('.toast >> text=이미 있는')
     page.fill('input[aria-label="작업 찾기"]', '없는이름zz'); page.wait_for_selector('.dlg >> text=그 이름의 작업이 없어요'); page.keyboard.press('Escape')
+    # 색 견본: 넣은 색이 색 고르는 칸의 견본으로 붙어요
+    P(page, "__potato.run('tool.swatches')"); page.click('.dlg >> text=이 색 넣기'); assert P(page, "__potato.settings.get('swatches')") == ['#d3a94e'] and P(page, "document.querySelector('.dlg input[type=color]').getAttribute('list')") == 'swatches' and P(page, "document.querySelectorAll('#swatches option').length") == 1
+    page.keyboard.press('Escape')
     # 밝은 화면: 설정에서 고르면 바로 바뀌고 다시 켜도 그대로
     page.set_viewport_size({'width': 1280, 'height': 800})
     P(page, "__potato.settings.set('theme', 'light'); document.documentElement.dataset.theme = 'light'"); shot(page, '14-light')
