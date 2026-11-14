@@ -55,6 +55,7 @@ const P = {
   chevron: 'M6 4l4 4l-4 4',
   panels: 'M2.5 3h11v10h-11z M6 3v10 M10.5 3v10',
   single: 'M2.5 3h11v10h-11z M2.5 6h11',
+  lines: 'M6 8a2 2 0 1 0 4 0a2 2 0 1 0-4 0 M8 1.5v2.5 M8 12v2.5 M1.5 8h2.5 M12 8h2.5 M3.4 3.4l1.8 1.8 M10.8 10.8l1.8 1.8 M12.6 3.4l-1.8 1.8 M5.2 10.8l-1.8 1.8',
 };
 export function icon(name, size = 16) {
   const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');

@@ -51,6 +51,11 @@ with sync_playwright() as pw:
     for shp in ['cloud', 'shout']:
         P(page, "(() => { const e = %s[2]; e.shape = '%s'; e.vert = true; __potato.emit(); })()" % (ELS, shp)); page.wait_for_timeout(150)
     shot(page, '83-shapes'); P(page, "(() => { const e = %s[2]; e.shape = 'ellipse'; e.vert = false; __potato.emit(); })()" % ELS)
+    # 집중선: 끌어서 넣으면 가장자리는 선으로 덮이고 가운데는 비어 있어요
+    n0 = P(page, ELS + ".length"); page.keyboard.press('l'); page.mouse.move(X(60), Y(700)); page.mouse.down(); page.mouse.move(X(460), Y(1100), steps=4); page.mouse.up()
+    ln = P(page, ELS + ".at(-1)"); assert P(page, ELS + ".length") == n0 + 1 and ln['type'] == 'lines' and abs(ln['w'] - 400) < 8
+    assert page.locator('.vid-side input[aria-label="선 수"]').count() == 1
+    shot(page, '84-lines'); page.keyboard.press('Control+z'); assert P(page, ELS + ".length") == n0
     # 그림 속 글자 번역 (흉내 응답): 그림을 보내고, 받은 자리에 덮는 네모와 번역을 올려요
     P(page, """(() => { window.__sent = []; window.fetch = async (u, o) => { const b = JSON.parse(o.body); __sent.push(b); const img = b.contents[0].parts.some(p => p.inlineData);
         const text = img ? JSON.stringify([{ box: [100, 100, 200, 400], text: 'こんにちは', translation: '안녕하세요' }, { box: [0, 0, 0, 0], text: 'x', translation: '' }]) : JSON.stringify(JSON.parse(b.contents[0].parts[0].text).map(t => 'T:' + t));

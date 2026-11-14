@@ -11,7 +11,7 @@ import { dialog, toast, busy, showMenu } from '../ui/overlay.js';
 const SIZES = [[800, 1280, '웹툰 한 화면 (800 × 1280)'], [1080, 1920, '세로 (1080 × 1920)'], [1600, 2260, '만화 원고 (1600 × 2260)'], [1920, 1080, '가로 (1920 × 1080)'], [1080, 1080, '정사각형 (1080 × 1080)']];
 const LAYOUTS = [['1', '한 컷', [[0, 0, 1, 1]]], ['2', '위아래 2컷', [[0, 0, 1, .5], [0, .5, 1, .5]]], ['3', '위아래 3컷', [[0, 0, 1, 1 / 3], [0, 1 / 3, 1, 1 / 3], [0, 2 / 3, 1, 1 / 3]]], ['4', '4컷 (2 × 2)', [[0, 0, .5, .5], [.5, 0, .5, .5], [0, .5, .5, .5], [.5, .5, .5, .5]]], ['t', '위 큰 컷 + 아래 2컷', [[0, 0, 1, .6], [0, .6, .5, .4], [.5, .6, .5, .4]]]];
 const FONTS = [['', '기본'], ['"Malgun Gothic", "Apple SD Gothic Neo", sans-serif', '고딕'], ['"Batang", "Nanum Myeongjo", serif', '명조'], ['"Gungsuh", serif', '궁서'], ['"Comic Sans MS", "Nanum Pen Script", cursive', '손글씨']];
-const TOOLS = [['pick', '고르기', 'V', 'move', '요소를 눌러 고르고 끌어 옮겨요. 모서리 점으로 크기를 바꿔요. 컷 안의 그림은 Alt를 누르고 끌면 옮겨지고 휠로 커져요.'], ['panel', '컷 만들기', 'C', 'cut', '끌어서 컷을 만들어요. 보관함 그림을 컷 위로 끌면 그 컷에 담겨요.'], ['bubble', '말풍선', 'B', 'bubble', '끌어서 말풍선을 만들어요. 꼬리 끝의 점을 끌어 말하는 사람 쪽으로 돌려요.'], ['text', '글자', 'T', 'text', '누른 자리에 글자를 놓아요. 오른쪽에서 내용과 모양을 바꿔요.']];
+const TOOLS = [['pick', '고르기', 'V', 'move', '요소를 눌러 고르고 끌어 옮겨요. 모서리 점으로 크기를 바꿔요. 컷 안의 그림은 Alt를 누르고 끌면 옮겨지고 휠로 커져요.'], ['panel', '컷 만들기', 'C', 'cut', '끌어서 컷을 만들어요. 보관함 그림을 컷 위로 끌면 그 컷에 담겨요.'], ['bubble', '말풍선', 'B', 'bubble', '끌어서 말풍선을 만들어요. 꼬리 끝의 점을 끌어 말하는 사람 쪽으로 돌려요.'], ['text', '글자', 'T', 'text', '누른 자리에 글자를 놓아요. 오른쪽에서 내용과 모양을 바꿔요.'], ['lines', '집중선', 'L', 'lines', '끌어서 집중선을 넣어요. 가운데가 비고 가장자리에서 선이 모여들어요. 컷 위에 겹쳐 쓰면 돼요.']];
 const V = { tool: 'pick', zoom: 1, ox: 0, oy: 0, fitted: null, sel: null, draft: null };
 let cv = null, ctx = null, wrap = null;
 
@@ -76,6 +76,16 @@ function drawEl(g, e) {
     if (e.bw !== 0) { tail(); if (e.tail) g.stroke(); shape(); g.stroke(); }
     tail(); if (e.tail) g.fill(); shape(); g.fill();
     drawText(g, e, cx, cy, e.w * (e.shape === 'rect' ? 0.88 : e.shape === 'ellipse' || !e.shape ? 0.72 : 0.6));
+  } else if (e.type === 'lines') {
+    // 집중선: 네모 가장자리에서 가운데 타원을 향해 쐐기 모양 선이 모여요. 같은 씨앗이면 늘 같은 모양
+    let sd = (e.seed || 1) >>> 0; const rnd = () => { sd = (sd * 1664525 + 1013904223) >>> 0; return sd / 4294967296; };
+    const cx = e.x + e.w / 2, cy = e.y + e.h / 2, n = Math.max(8, e.count || 90), far = Math.hypot(e.w, e.h), hole = (e.hole ?? 45) / 100;
+    g.save(); g.beginPath(); g.rect(e.x, e.y, e.w, e.h); g.clip(); g.fillStyle = e.color || '#111111'; g.beginPath();
+    for (let i = 0; i < n; i++) {
+      const a = (i + rnd() * 0.8) / n * Math.PI * 2, wd = (0.25 + rnd() * 0.75) * Math.PI / n * (e.thick ?? 1), k = hole * (0.85 + rnd() * 0.45);
+      g.moveTo(cx + Math.cos(a) * e.w / 2 * k, cy + Math.sin(a) * e.h / 2 * k); g.lineTo(cx + Math.cos(a - wd) * far, cy + Math.sin(a - wd) * far); g.lineTo(cx + Math.cos(a + wd) * far, cy + Math.sin(a + wd) * far); g.closePath();
+    }
+    g.fill(); g.restore();
   } else if (e.type === 'text') {
     const m = drawText(g, e, e.x + e.w / 2, e.y + e.h / 2, 0); e.w = Math.ceil(m.w) + 8; e.h = Math.ceil(m.h);
   }
@@ -180,13 +190,14 @@ export const cutRoom = {
       if (e.button === 1 || V.space) { const ox = V.ox, oy = V.oy; return drag(e, ev => { V.ox = ox + ev.clientX - e.clientX; V.oy = oy + ev.clientY - e.clientY; draw(); }); }
       if (e.button !== 0) return;
       if (V.tool === 'text') { const t = { id: uid('e'), type: 'text', x: Math.round(p.x - 60), y: Math.round(p.y - 20), w: 120, h: 40, text: '글자', size: Math.round(pg.w / 22), color: '#111111', sw: 3, sc: '#ffffff', bold: true }; pg.els.push(t); V.sel = t.id; V.tool = 'pick'; commit('글자 넣기'); return; }
-      if (V.tool === 'panel' || V.tool === 'bubble') {
+      if (V.tool === 'panel' || V.tool === 'bubble' || V.tool === 'lines') {
         const kind = V.tool; V.draft = { x: p.x, y: p.y, w: 0, h: 0 };
         return drag(e, ev => { const q = at(ev); Object.assign(V.draft, { x: Math.min(p.x, q.x), y: Math.min(p.y, q.y), w: Math.abs(q.x - p.x), h: Math.abs(q.y - p.y) }); draw(); }, () => {
           const d = V.draft; V.draft = null; if (d.w < 12 || d.h < 12) { draw(); return; }
-          const n = kind === 'panel' ? { id: uid('e'), type: 'panel', x: Math.round(d.x), y: Math.round(d.y), w: Math.round(d.w), h: Math.round(d.h), mediaId: null, ix: 0, iy: 0, is: 1, bw: 4, bc: '#111111' }
+          const n = kind === 'lines' ? { id: uid('e'), type: 'lines', x: Math.round(d.x), y: Math.round(d.y), w: Math.round(d.w), h: Math.round(d.h), color: '#111111', count: 90, hole: 45, thick: 1, seed: 1 + Math.floor(Math.random() * 99999) }
+            : kind === 'panel' ? { id: uid('e'), type: 'panel', x: Math.round(d.x), y: Math.round(d.y), w: Math.round(d.w), h: Math.round(d.h), mediaId: null, ix: 0, iy: 0, is: 1, bw: 4, bc: '#111111' }
             : { id: uid('e'), type: 'bubble', x: Math.round(d.x), y: Math.round(d.y), w: Math.round(d.w), h: Math.round(d.h), shape: 'ellipse', text: '대사', size: Math.round(pg.w / 26), color: '#111111', fill: '#ffffff', bc: '#111111', bw: 3, tail: true, tx: Math.round(d.x + d.w * 0.3), ty: Math.round(d.y + d.h + d.h * 0.35) };
-          pg.els.push(n); V.sel = n.id; V.tool = 'pick'; commit(kind === 'panel' ? '컷 만들기' : '말풍선 넣기');
+          pg.els.push(n); V.sel = n.id; V.tool = 'pick'; commit(kind === 'panel' ? '컷 만들기' : kind === 'lines' ? '집중선 넣기' : '말풍선 넣기');
         });
       }
       const cur = elOf(), rr = 7 / V.zoom;
@@ -230,10 +241,11 @@ export const cutRoom = {
         h('div.btn-row', null, h('button.btn.small', { onclick: () => run('cut.translate') }, '대사 번역…')),
         h('p.panel-note', null, '요소를 누르면 그 요소의 설정이 보여요. 보관함 그림을 컷 위로 끌어 담아요.'),
       ] : [
-        h('h3.sec', null, { panel: '컷', bubble: '말풍선', text: '글자' }[e.type]),
+        h('h3.sec', null, { panel: '컷', bubble: '말풍선', text: '글자', lines: '집중선' }[e.type]),
         ...(e.type === 'panel' ? [h('div.field-row', null, num('테두리', 'bw'), col('테두리색', 'bc', '#111111')), h('div.btn-row', null, h('button.btn.small', { disabled: !e.mediaId, onclick: () => { e.ix = 0; e.iy = 0; e.is = 1; commit('그림 가운데로'); } }, '그림 가운데로'), h('button.btn.small', { disabled: !e.mediaId, onclick: () => { e.mediaId = null; commit('그림 빼기'); } }, '그림 빼기')), h('p.panel-note', null, 'Alt를 누르고 끌면 컷 안의 그림이 움직이고, Alt를 누르고 휠을 돌리면 커져요.')] : []),
         ...(e.type === 'bubble' ? [...textBox(), h('div.field-row', null, h('label.field', null, h('span.field-name.w', null, '모양'), h('select.text', { 'aria-label': '모양', onchange: ev => { e.shape = ev.target.value; commit('말풍선 모양'); } }, [['ellipse', '둥글게'], ['rect', '네모나게'], ['cloud', '구름 (생각)'], ['shout', '뾰족하게 (외침)']].map(([v, t]) => h('option', { value: v, selected: e.shape === v }, t)))), h('label.check', null, h('input', { type: 'checkbox', checked: !!e.tail, onchange: ev => { e.tail = ev.target.checked; commit('말풍선 꼬리'); } }), '꼬리')),
           h('div.field-row', null, col('바탕색', 'fill', '#ffffff'), col('테두리색', 'bc', '#111111')), num('테두리', 'bw')] : []),
+        ...(e.type === 'lines' ? [h('div.field-row', null, num('선 수', 'count'), num('굵기', 'thick', e, 0.1)), h('div.field-row', null, num('가운데 빈 곳 %', 'hole'), col('색', 'color', '#111111')), h('div.btn-row', null, h('button.btn.small', { onclick: () => { e.seed = 1 + Math.floor(Math.random() * 99999); commit('집중선 다시 뿌리기'); } }, '다르게 뿌리기'))] : []),
         ...(e.type === 'text' ? [...textBox(), h('div.field-row', null, num('테두리', 'sw'), col('테두리색', 'sc', '#ffffff'))] : []),
         h('h3.sec', null, '자리'),
         h('div.field-row', null, num('X', 'x'), num('Y', 'y')), e.type !== 'text' && h('div.field-row', null, num('가로', 'w'), num('세로', 'h')),
@@ -249,7 +261,7 @@ export const cutRoom = {
     update();
     return { update, destroy: () => { ro.disconnect(); cv = null; wrap = null; } };
   },
-  status() { const pg = pageOf(), e = elOf(); return pg ? [`${pg.w} × ${pg.h}`, `${pages().indexOf(pg) + 1} / ${pages().length}쪽`, e ? { panel: '컷', bubble: '말풍선', text: '글자' }[e.type] : ''].filter(Boolean) : []; },
+  status() { const pg = pageOf(), e = elOf(); return pg ? [`${pg.w} × ${pg.h}`, `${pages().indexOf(pg) + 1} / ${pages().length}쪽`, e ? { panel: '컷', bubble: '말풍선', text: '글자', lines: '집중선' }[e.type] : ''].filter(Boolean) : []; },
   hint: () => pageOf() ? (TOOLS.find(t => t[0] === V.tool) || TOOLS[0])[4] : '컷 나누기를 골라 첫 페이지를 만들어요.',
   zoomText: () => pageOf() ? Math.round(V.zoom * 100) + '%' : '',
 };
