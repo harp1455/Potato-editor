@@ -106,6 +106,15 @@ with sync_playwright() as pw:
     zb = zipfile.ZipFile(dl.value.path()); zn = zb.namelist()
     assert zn and all(x.endswith('.webp') and x.startswith('작업/캐릭터A/') for x in zn), zn
     assert zb.read(zn[0])[8:12] == b'WEBP'
+    # 따라 하기: 지금 그림판에서 한 일(여기서는 그림판 크기 100×80으로 자른 것)을 다른 그림에도 똑같이 → 결과가 모두 그 크기
+    has = P(page, "__potato.state.project.canvases.length")
+    if has:
+        P(page, "(() => { const c = __potato.state.project.canvases[0]; c.w = 100; c.h = 80; c.adj = { sat: -100 }; __potato.emit(); })()")
+        page.select_option('select[aria-label="fit"]', '0'); page.select_option('select[aria-label="fmt"]', 'image/png'); page.click('label:has-text("지금 그림판에서 한 일 따라 하기")')
+        with page.expect_download() as dl: page.click('.btn.primary >> text=처리해서 저장')
+        z2 = zipfile.ZipFile(dl.value.path()); d0 = z2.read(z2.namelist()[0]); import struct as _s; assert len(z2.namelist()) == len(zn) and _s.unpack('>II', d0[16:24]) == (100, 80), _s.unpack('>II', d0[16:24])
+        page.click('label:has-text("지금 그림판에서 한 일 따라 하기")'); page.keyboard.press('Control+z')
+    print('따라 하기 시험:', bool(has))
     page.keyboard.press('Alt+1')
 
     # 다시 켜도 폴더와 미리보기가 그대로

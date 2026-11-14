@@ -148,6 +148,11 @@ with sync_playwright() as pw:
     wh0 = P(page, "[%s.w, %s.h]" % (C0, C0)); l0 = P(page, C0 + ".layers[0]"); P(page, "__potato.run('canvas.turnR')"); assert P(page, "[%s.w, %s.h]" % (C0, C0)) == wh0[::-1] and P(page, C0 + ".layers[0].rot") == (l0['rot'] + 90) % 360
     P(page, "__potato.run('canvas.turnL')"); l1 = P(page, C0 + ".layers[0]"); assert P(page, "[%s.w, %s.h]" % (C0, C0)) == wh0 and abs(l1['x'] - l0['x']) <= 1 and abs(l1['y'] - l0['y']) <= 1 and l1['rot'] == l0['rot']
     page.keyboard.press('Control+z'); page.keyboard.press('Control+z')
+    # 컷 자동 배치: 고른 그림 수만큼 컷이 나뉘고 그림이 채워져요
+    mids = P(page, "__potato.state.project.media.filter(m => !m.hidden).slice(0, 3).map(m => m.id)"); assert len(mids) >= 2, mids
+    P(page, "(ids => { const B = __potato.picked; B.clear(); ids.forEach(i => B.add(i)); })(%s)" % mids); np = P(page, "(__potato.state.project.pages || []).length"); P(page, "__potato.run('cut.auto')")
+    pg2 = P(page, "__potato.state.project.pages.at(-1)"); assert P(page, "__potato.state.project.pages.length") == np + 1 and len(pg2['els']) == len(mids) and all(e['mediaId'] and e['w'] > 50 and e['h'] > 50 for e in pg2['els']) and max(e['y'] + e['h'] for e in pg2['els']) <= pg2['h'], pg2['els']
+    page.keyboard.press('Control+z'); P(page, "__potato.picked.clear()")
     # 가림막: 고른 곳만 보이게 하면 바깥은 투명해지고, 없애면 돌아와요
     A = "(async (x, y) => { const cv = __potato.state.project.canvases[0], c = await __potato.image.flatten(cv, cv.layers[0].id); return c.getContext('2d').getImageData(x, y, 1, 1).data[3]; })"
     lid = P(page, "__potato.state.layerId"); P(page, "(() => { __potato.state.layerId = __potato.state.project.canvases[0].layers[0].id; __potato.sel.selRect('new', 20, 20, 60, 60); __potato.emit(); })()")
