@@ -385,6 +385,7 @@ async function start() {
   import('./ui/geminitools.js').then(f => { window.__potato.gem = f; });
   import('./rooms/cut.js').then(f => { window.__potato.cut = f; });
   window.__potato.liq = { makeField, stroke, warp };
+  import('./ui/bin.js').then(f => { window.__potato.picked = f.picked; });
   window.__potato.toastErr = m => toast(m, 'err');
   window.__potato.link = { linkState, startWatch, stopWatch, sendOut };
 }

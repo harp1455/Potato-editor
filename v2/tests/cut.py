@@ -74,6 +74,16 @@ with sync_playwright() as pw:
     P(page, "__potato.cut.pick('%s')" % pe['id']); page.keyboard.press('Control+c'); page.keyboard.press('Control+v'); assert P(page, ELS + ".length") == n2 + 1 and P(page, ELS + ".at(-1).x") == pe['x'] + 24
     page.keyboard.press('Control+z'); P(page, "__potato.cut.pick('%s')" % pe['id']); P(page, "__potato.run('cut.splitV')"); sp = P(page, ELS + ".filter(e => e.type === 'panel' && e.y === %d && e.h === %d)" % (pe['y'], pe['h'])); assert P(page, ELS + ".length") == n2 + 1 and len(sp) >= 2 and sp[0]['w'] < pe['w'] / 2, sp
     page.keyboard.press('Control+z'); assert P(page, ELS + ".length") == n2
+    # 8.x에서 옮긴 것: 묶기(하나를 고르면 함께 골라짐), 스티커, 자동 배치
+    ids2 = P(page, ELS + ".slice(0, 2).map(e => e.id)"); P(page, "(() => { const p = __potato.state.project.pages[0]; p.els[0].gid = p.els[1].gid = 'gt'; __potato.cut.pick(p.els[0].id); })()")
+    P(page, "__potato.run('cut.delete')"); assert not any(i in P(page, ELS + ".map(e => e.id)") for i in ids2); page.keyboard.press('Control+z')
+    P(page, "(() => { const p = __potato.state.project.pages[0]; delete p.els[0].gid; delete p.els[1].gid; __potato.emit(); })()")
+    mids = P(page, "__potato.state.project.media.filter(m => !m.hidden).slice(0, 3).map(m => m.id)")
+    if len(mids) >= 2:
+        P(page, "(ids => { const B = __potato.picked; B.clear(); ids.forEach(i => B.add(i)); __potato.emit(); })(%s)" % mids); np = P(page, "__potato.state.project.pages.length")
+        P(page, "__potato.run('cut.auto')"); pg2 = P(page, "__potato.state.project.pages.at(-1)"); assert P(page, "__potato.state.project.pages.length") == np + 1 and len(pg2['els']) == len(mids) and all(e['mediaId'] for e in pg2['els']); shot(page, '87-auto')
+        P(page, "__potato.run('cut.addPic')"); assert P(page, "__potato.state.project.pages.at(-1).els.filter(e => e.type === 'pic').length") == len(mids)
+        page.keyboard.press('Control+z'); page.keyboard.press('Control+z'); P(page, "(() => { __potato.picked.clear(); __potato.state.project.activePage = __potato.state.project.pages[0].id; __potato.emit(); })()")
     # 효과음: 크게, 기울여서 들어가요
     n1 = P(page, ELS + ".length"); P(page, "__potato.run('cut.sfx')"); sf = P(page, ELS + ".at(-1)"); assert sf['rot'] == -12 and sf['size'] > 80 and page.locator('.vid-side input[aria-label="회전"]').count() == 1
     shot(page, '85-sfx'); page.keyboard.press('Control+z'); assert P(page, ELS + ".length") == n1
