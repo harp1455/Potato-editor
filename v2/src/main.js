@@ -8,6 +8,7 @@ import { PANELS } from './ui/panels.js';
 import { imageRoom, registerImageCmds, setMenuItem } from './rooms/image.js';
 import { stubRooms } from './rooms/stub.js';
 import { registerBinCmds } from './ui/bin.js';
+import { batchRoom } from './rooms/batch.js';
 import { videoRoom, registerVideoCmds } from './rooms/video.js';
 import { registerGeminiCmds } from './ui/geminitools.js';
 import { characterRoom, registerCharCmds } from './rooms/character.js';
@@ -16,7 +17,7 @@ import { registerAiCmds, packsPane } from './ui/aitools.js';
 import { preamble, check, generate, buildBody, buildInteraction, speak, animate, SAFETY_CATEGORIES } from './api/gemini.js';
 
 const VERSION = typeof __VERSION__ === 'string' ? __VERSION__ : 'dev';
-const ROOMS = [imageRoom, stubRooms[0], videoRoom, characterRoom, ...stubRooms.slice(1)];
+const ROOMS = [imageRoom, stubRooms[0], videoRoom, characterRoom, batchRoom];
 const roomOf = () => ROOMS.find(r => r.id === settings.get('room')) || imageRoom;
 const MENUS = ['파일', '편집', '보기', '레이어', '고르기', '영상', 'AI', '도구', '작업실', '도움말'];
 
@@ -140,8 +141,9 @@ function planDialog() {
     ['이미지 작업실', '고르는 도구, 보정, AI 도구, NovelAI는 들어왔고, 가림막·고급 보정·AI 지우개·자동 흰칠이 남았어요', '지금'],
     ['캐릭터 작업실', '배경과 인물 나누기, AI로 외곽선 따기, 마법 붓으로 마무리, 뼈대와 움직임 (움직임 창은 8.x 것을 그대로 가져옴)', '지금'],
     ['영상 작업실', '장면 잇기와 MP4·WebP·GIF 내보내기는 들어왔고, 글자·넘김 효과·소리·AI 중간 장면이 남았어요', '지금'],
-    ['컷 작업실', '페이지·컷·말풍선, 번역, 더빙, API 금액', '5단계'],
-    ['마무리', '8.x 작업 가져오기, 새 기능, 전체 점검', '6단계'],
+    ['컷 작업실', '페이지·컷·말풍선, 번역, API 금액 (더빙은 먼저 들어왔어요)', '5단계'],
+    ['일괄 처리 작업실', '배경 지우기, 화질 키우기, 크기·형식 바꾸기, NAI 정보 지우기를 여러 장에 한 번에', '지금'],
+    ['마무리', '8.x 작업 가져오기, 자동 흰칠, 번역, 전체 점검', '6단계'],
   ];
   dialog({ title: '2.0에서 달라지는 것', wide: true, buttons: [{ label: '닫기', primary: true }],
     body: h('div', null, h('p.dlg-text', null, '감자 편집기 2.0은 새 틀 위에 8.x의 기능을 하나씩 옮겨 담는 중이에요. 아직 옮기지 않은 기능은 8.x에서 그대로 쓸 수 있어요.'),

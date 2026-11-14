@@ -95,6 +95,19 @@ with sync_playwright() as pw:
     page.wait_for_function("!__potato.state.project.media.some(m => m.meta)")
     assert page.locator('.media-meta').count() == 0
 
+    # 일괄 처리: 폴더 하나를 긴 쪽 48로 줄여 WebP로 → 폴더 모양 그대로 ZIP
+    page.keyboard.press('Alt+5'); page.wait_for_selector('.batch-row')
+    page.select_option('select[aria-label="from"]', label='폴더: 작업 › 캐릭터A')
+    page.select_option('select[aria-label="fit"]', '768'); page.select_option('select[aria-label="fmt"]', 'image/webp')
+    P(page, "__potato.settings.set('batch', { ...__potato.settings.get('batch'), fit: 48 })")
+    page.keyboard.press('Alt+1'); page.keyboard.press('Alt+5')
+    n = P(page, "__potato.state.project.media.filter(m => !m.hidden).length")
+    with page.expect_download() as dl: page.click('.btn.primary >> text=처리해서 저장')
+    zb = zipfile.ZipFile(dl.value.path()); zn = zb.namelist()
+    assert zn and all(x.endswith('.webp') and x.startswith('작업/캐릭터A/') for x in zn), zn
+    assert zb.read(zn[0])[8:12] == b'WEBP'
+    page.keyboard.press('Alt+1')
+
     # 다시 켜도 폴더와 미리보기가 그대로
     page.wait_for_function("__potato.state.saved"); page.reload()
     page.wait_for_function("window.__potato && __potato.state.project.media.length === 3")
