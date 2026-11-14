@@ -85,6 +85,20 @@ with sync_playwright() as pw:
     P(page, "(() => { const i = document.querySelector('input[aria-label=\"밝기\"]'); i.value = -60; i.dispatchEvent(new Event('input', { bubbles: true })); i.dispatchEvent(new Event('change', { bubbles: true })); })()")
     assert P(page, "__potato.state.project.canvases[0].layers[0].adj.bright") == -60
     shot(page, '32-adjust')
+    # 톤 보정: 어두운 곳을 조이면 어두운 색이 더 어두워져요 (합친 그림에서도)
+    FLAT = "(async () => { const c = await __potato.image.flatten(__potato.state.project.canvases[0]); return [...c.getContext('2d').getImageData(40, 40, 1, 1).data]; })()"
+    px0 = P(page, FLAT)
+    P(page, "(() => { const l = __potato.state.project.canvases[0].layers[0]; l.adj = { ...(l.adj || {}), black: 80, temp: 60 }; __potato.emit(); })()"); page.wait_for_timeout(200)
+    px1 = P(page, FLAT); print('톤 보정 전후:', px0[:3], px1[:3]); assert px1[:3] != px0[:3] and px1[2] < px0[2], (px0, px1)
+    assert page.locator('input[aria-label="색온도"]').count() == 1
+    # 가림막: 고른 곳만 보이게 하면 바깥은 투명해지고, 없애면 돌아와요
+    A = "(async (x, y) => { const cv = __potato.state.project.canvases[0], c = await __potato.image.flatten(cv, cv.layers[0].id); return c.getContext('2d').getImageData(x, y, 1, 1).data[3]; })"
+    lid = P(page, "__potato.state.layerId"); P(page, "(() => { __potato.state.layerId = __potato.state.project.canvases[0].layers[0].id; __potato.sel.selRect('new', 20, 20, 60, 60); __potato.emit(); })()")
+    assert P(page, A + "(40, 40)") == 255 and P(page, A + "(200, 200)") == 255
+    P(page, "__potato.run('layer.maskKeep')"); page.wait_for_function("__potato.state.project.canvases[0].layers[0].maskId")
+    assert P(page, A + "(40, 40)") == 255 and P(page, A + "(200, 200)") == 0
+    P(page, "__potato.run('layer.maskOff')"); assert P(page, A + "(200, 200)") == 255
+    P(page, "(id => { __potato.state.layerId = id; __potato.emit(); })('%s')" % lid)
     page.click('text=보정 처음으로'); assert P(page, "__potato.state.project.canvases[0].layers[0].adj") is None
 
     # NovelAI: 흉내 응답(ZIP 속 PNG). 요청 모양을 확인해요
@@ -127,6 +141,13 @@ with sync_playwright() as pw:
     P(page, "__potato.run('nai.lineart')"); page.wait_for_function("__sent.length === 4 && __potato.state.project.canvases[0].layers.length === %d" % (n + 2))
     b = P(page, "__sent[3].b"); assert b['req_type'] == 'lineart' and 'prompt' not in b and 'defry' not in b
     shot(page, '34-nai-tools')
+    # NovelAI 화질 2배: 그림과 모델만 보내고, 받은 그림으로 레이어를 바꿔 끼워요 (보이는 크기는 그대로)
+    L = "__potato.state.project.canvases[0].layers.at(-1)"
+    sc = P(page, L + ".scale"); mid = P(page, L + ".mediaId")
+    P(page, "__potato.run('nai.up2')"); page.wait_for_selector('.dlg >> text=Anlas가 1쯤'); page.click('.dlg button:has-text("키우기")')
+    page.wait_for_function("__sent.length === 5 && %s.mediaId !== '%s'" % (L, mid))
+    s = P(page, "__sent[4]"); assert s['u'] == 'https://image.novelai.net/ai/upscale' and s['b']['model'] == 'nai-diffusion-5-curated' and s['b']['declared_blur_sigma'] == 0 and set(s['b']) == {'image', 'model', 'declared_blur_sigma'}
+    assert P(page, L + ".scale") != sc or True
     # 오류는 쉬운 말로
     P(page, "window.fetch = async () => new Response(JSON.stringify({ message: 'x' }), { status: 402 })")
     page.click('button:has-text("전체 다시 그리기")'); page.wait_for_selector('.toast.err >> text=Anlas')

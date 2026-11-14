@@ -109,3 +109,14 @@ export async function naiAugment(o, signal) {
   logUse('nai ' + o.tool, 'director', null, { size: o.width + ' × ' + o.height });
   return new Blob([png], { type: 'image/png' });
 }
+
+// 화질 2배로 키우기. 그림 한 장(3,145,728픽셀 이하)을 보내면 가로세로 2배인 PNG가 와요
+export const NAI_UP_MAX = 3145728;
+export const upscaleCost = (w, h) => { const p = w * h; return p > NAI_UP_MAX ? 0 : p <= 1048576 ? 1 : p <= 1747627 ? 2 : p <= 2446678 ? 3 : 4; };
+export async function naiUpscale(image, w, h, signal) {
+  const res = await naiFetch('/ai/upscale', { method: 'POST', body: JSON.stringify({ image, model: 'nai-diffusion-5-curated', declared_blur_sigma: 0 }), signal });
+  const png = await unzipFirst(await res.arrayBuffer());
+  if (![137, 80, 78, 71].every((v, i) => png[i] === v)) throw new ApiError('bad', 'NovelAI가 그림이 아닌 것을 돌려줬어요. 잠시 뒤에 다시 해 주세요.');
+  logUse('nai upscale', 'upscale', null, { size: w + ' × ' + h });
+  return new Blob([png], { type: 'image/png' });
+}

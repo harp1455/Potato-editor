@@ -65,9 +65,25 @@ export function zoomAt(f, px, py) {
 // ---- 그리기 ----
 // 보정 값(밝기·대비·채도·색조·흐림)은 레이어에 숫자로만 남겨 두고 그릴 때 입혀요. 원본 그림은 그대로예요.
 export const ADJ = [['bright', '밝기', -100, 100], ['contrast', '대비', -100, 100], ['sat', '채도', -100, 100], ['hue', '색조', -180, 180], ['blur', '흐림', 0, 40]];
+// 톤 보정: 어두운 곳·밝은 곳의 끝점, 중간 밝기, 색온도. 색 단계표를 만들어 필터로 입혀요.
+export const TONE = [['black', '어두운 곳 조이기', 0, 100], ['white', '밝은 곳 조이기', 0, 100], ['gamma', '중간 밝기', -100, 100], ['temp', '색온도', -100, 100]];
+const luts = new Map();
+function lutOf(a) {
+  const key = [a.black | 0, a.white | 0, a.gamma | 0, a.temp | 0].join('_'); if (key === '0_0_0_0') return '';
+  if (luts.has(key)) return luts.get(key);
+  let svg = document.getElementById('adjLuts');
+  if (!svg) { svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); svg.id = 'adjLuts'; svg.setAttribute('width', 0); svg.setAttribute('height', 0); svg.style.position = 'absolute'; document.body.append(svg); }
+  const lo = (a.black || 0) / 200, hi = 1 - (a.white || 0) / 200, ex = Math.pow(2, -(a.gamma || 0) / 100), t = (a.temp || 0) / 100;
+  const table = gain => Array.from({ length: 33 }, (_, i) => Math.min(1, Math.max(0, Math.pow(Math.min(1, Math.max(0, (i / 32 - lo) / Math.max(0.02, hi - lo))), ex) * gain)).toFixed(4)).join(' ');
+  const id = 'lut' + key.replace(/-/g, 'm'), NS = 'http://www.w3.org/2000/svg', f = document.createElementNS(NS, 'filter'), ct = document.createElementNS(NS, 'feComponentTransfer');
+  f.id = id; f.setAttribute('color-interpolation-filters', 'sRGB');
+  for (const [ch, gain] of [['R', 1 + t * 0.18], ['G', 1], ['B', 1 - t * 0.18]]) { const fn = document.createElementNS(NS, 'feFunc' + ch); fn.setAttribute('type', 'table'); fn.setAttribute('tableValues', table(gain)); ct.append(fn); }
+  f.append(ct); svg.append(f); luts.set(key, `url(#${id})`);
+  return luts.get(key);
+}
 function filterOf(l) {
   const a = l.adj; if (!a) return 'none';
-  const f = [];
+  const f = [], lut = lutOf(a); if (lut) f.push(lut);
   if (a.bright) f.push(`brightness(${1 + a.bright / 100})`);
   if (a.contrast) f.push(`contrast(${1 + a.contrast / 100})`);
   if (a.sat) f.push(`saturate(${1 + a.sat / 100})`);
@@ -83,9 +99,26 @@ export function paint(g, c, only) {
     g.save(); g.globalAlpha = l.opacity; g.filter = filterOf(l);
     g.translate(l.x + s.w / 2, l.y + s.h / 2); g.rotate(l.rot * Math.PI / 180);
     g.imageSmoothingQuality = 'high';
-    g.drawImage(bmp, -s.w / 2, -s.h / 2, s.w, s.h);
+    g.drawImage(l.maskId ? masked(l, bmp) : bmp, -s.w / 2, -s.h / 2, s.w, s.h);
     g.restore();
   }
+}
+// 가림막: 레이어 그림과 같은 크기의 그림. 불투명한 곳만 레이어가 보여요. 원본 그림은 그대로예요.
+const maskCache = new Map();
+function masked(l, bmp) {
+  const mb = state.bitmaps.get(l.maskId); if (!mb) { ensureBitmap(l.maskId).then(() => emit()); return bmp; }
+  const key = l.mediaId + '|' + l.maskId; let c = maskCache.get(key);
+  if (!c) { c = document.createElement('canvas'); c.width = bmp.width; c.height = bmp.height; const g = c.getContext('2d'); g.drawImage(bmp, 0, 0); g.globalCompositeOperation = 'destination-in'; g.drawImage(mb, 0, 0, c.width, c.height); if (maskCache.size > 24) maskCache.clear(); maskCache.set(key, c); }
+  return c;
+}
+async function maskFromSel(invert) {
+  const l = layerOf(), bmp = await ensureBitmap(l.mediaId), s = layerSize(l), c = document.createElement('canvas'); c.width = bmp.width; c.height = bmp.height;
+  const g = c.getContext('2d'); g.translate(c.width / 2, c.height / 2); g.scale(c.width / s.w, c.height / s.h); g.rotate(-l.rot * Math.PI / 180); g.translate(-(l.x + s.w / 2), -(l.y + s.h / 2)); g.drawImage(sel.cv, 0, 0);
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  if (invert) { g.globalCompositeOperation = 'source-out'; g.fillStyle = '#000'; g.fillRect(0, 0, c.width, c.height); }
+  if (l.maskId) { const old = await ensureBitmap(l.maskId); g.globalCompositeOperation = 'destination-in'; g.drawImage(old, 0, 0, c.width, c.height); }   // 이미 가린 곳은 계속 가려요
+  const m = await addMedia(new File([await toBlob(c)], `${l.name} 가림막.png`, { type: 'image/png' }), null, { hidden: true });
+  await ensureBitmap(m.id); l.maskId = m.id; selNone(); commit(invert ? '고른 곳 가리기' : '고른 곳만 보이기');
 }
 // 그림판을 한 장으로 합친 캔버스 (only = 그 레이어만)
 export async function flatten(c, only) {
@@ -392,6 +425,9 @@ export function registerImageCmds() {
   addCmd({ id: 'layer.dup', title: '레이어 복제', menu: '레이어', keys: 'Ctrl+J', enabled: hasLayer, run: () => { const c = canvasOf(), l = layerOf(), n = { ...l, ...(l.adj ? { adj: { ...l.adj } } : {}), id: uid('l'), name: l.name + ' 복사', x: l.x + 20, y: l.y + 20 }; c.layers.splice(c.layers.indexOf(l) + 1, 0, n); state.project.sel = n.id; commit('레이어 복제'); } });
   addCmd({ id: 'layer.up', title: '레이어 위로', menu: '레이어', keys: 'Ctrl+]', enabled: hasLayer, run: () => moveLayer(1) });
   addCmd({ id: 'layer.down', title: '레이어 아래로', menu: '레이어', keys: 'Ctrl+[', enabled: hasLayer, run: () => moveLayer(-1) });
+  addCmd({ id: 'layer.maskKeep', title: '고른 곳만 보이기 (가림막)', menu: '레이어', group: 'mask', words: '마스크 mask 가리기', enabled: () => hasLayer() && sel.any, run: () => maskFromSel(false) });
+  addCmd({ id: 'layer.maskHide', title: '고른 곳 가리기 (가림막)', menu: '레이어', group: 'mask', words: '마스크 mask 숨기기', enabled: () => hasLayer() && sel.any, run: () => maskFromSel(true) });
+  addCmd({ id: 'layer.maskOff', title: '가림막 없애기', menu: '레이어', group: 'mask', enabled: () => !!(layerOf() && layerOf().maskId), run: () => { delete layerOf().maskId; commit('가림막 없애기'); } });
   addCmd({ id: 'layer.resetAdj', title: '보정 처음으로', menu: '레이어', group: 'adj', enabled: () => !!(layerOf() && layerOf().adj), run: () => { delete layerOf().adj; commit('보정 처음으로'); } });
   addCmd({ id: 'layer.delete', title: '레이어 지우기', menu: '레이어', group: 'del', keys: 'Delete', enabled: hasLayer, run: () => { const c = canvasOf(); c.layers = c.layers.filter(l => l.id !== state.project.sel); state.project.sel = null; commit('레이어 지우기'); } });
   addEventListener('keydown', e => { if (e.code === 'Space' && !e.repeat && !/^(INPUT|TEXTAREA|SELECT|BUTTON)$/.test(e.target.tagName)) { view.space = true; if (cv) cv.dataset.tool = 'hand'; e.preventDefault(); } });

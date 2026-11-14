@@ -292,5 +292,6 @@ async function start() {
   import('./core/ai.js').then(f => { window.__potato.ai = f; });
   import('./core/encode.js').then(f => { window.__potato.enc = f; });
   import('./rooms/video.js').then(f => { window.__potato.video = f; });
+  import('./rooms/image.js').then(f => { window.__potato.image = f; });
 }
 start();

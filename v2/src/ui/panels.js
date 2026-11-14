@@ -2,7 +2,7 @@
 import { h, icon } from './dom.js';
 import { state, commit, emit, canvasOf, layerOf, history, jump } from '../core/store.js';
 import { run } from '../core/cmd.js';
-import { draw, ADJ } from '../rooms/image.js';
+import { draw, ADJ, TONE } from '../rooms/image.js';
 import { showMenu, cmdItem } from './overlay.js';
 import { cmd } from '../core/cmd.js';
 import { binPanel } from './bin.js';
@@ -70,7 +70,7 @@ export const PANELS = {
         h('h3.sec', null, '보이기'),
         h('label.field', null, h('span.field-name', null, '불투명도'), op, opv),
         h('h3.sec', null, '보정'),
-        ...ADJ.map(([k, label, min, max]) => {
+        ...[...ADJ, ...TONE].map(([k, label, min, max]) => {
           const v = (l.adj && l.adj[k]) || 0, out = h('span.field-unit', null, String(v));
           return h('label.field', null, h('span.field-name.w', null, label), h('input.range', { type: 'range', min, max, value: v, 'aria-label': label,
             oninput: e => { (l.adj || (l.adj = {}))[k] = +e.target.value; out.textContent = e.target.value; draw(); },
