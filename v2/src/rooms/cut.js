@@ -11,13 +11,16 @@ import { dialog, toast, busy, showMenu } from '../ui/overlay.js';
 const SIZES = [[800, 1280, '웹툰 한 화면 (800 × 1280)'], [1080, 1920, '세로 (1080 × 1920)'], [1600, 2260, '만화 원고 (1600 × 2260)'], [1920, 1080, '가로 (1920 × 1080)'], [1080, 1080, '정사각형 (1080 × 1080)']];
 const LAYOUTS = [['1', '한 컷', [[0, 0, 1, 1]]], ['2', '위아래 2컷', [[0, 0, 1, .5], [0, .5, 1, .5]]], ['3', '위아래 3컷', [[0, 0, 1, 1 / 3], [0, 1 / 3, 1, 1 / 3], [0, 2 / 3, 1, 1 / 3]]], ['4', '4컷 (2 × 2)', [[0, 0, .5, .5], [.5, 0, .5, .5], [0, .5, .5, .5], [.5, .5, .5, .5]]], ['t', '위 큰 컷 + 아래 2컷', [[0, 0, 1, .6], [0, .6, .5, .4], [.5, .6, .5, .4]]]];
 const FONTS = [['', '기본'], ['"Malgun Gothic", "Apple SD Gothic Neo", sans-serif', '고딕'], ['"Batang", "Nanum Myeongjo", serif', '명조'], ['"Gungsuh", serif', '궁서'], ['"Comic Sans MS", "Nanum Pen Script", cursive', '손글씨']];
-const TOOLS = [['pick', '고르기', 'V', 'move', '요소를 눌러 고르고 끌어 옮겨요. 모서리 점으로 크기를 바꿔요. 컷 안의 그림은 Alt를 누르고 끌면 옮겨지고 휠로 커져요.'], ['panel', '컷 만들기', 'C', 'cut', '끌어서 컷을 만들어요. 보관함 그림을 컷 위로 끌면 그 컷에 담겨요.'], ['bubble', '말풍선', 'B', 'bubble', '끌어서 말풍선을 만들어요. 꼬리 끝의 점을 끌어 말하는 사람 쪽으로 돌려요.'], ['text', '글자', 'T', 'text', '누른 자리에 글자를 놓아요. 오른쪽에서 내용과 모양을 바꿔요.'], ['lines', '집중선', 'L', 'lines', '끌어서 집중선을 넣어요. 가운데가 비고 가장자리에서 선이 모여들어요. 컷 위에 겹쳐 쓰면 돼요.']];
+const TOOLS = [['pick', '고르기', 'V', 'move', '요소를 눌러 고르고 끌어 옮겨요. Shift를 누르고 누르면 여러 개를 함께 골라요. 모서리 점으로 크기를 바꿔요. 컷 안의 그림은 Alt를 누르고 끌면 옮겨지고 휠로 커져요.'], ['panel', '컷 만들기', 'C', 'cut', '끌어서 컷을 만들어요. 보관함 그림을 컷 위로 끌면 그 컷에 담겨요.'], ['bubble', '말풍선', 'B', 'bubble', '끌어서 말풍선을 만들어요. 꼬리 끝의 점을 끌어 말하는 사람 쪽으로 돌려요.'], ['text', '글자', 'T', 'text', '누른 자리에 글자를 놓아요. 오른쪽에서 내용과 모양을 바꿔요.'], ['lines', '집중선', 'L', 'lines', '끌어서 집중선을 넣어요. 가운데가 비고 가장자리에서 선이 모여들어요. 컷 위에 겹쳐 쓰면 돼요.']];
 const V = { tool: 'pick', zoom: 1, ox: 0, oy: 0, fitted: null, sel: null, draft: null };
 let cv = null, ctx = null, wrap = null;
 
 const pages = () => state.project.pages || (state.project.pages = []);
 export const pageOf = () => pages().find(p => p.id === state.project.activePage) || pages()[0] || null;
 const elOf = () => { const p = pageOf(); return p ? p.els.find(e => e.id === V.sel) || null : null; };
+// 함께 고른 요소들: Shift를 누르고 누르면 더해져요. 맨 마지막에 누른 것이 설정을 보여 주는 요소예요.
+const extra = () => (V.more && V.more.anchor === V.sel ? V.more.ids : null);
+const group = () => { const p = pageOf(), x = extra(); return p ? p.els.filter(e => e.id === V.sel || (x && x.has(e.id))) : []; };
 function newPage(w, hh, layout) {
   const pg = { id: uid('g'), name: `${pages().length + 1}쪽`, w, h: hh, bg: '#ffffff', els: [] }, m = Math.round(Math.min(w, hh) * 0.04), gap = Math.round(m * 0.6);
   for (const [fx, fy, fw, fh] of (LAYOUTS.find(l => l[0] === layout) || LAYOUTS[0])[2]) {
@@ -103,6 +106,7 @@ function draw() {
   ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.fillRect(V.ox + 2, V.oy + 3, pg.w * V.zoom, pg.h * V.zoom);
   ctx.save(); ctx.translate(V.ox, V.oy); ctx.scale(V.zoom, V.zoom); ctx.save(); ctx.beginPath(); ctx.rect(0, 0, pg.w, pg.h); ctx.clip(); renderPage(ctx, pg); ctx.restore();
   const e = elOf(), px = 1 / V.zoom;
+  for (const o of group()) if (o !== e) { ctx.lineWidth = px; ctx.strokeStyle = '#4b9fe8'; ctx.strokeRect(o.x, o.y, o.w, o.h); }
   if (e) { ctx.lineWidth = px; ctx.strokeStyle = '#4b9fe8'; ctx.strokeRect(e.x, e.y, e.w, e.h); ctx.fillStyle = '#fff'; const r = 3.5 * px; if (e.type !== 'text') for (const [x, y] of [[e.x, e.y], [e.x + e.w, e.y], [e.x, e.y + e.h], [e.x + e.w, e.y + e.h]]) { ctx.fillRect(x - r, y - r, r * 2, r * 2); ctx.strokeRect(x - r, y - r, r * 2, r * 2); } if (e.type === 'bubble' && e.tail) { ctx.beginPath(); ctx.arc(e.tx, e.ty, 4.5 * px, 0, Math.PI * 2); ctx.fillStyle = '#d3a94e'; ctx.fill(); ctx.stroke(); } }
   const d = V.draft; if (d) { ctx.lineWidth = px; ctx.strokeStyle = '#eaf4ff'; ctx.setLineDash([4 * px, 3 * px]); ctx.strokeRect(d.x, d.y, d.w, d.h); }
   ctx.restore();
@@ -206,7 +210,14 @@ export const cutRoom = {
         const ax = fx ? cur.x + cur.w : cur.x, ay = fy ? cur.y + cur.h : cur.y; let mv = false;   // 맞은편 모서리를 붙잡고
         return drag(e, ev => { const q = at(ev); cur.x = Math.round(Math.min(ax, q.x)); cur.y = Math.round(Math.min(ay, q.y)); cur.w = Math.max(16, Math.round(Math.abs(q.x - ax))); cur.h = Math.max(16, Math.round(Math.abs(q.y - ay))); mv = true; draw(); }, () => mv && commit('크기 바꾸기'));
       }
-      const t = hit(pg, p); if (V.sel !== (t ? t.id : null)) { V.sel = t ? t.id : null; emit(); } if (!t) return;
+      const t = hit(pg, p);
+      if (e.shiftKey && t) {   // 더하거나 빼기
+        const ids = new Set(group().map(x => x.id)); if (ids.has(t.id) && ids.size > 1) { ids.delete(t.id); V.sel = [...ids].at(-1); } else { ids.add(t.id); V.sel = t.id; }
+        ids.delete(V.sel); V.more = { anchor: V.sel, ids }; emit(); return;
+      }
+      const inGroup = t && group().length > 1 && group().includes(t);
+      if (!inGroup && V.sel !== (t ? t.id : null)) { V.sel = t ? t.id : null; emit(); } if (!t) return;
+      if (inGroup) { const g0 = group().map(x => ({ x, x0: x.x, y0: x.y, tx0: x.tx, ty0: x.ty })); let mv = false; return drag(e, ev => { const dx = Math.round((ev.clientX - e.clientX) / V.zoom), dy = Math.round((ev.clientY - e.clientY) / V.zoom); if (dx || dy) mv = true; for (const o of g0) { o.x.x = o.x0 + dx; o.x.y = o.y0 + dy; if (o.x.type === 'bubble') { o.x.tx = o.tx0 + dx; o.x.ty = o.ty0 + dy; } } draw(); }, () => mv && commit('함께 옮기기')); }
       if (e.altKey && t.type === 'panel' && t.mediaId) { const ix = t.ix || 0, iy = t.iy || 0; let mv = false; return drag(e, ev => { t.ix = ix + (ev.clientX - e.clientX) / V.zoom; t.iy = iy + (ev.clientY - e.clientY) / V.zoom; mv = true; draw(); }, () => mv && commit('컷 안 그림 옮기기')); }
       const x0 = t.x, y0 = t.y, tx0 = t.tx, ty0 = t.ty; let mv = false;
       drag(e, ev => { const dx = Math.round((ev.clientX - e.clientX) / V.zoom), dy = Math.round((ev.clientY - e.clientY) / V.zoom); if (dx || dy) mv = true; t.x = x0 + dx; t.y = y0 + dy; if (t.type === 'bubble') { t.tx = tx0 + dx; t.ty = ty0 + dy; } draw(); }, () => mv && commit('옮기기'));
@@ -275,7 +286,7 @@ export function registerCutCmds() {
   addCmd({ id: 'cut.front', title: '맨 앞으로', menu: '컷', group: 'el', enabled: has, run: () => order(true) });
   addCmd({ id: 'cut.back', title: '맨 뒤로', menu: '컷', group: 'el', enabled: has, run: () => order(false) });
   addCmd({ id: 'cut.dup', title: '요소 복제', menu: '컷', group: 'el', enabled: has, run: () => { const pg = pageOf(), e = elOf(), n = { ...e, id: uid('e'), x: e.x + 24, y: e.y + 24, ...(e.type === 'bubble' ? { tx: e.tx + 24, ty: e.ty + 24 } : {}) }; pg.els.push(n); V.sel = n.id; commit('요소 복제'); } });
-  addCmd({ id: 'cut.delete', title: '요소 지우기', menu: '컷', group: 'el', enabled: has, run: () => { const pg = pageOf(); pg.els = pg.els.filter(e => e.id !== V.sel); V.sel = null; commit('요소 지우기'); } });
+  addCmd({ id: 'cut.delete', title: '요소 지우기', menu: '컷', group: 'el', enabled: has, run: () => { const pg = pageOf(), g = new Set(group().map(e => e.id)); pg.els = pg.els.filter(e => !g.has(e.id)); V.sel = null; commit(g.size > 1 ? `요소 ${g.size}개 지우기` : '요소 지우기'); } });
   addCmd({ id: 'cut.translate', title: '대사 번역… (제미나이)', menu: '컷', group: 'ai', words: 'translate 번역', enabled: () => !!pageOf(), run: translateDialog });
   addCmd({ id: 'cut.export', title: '이 페이지를 PNG로', menu: '컷', group: 'out', enabled: () => !!pageOf(), run: async () => { const pg = pageOf(), c = await pageCanvas(pg); download(await new Promise(r => c.toBlob(r, 'image/png')), pg.name + '.png'); toast(`'${pg.name}.png'로 저장했어요.`); } });
   addCmd({ id: 'cut.exportAll', title: '모든 페이지 저장…', menu: '컷', group: 'out', enabled: () => pages().length > 0, run: async () => { const b = busy('페이지를 그리는 중이에요.'), files = []; for (const [i, pg] of pages().entries()) { const c = await pageCanvas(pg); files.push({ name: `${String(i + 1).padStart(3, '0')} ${pg.name}.png`, blob: await new Promise(r => c.toBlob(r, 'image/png')) }); b.set(`페이지를 그리는 중이에요. ${i + 1} / ${pages().length}`); } b.done(''); const r = await saveFiles(files, state.project.name + ' 페이지.zip'); if (r) toast(`페이지 ${files.length}쪽을 저장했어요.`); } });

@@ -26,10 +26,16 @@ const total = s => s.scenes.reduce((a, x) => a + x.dur, 0);
 function sceneAt(s, t) { let a = 0; for (const x of s.scenes) { if (t < a + x.dur) return x; a += x.dur; } return s.scenes[s.scenes.length - 1] || null; }
 const startOf = (s, id) => { let a = 0; for (const x of s.scenes) { if (x.id === id) return a; a += x.dur; } return 0; };
 let fadeCv = null;
-function drawScene(g, x, w, h) {
+// 화면 움직임: 장면이 이어지는 동안 그림이 천천히 다가오거나 멀어지거나 옆으로 흘러요 (p = 장면 안에서 0~1)
+export const MOVES = [['', '없음'], ['in', '천천히 다가가기'], ['out', '천천히 멀어지기'], ['left', '왼쪽으로 흐르기'], ['right', '오른쪽으로 흐르기'], ['up', '위로 흐르기'], ['down', '아래로 흐르기']];
+function drawScene(g, x, w, h, p = 0) {
   const b = state.bitmaps.get(x.mediaId); if (!b) { ensureBitmap(x.mediaId); return; }
   const k = (x.fit === 'cover' ? Math.max : Math.min)(w / b.width, h / b.height), dw = b.width * k, dh = b.height * k;
-  g.imageSmoothingQuality = 'high'; g.drawImage(b, (w - dw) / 2, (h - dh) / 2, dw, dh);
+  const m = x.move, amt = (x.moveAmt ?? 12) / 100, e = p * p * (3 - 2 * p);   // 처음과 끝은 부드럽게
+  const z = m === 'in' ? 1 + amt * e : m === 'out' ? 1 + amt * (1 - e) : m ? 1 + amt : 1, sh = amt / 2 * (1 - 2 * e);
+  const ox = m === 'left' ? sh * w : m === 'right' ? -sh * w : 0, oy = m === 'up' ? sh * h : m === 'down' ? -sh * h : 0;
+  g.save(); g.beginPath(); g.rect(0, 0, w, h); g.clip(); g.translate(w / 2 + ox, h / 2 + oy); g.scale(z, z);
+  g.imageSmoothingQuality = 'high'; g.drawImage(b, -dw / 2, -dh / 2, dw, dh); g.restore();
 }
 export function renderSeq(g, s, t, w, h) {
   g.fillStyle = s.bg || '#000'; g.fillRect(0, 0, w, h);
@@ -37,12 +43,12 @@ export function renderSeq(g, s, t, w, h) {
   const x = s.scenes[i]; if (!x) return;
   const f = Math.min(x.fade || 0, x.dur), prev = s.scenes[i - 1];
   if (f > 0 && prev && t - a < f) {   // 앞 장면 위에 이 장면을 (바탕까지 그린 뒤) 점점 진하게
-    drawScene(g, prev, w, h);
+    drawScene(g, prev, w, h, 1);
     if (!fadeCv || fadeCv.width !== w || fadeCv.height !== h) { fadeCv = document.createElement('canvas'); fadeCv.width = w; fadeCv.height = h; }
-    const fg = fadeCv.getContext('2d'); fg.fillStyle = s.bg || '#000'; fg.fillRect(0, 0, w, h); drawScene(fg, x, w, h);
+    const fg = fadeCv.getContext('2d'); fg.fillStyle = s.bg || '#000'; fg.fillRect(0, 0, w, h); drawScene(fg, x, w, h, (t - a) / x.dur);
     g.save(); g.globalAlpha = (t - a) / f; g.drawImage(fadeCv, 0, 0); g.restore();
   }
-  else drawScene(g, x, w, h);
+  else drawScene(g, x, w, h, Math.min(1, (t - a) / x.dur));
   // 자막: 영상 높이에 맞춰 크기를 정해요
   for (const c of s.caps || []) {
     if (t < c.t0 || t >= c.t0 + c.dur || !String(c.text || '').trim()) continue;
@@ -173,6 +179,8 @@ export const videoRoom = {
         h('h3.sec', null, many.length > 1 ? `장면 ${many.length}개` : '장면'),
         !many.length ? h('p.panel-note', null, '아래 줄에서 장면을 누르면 길이와 맞춤을 바꿀 수 있어요. Shift나 Ctrl로 여러 개를 골라요.') : num('길이', +(one ? one.dur : many[0].dur).toFixed(3), 0.1, 0.02, v => { many.forEach(x => { x.dur = clamp(v, 0.02, 600); }); commit('장면 길이'); }, '초'),
         many.length ? h('label.field', null, h('span.field-name.w', null, '맞춤'), h('select.text', { 'aria-label': '맞춤', onchange: e => { many.forEach(x => { x.fit = e.target.value; }); commit('장면 맞춤'); } }, [['contain', '다 보이게'], ['cover', '꽉 채우게']].map(([v, t]) => h('option', { value: v, selected: many[0].fit === v }, t)))) : null,
+        many.length ? h('label.field', null, h('span.field-name.w', null, '화면 움직임'), h('select.text', { 'aria-label': '화면 움직임', onchange: e => { many.forEach(x => { if (e.target.value) x.move = e.target.value; else delete x.move; }); commit('화면 움직임'); } }, MOVES.map(([v, t]) => h('option', { value: v, selected: (many[0].move || '') === v }, t)))) : null,
+        many.length && many[0].move ? num('움직이는 정도', many[0].moveAmt ?? 12, 1, 1, v => { many.forEach(x => { x.moveAmt = clamp(v, 1, 60); }); commit('움직이는 정도'); }, '%') : null,
         many.length ? num('겹쳐 바뀜', +(many[0].fade || 0).toFixed(2), 0.1, 0, v => { many.forEach(x => { x.fade = clamp(v, 0, 10); }); commit('겹쳐 바뀜'); }, '초') : null,
         many.length ? h('div.btn-row', null, h('button.btn.small', { title: '고른 장면과 다음 장면 사이에 AI가 중간 장면을 그려 넣어 부드럽게 이어요', onclick: () => run('video.interp') }, 'AI 중간 장면 넣기')) : null,
         many.length ? h('div.btn-row', null, h('button.icon-btn', { title: '앞으로 옮기기', 'aria-label': '앞으로 옮기기', onclick: () => run('video.left') }, icon('up')), h('button.icon-btn', { title: '뒤로 옮기기', 'aria-label': '뒤로 옮기기', onclick: () => run('video.right') }, icon('down')), h('span.grow'), h('button.icon-btn', { title: '장면 지우기', 'aria-label': '장면 지우기', onclick: () => run('video.delete') }, icon('trash'))) : null,

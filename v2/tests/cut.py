@@ -51,6 +51,12 @@ with sync_playwright() as pw:
     for shp in ['cloud', 'shout']:
         P(page, "(() => { const e = %s[2]; e.shape = '%s'; e.vert = true; __potato.emit(); })()" % (ELS, shp)); page.wait_for_timeout(150)
     shot(page, '83-shapes'); P(page, "(() => { const e = %s[2]; e.shape = 'ellipse'; e.vert = false; __potato.emit(); })()" % ELS)
+    # 여러 개 함께 고르기: Shift로 더해 고르고 함께 옮기고, 되돌려요
+    page.keyboard.press('v'); e0 = P(page, ELS + "[0]"); e1 = P(page, ELS + "[1]")
+    page.mouse.click(X(e0['x'] + 30), Y(e0['y'] + e0['h'] - 30)); page.keyboard.down('Shift'); page.mouse.click(X(e1['x'] + 30), Y(e1['y'] + e1['h'] - 30)); page.keyboard.up('Shift')
+    page.mouse.move(X(e1['x'] + 30), Y(e1['y'] + e1['h'] - 30)); page.mouse.down(); page.mouse.move(X(e1['x'] + 70), Y(e1['y'] + e1['h'] - 30), steps=3); page.mouse.up()
+    a0 = P(page, ELS + "[0].x"); a1 = P(page, ELS + "[1].x"); assert a0 - e0['x'] == a1 - e1['x'] and a0 != e0['x'], (a0, a1)
+    page.keyboard.press('Control+z'); assert P(page, ELS + "[0].x") == e0['x']; page.keyboard.press('Escape')
     # 집중선: 끌어서 넣으면 가장자리는 선으로 덮이고 가운데는 비어 있어요
     n0 = P(page, ELS + ".length"); page.keyboard.press('l'); page.mouse.move(X(60), Y(700)); page.mouse.down(); page.mouse.move(X(460), Y(1100), steps=4); page.mouse.up()
     ln = P(page, ELS + ".at(-1)"); assert P(page, ELS + ".length") == n0 + 1 and ln['type'] == 'lines' and abs(ln['w'] - 400) < 8

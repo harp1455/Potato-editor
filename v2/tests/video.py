@@ -75,6 +75,13 @@ with sync_playwright() as pw:
 
     # 다시 켜도 장면이 그대로
     page.wait_for_function("__potato.state.saved"); page.reload(); page.wait_for_function("window.__potato && __potato.state.project.sequences && __potato.state.project.sequences[0].scenes.length === 4")
+    # 화면 움직임: 다가가기를 켜면 장면의 처음과 끝 그림이 달라져요
+    R = "((t) => { const s = __potato.state.project.sequences[0], c = document.createElement('canvas'); c.width = 60; c.height = 90; const g = c.getContext('2d'); __potato.video.renderSeq(g, s, t, 60, 90); return [...g.getImageData(0, 0, 60, 90).data].reduce((a, v, i) => (a * 31 + v * (i % 7 + 1)) % 1000003, 7); })"
+    P(page, "(() => { const s = __potato.state.project.sequences[0]; s.scenes.forEach(x => { x.fade = 0; }); s.caps = []; s.scenes[0].dur = 2; __potato.emit(); })()")
+    P(page, R + "(0.05)"); page.wait_for_timeout(300)   # 그림을 불러올 틈
+    same = P(page, R + "(0.05)") == P(page, R + "(1.9)")
+    P(page, "(() => { const x = __potato.state.project.sequences[0].scenes[0]; x.move = 'in'; x.moveAmt = 40; __potato.emit(); })()")
+    r0, r1 = P(page, R + "(0.05)"), P(page, R + "(1.9)"); assert same and r0 != r1, (same, r0, r1, P(page, "JSON.stringify(__potato.state.project.sequences[0].scenes.slice(0,2))"))
     assert not errs, errs
     br.close()
 print('통과')
