@@ -59,10 +59,23 @@ function framesDialog(frames, fps, name) {
   ] });
 }
 
+// 캐릭터 움직이기 창을 잠시 접고 그림판에서 고르게 해요. 다 고르면 창으로 돌아와 고른 곳을 가져가요
+function pickOutside() {
+  return new Promise(res => {
+    const root = document.getElementById('modalRoot'), room = settings.get('room');
+    root.style.display = 'none'; window.__rigAway = true;
+    if (room !== 'image') settings.set('room', 'image');
+    run('tool.magic');
+    const end = ok => { bar.remove(); root.style.display = ''; window.__rigAway = false; if (room !== 'image') settings.set('room', room); res(ok); };
+    const bar = h('div.away-bar', { role: 'status' }, h('span', null, '캐릭터에서 떼어 낼 곳을 그림판에서 골라 주세요. 마법 붓, 올가미, AI로 고르기를 모두 쓸 수 있어요.'),
+      h('button.btn.primary', { onclick: () => { if (!sel.any) { toast('아직 고른 곳이 없어요.', 'err'); return; } end(true); } }, '다 골랐어요'), h('button.btn', { onclick: () => end(false) }, '그만두기'));
+    document.body.append(bar);
+  });
+}
 // src = 그림(캔버스·비트맵), key = 이어서 하기용 이름
 export async function rigOpen(src, name, key, selMask) {
   const c0 = canvasOf();
-  await openRig({ src, W: src.width, H: src.height, name, key, goLabel: '내보내기', selMask,
+  await openRig({ src, W: src.width, H: src.height, name, key, goLabel: '내보내기', selMask, pickOutside,
     onFrames: async (frames, fps) => { if (frames && frames.length) framesDialog(frames, fps, name); },
     onStill: async cv => { const c = canvasOf() || c0; if (!c) return; await layerFromBlob(c, await png(cv), name + ' 자세', { scale: Math.min(c.w / cv.width, c.h / cv.height), hidden: true }); commit('자세를 레이어로'); toast('이 자세를 새 레이어로 올렸어요.'); },
   });

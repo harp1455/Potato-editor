@@ -82,6 +82,12 @@ with sync_playwright() as pw:
     same = P(page, R + "(0.05)") == P(page, R + "(1.9)")
     P(page, "(() => { const x = __potato.state.project.sequences[0].scenes[0]; x.move = 'in'; x.moveAmt = 40; __potato.emit(); })()")
     r0, r1 = P(page, R + "(0.05)"), P(page, R + "(1.9)"); assert same and r0 != r1, (same, r0, r1, P(page, "JSON.stringify(__potato.state.project.sequences[0].scenes.slice(0,2))"))
+    # 얹는 그림: 고른 그림을 지금 시각에 얹으면 그 시간 동안만 장면 위에 보이고, 둘째 줄에 막대가 생겨요
+    P(page, "(() => { const p = __potato.state.project, s = p.sequences[0]; delete s.scenes[0].move; s.overs = [{ id: 'o1', mediaId: s.scenes[1].mediaId, t0: 0.5, dur: 1, x: 50, y: 50, size: 50, opacity: 1 }]; __potato.emit(); })()")
+    P(page, R + "(0.7)"); page.wait_for_timeout(300)
+    assert P(page, R + "(0.1)") != P(page, R + "(0.7)") and P(page, R + "(0.1)") == P(page, R + "(1.8)")
+    assert page.locator('.vid-chip.over').count() == 1 and page.locator('.vid-side >> text=얹는 그림').count() >= 1
+    shot(page, '75-over')
     assert not errs, errs
     br.close()
 print('통과')

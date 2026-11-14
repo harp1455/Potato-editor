@@ -62,6 +62,11 @@ with sync_playwright() as pw:
     # 2.0에서 더한 것 ①: 이미지 작업실에서 고른 곳을 '칠한 곳'으로 가져오기
     page.click('#modalRoot [data-rgm="part"]'); page.click('#modalRoot [data-rga="fromsel"]')
     page.wait_for_selector('.toast >> text=고른 곳을 가져왔어요'); shot(page, '53b-fromsel')
+    # 2.0에서 더한 것 ①-2: 창을 잠시 접고 그림판에서 고른 뒤 돌아오기
+    page.click('#modalRoot [data-rga="pick2"]'); page.wait_for_selector('.away-bar'); assert not page.locator('#modalRoot .rg-modal').is_visible() and P(page, "__potato.settings.get('room')") == 'image'
+    P(page, "(() => { const c = __potato.state.project.canvases[0]; __potato.sel.selEllipse('new', c.w * 0.3, c.h * 0.2, c.w * 0.3, c.h * 0.3); })()"); shot(page, '53c-away')
+    page.click('.away-bar >> text=다 골랐어요'); page.wait_for_selector('#modalRoot .rg-modal'); assert page.locator('.away-bar').count() == 0 and P(page, "__potato.settings.get('room')") == 'character'
+    page.wait_for_timeout(600); assert page.locator('.toast >> text=고른 곳을 가져왔어요').count() >= 1
     # 2.0에서 더한 것 ②: 메운 자리를 NovelAI로 바로 다시 그리기 (흉내 응답)
     import io, json, zipfile
     zb = io.BytesIO(); zipfile.ZipFile(zb, 'w').writestr('image_0.png', open(src, 'rb').read())

@@ -49,6 +49,13 @@ export function renderSeq(g, s, t, w, h) {
     g.save(); g.globalAlpha = (t - a) / f; g.drawImage(fadeCv, 0, 0); g.restore();
   }
   else drawScene(g, x, w, h, Math.min(1, (t - a) / x.dur));
+  // 얹는 그림: 장면 위, 자막 아래. 자리는 가운데 기준 %, 크기는 영상 너비의 %
+  for (const o of s.overs || []) {
+    if (t < o.t0 || t >= o.t0 + o.dur) continue;
+    const b = state.bitmaps.get(o.mediaId); if (!b) { ensureBitmap(o.mediaId); continue; }
+    const dw = w * (o.size ?? 30) / 100, dh = dw * b.height / b.width;
+    g.save(); g.globalAlpha = o.opacity ?? 1; g.imageSmoothingQuality = 'high'; g.drawImage(b, w * (o.x ?? 50) / 100 - dw / 2, h * (o.y ?? 50) / 100 - dh / 2, dw, dh); g.restore();
+  }
   // 자막: 영상 높이에 맞춰 크기를 정해요
   for (const c of s.caps || []) {
     if (t < c.t0 || t >= c.t0 + c.dur || !String(c.text || '').trim()) continue;
@@ -145,8 +152,9 @@ export const videoRoom = {
   mount(el) {
     cv = h('canvas.vid-view', { 'aria-label': '미리보기' });
     wrap = h('div.vid-stage', null, cv);
-    const bar = h('div.vid-bar'), strip = h('div.vid-strip'), side = h('div.vid-side');
-    el.append(h('div.vid-room', null, h('div.vid-top', null, wrap, side), bar, strip));
+    const bar = h('div.vid-bar'), strip = h('div.vid-strip'), side = h('div.vid-side'), lane = h('div.vid-lane', { 'aria-label': '얹는 그림과 자막이 나오는 때' });
+    el.append(h('div.vid-room', null, h('div.vid-top', null, wrap, side), bar, lane, strip));
+    strip.addEventListener('scroll', () => { lane.scrollLeft = strip.scrollLeft; });
     const ro = new ResizeObserver(draw); ro.observe(wrap);
     const drop = e => { e.preventDefault(); strip.classList.remove('over'); let ids = []; try { ids = JSON.parse(e.dataTransfer.getData('application/x-potato-medias')) || []; } catch (_) { /* 보관함 그림이 아님 */ } if (ids.length) addScenes(ids); };
     strip.addEventListener('dragover', e => { e.preventDefault(); strip.classList.add('over'); }); strip.addEventListener('dragleave', () => strip.classList.remove('over')); strip.addEventListener('drop', drop);
@@ -163,6 +171,12 @@ export const videoRoom = {
         h('button.btn.small', { onclick: () => run('video.import'), title: '영상이나 움짤 파일을 장면으로 풀어 넣어요' }, '영상 불러오기'),
         h('button.btn.small', { onclick: () => run('video.addPicked'), title: '보관함에서 고른 그림을 장면으로 넣어요. 보관함 그림을 아래 줄로 끌어도 돼요.' }, '고른 그림 넣기'),
         h('button.btn.small.primary', { disabled: !T, onclick: () => run('video.export') }, '내보내기'));
+      // 둘째 줄: 얹는 그림과 자막이 언제 나오는지 막대로 보여요. 누르면 그 시각으로 가요
+      const xOf = tt => { let a = 0, px = 8; for (const x of s.scenes) { if (tt < a + x.dur) return px + (tt - a) / x.dur * widthOf(x); a += x.dur; px += widthOf(x); } return px; };
+      const bars = s && s.scenes.length ? [...(s.overs || []).map(o => [o, 'over', (state.project.media.find(m => m.id === o.mediaId) || {}).name || '그림']), ...(s.caps || []).map(c => [c, 'cap', String(c.text || '').split('\n')[0]])] : [];
+      lane.hidden = !bars.length;
+      lane.replaceChildren(h('div.vid-lane-in', { style: `width:${s ? xOf(1e9) + 8 : 0}px` }, bars.map(([o, kind, name]) => h('button.vid-chip.' + kind, { style: `left:${xOf(o.t0)}px;width:${Math.max(10, xOf(o.t0 + o.dur) - xOf(o.t0))}px`, title: `${kind === 'over' ? '얹는 그림' : '자막'}: ${name}, ${o.t0.toFixed(2)}초부터 ${o.dur.toFixed(2)}초 동안`, onclick: () => { V.t = o.t0; emit(); } }, name))));
+      lane.scrollLeft = strip.scrollLeft;
       strip.replaceChildren(...(s && s.scenes.length ? [
         ...s.scenes.map((x, i) => h('button.vid-scene' + (V.sel.has(x.id) ? '.on' : ''), { style: `width:${widthOf(x)}px`, title: `${i + 1}번 장면, ${x.dur.toFixed(2)}초`, 'aria-pressed': String(V.sel.has(x.id)),
           onclick: e => { if (e.shiftKey && V.sel.size) { const a = s.scenes.findIndex(y => V.sel.has(y.id)); s.scenes.slice(Math.min(a, i), Math.max(a, i) + 1).forEach(y => V.sel.add(y.id)); } else if (e.ctrlKey || e.metaKey) { V.sel.has(x.id) ? V.sel.delete(x.id) : V.sel.add(x.id); } else { V.sel.clear(); V.sel.add(x.id); } V.t = startOf(s, x.id); emit(); },
@@ -190,6 +204,13 @@ export const videoRoom = {
           h('div.field-row', null, num('시작', +c.t0.toFixed(2), 0.1, 0, v => { c.t0 = Math.max(0, v); commit('자막 시작'); }, '초'), num('길이', +c.dur.toFixed(2), 0.1, 0.1, v => { c.dur = Math.max(0.1, v); commit('자막 길이'); }, '초')),
           h('div.btn-row', null, h('select.text', { 'aria-label': '자막 자리', style: 'width:auto', onchange: e => { c.pos = e.target.value; commit('자막 자리'); } }, [['bottom', '아래'], ['middle', '가운데'], ['top', '위']].map(([v, t]) => h('option', { value: v, selected: (c.pos || 'bottom') === v }, t))), h('span.grow'), h('button.icon-btn', { title: '자막 지우기', 'aria-label': '자막 지우기', onclick: () => { s.caps = s.caps.filter(x => x !== c); commit('자막 지우기'); } }, icon('trash'))))),
         h('button.btn.small', { onclick: () => { (s.caps || (s.caps = [])).push({ id: uid('k'), text: '자막', t0: +V.t.toFixed(2), dur: 2, pos: 'bottom', size: 5 }); commit('자막 넣기'); } }, '지금 시각에 자막 넣기'),
+        h('h3.sec', null, '얹는 그림'),
+        ...(s.overs || []).map(o => { const m = state.project.media.find(x => x.id === o.mediaId); return h('div.cap', null, h('p.clip-text', { title: m ? m.name : '' }, m ? m.name : '지워진 그림'),
+          h('div.field-row', null, num('시작', +o.t0.toFixed(2), 0.1, 0, v => { o.t0 = Math.max(0, v); commit('얹는 그림 시작'); }, '초'), num('길이', +o.dur.toFixed(2), 0.1, 0.1, v => { o.dur = Math.max(0.1, v); commit('얹는 그림 길이'); }, '초')),
+          h('div.field-row', null, num('가로', o.x ?? 50, 1, -50, v => { o.x = clamp(v, -50, 150); commit('얹는 그림 자리'); }, '%'), num('세로', o.y ?? 50, 1, -50, v => { o.y = clamp(v, -50, 150); commit('얹는 그림 자리'); }, '%')),
+          h('div.field-row', null, num('크기', o.size ?? 30, 1, 1, v => { o.size = clamp(v, 1, 400); commit('얹는 그림 크기'); }, '%'), num('진하기', Math.round((o.opacity ?? 1) * 100), 5, 0, v => { o.opacity = clamp(v, 0, 100) / 100; commit('얹는 그림 불투명도'); }, '%')),
+          h('div.btn-row', null, h('span.grow'), h('button.icon-btn', { title: '얹는 그림 빼기', 'aria-label': '얹는 그림 빼기', onclick: () => { s.overs = s.overs.filter(x => x !== o); commit('얹는 그림 빼기'); } }, icon('trash')))); }),
+        h('button.btn.small', { disabled: !picked.size, title: picked.size ? '' : '보관함에서 얹을 그림을 먼저 골라 주세요', onclick: () => run('video.addOver') }, '고른 그림을 지금 시각에 얹기'),
         h('h3.sec', null, '소리'),
         s.audio ? h('div.cap', null, h('p.clip-text', { title: s.audio.name }, s.audio.name),
           h('label.field', null, h('span.field-name.w', null, '크기'), h('input.range', { type: 'range', min: 0, max: 100, value: Math.round((s.audio.vol ?? 1) * 100), 'aria-label': '소리 크기', onchange: e => { s.audio.vol = e.target.value / 100; commit('소리 크기'); } })),
@@ -258,6 +279,7 @@ async function interp() {
 export function registerVideoCmds() {
   const inRoom = () => !!cv, has = () => inRoom() && !!seqOf() && V.sel.size > 0;
   const shift = d => { const s = seqOf(), ids = s.scenes.filter(x => V.sel.has(x.id)); (d < 0 ? ids : ids.reverse()).forEach(x => { const i = s.scenes.indexOf(x), j = i + d; if (j >= 0 && j < s.scenes.length && !V.sel.has(s.scenes[j].id)) { s.scenes.splice(i, 1); s.scenes.splice(j, 0, x); } }); commit('장면 옮기기'); };
+  addCmd({ id: 'video.addOver', title: '보관함에서 고른 그림을 장면 위에 얹기', menu: '영상', words: '로고 스티커 워터마크 오버레이', enabled: () => picked.size > 0 && !!seqOf() && seqOf().scenes.length > 0, run: () => { const s = seqOf(); [...picked].forEach(id => { (s.overs || (s.overs = [])).push({ id: uid('o'), mediaId: id, t0: +V.t.toFixed(2), dur: 2, x: 50, y: 50, size: 30, opacity: 1 }); ensureBitmap(id); }); commit('그림 얹기'); } });
   addCmd({ id: 'video.addPicked', title: '보관함에서 고른 그림을 장면으로', menu: '영상', enabled: () => picked.size > 0, run: () => { const n = addScenes([...picked]); if (n) toast(`장면 ${n}개를 넣었어요.`); } });
   addCmd({ id: 'video.export', title: '영상 내보내기…', menu: '영상', enabled: () => !!seqOf() && seqOf().scenes.length > 0, run: exportDialog });
   addCmd({ id: 'video.play', title: '재생·멈춤', menu: '영상', group: 'play', enabled: () => inRoom() && !!seqOf(), run: () => play(!V.playing) });
