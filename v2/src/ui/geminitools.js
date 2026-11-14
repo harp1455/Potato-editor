@@ -59,7 +59,16 @@ export const dubPanel = {
   },
 };
 
-const RATIOS = [['16:9', 16 / 9], ['9:16', 9 / 16], ['1:1', 1], ['4:3', 4 / 3], ['3:4', 3 / 4]];
+// 영상 모델이 받는 화면 비율은 가로(16:9)와 세로(9:16) 둘뿐이에요. 그림은 보내기 전에 이 비율로 다듬어요
+const RATIOS = [['16:9', 16 / 9], ['9:16', 9 / 16]];
+const FITS = [['crop', '잘라서 맞추기 (가운데 기준)'], ['blur', '안 자르고, 남는 곳은 흐린 그림으로 채우기'], ['black', '안 자르고, 남는 곳은 검정으로 채우기']];
+// 그림을 고른 비율의 첫 장면으로 다듬어요 (긴 쪽 1280까지)
+export function firstFrame(flat, k, fit) {
+  const W = k >= 1 ? 1280 : Math.round(1280 * k), H = k >= 1 ? Math.round(1280 / k) : 1280, f = document.createElement('canvas'); f.width = W; f.height = H; const g = f.getContext('2d'); g.imageSmoothingQuality = 'high'; g.fillStyle = '#000'; g.fillRect(0, 0, W, H);
+  const cover = Math.max(W / flat.width, H / flat.height), inside = Math.min(W / flat.width, H / flat.height), put = z => g.drawImage(flat, (W - flat.width * z) / 2, (H - flat.height * z) / 2, flat.width * z, flat.height * z);
+  if (fit === 'crop') put(cover); else { if (fit === 'blur') { g.filter = 'blur(28px) brightness(0.75)'; put(cover * 1.12); g.filter = 'none'; } put(inside); }
+  return f;
+}
 const IDEAS = [['카메라가 천천히 다가가요', 'Slow cinematic push-in toward the subject.'], ['머리카락과 옷이 바람에 흔들려요', 'Hair and clothes sway gently in the wind; subtle natural motion.'], ['숨 쉬고 눈을 깜빡여요', 'The character breathes softly and blinks; minimal idle motion.'], ['카메라가 옆으로 천천히 움직여요', 'Slow lateral camera pan with gentle parallax.']];
 // AI 영상 작업 창: 왼쪽에서 만들고, 오른쪽에 만드는 중인 것과 다 만든 영상이 쌓여요.
 // 창을 닫아도 만들기는 계속되고, 다 된 영상은 작업에 저장돼서 언제든 다시 열어 보고, 저장하고, 영상 작업실로 보낼 수 있어요.
@@ -71,9 +80,7 @@ async function makeVideo(c, V, ratio) {
   const ctl = new AbortController(); it.stop = () => ctl.abort();
   try {
     const r = await runJob('AI 영상', async (job, say) => {
-      const flat = await flatten(c), k = ratio[1], sw = Math.min(flat.width, flat.height * k), sh = sw / k, L = 1280 / Math.max(sw, sh), f = document.createElement('canvas');
-      f.width = Math.round(sw * Math.min(1, L)); f.height = Math.round(sh * Math.min(1, L)); const g = f.getContext('2d'); g.fillStyle = '#000'; g.fillRect(0, 0, f.width, f.height); g.imageSmoothingQuality = 'high';
-      g.drawImage(flat, (flat.width - sw) / 2, (flat.height - sh) / 2, sw, sh, 0, 0, f.width, f.height);
+      const f = firstFrame(await flatten(c), ratio[1], V.fit || 'crop');
       it.text = '제미나이에 보냈어요. 보통 1~3분 걸려요.'; say('제미나이가 영상을 만드는 중', 0.1); if (vidPaint) vidPaint();
       return animate(V.model, f.toDataURL('image/jpeg', 0.93).split(',')[1], V.prompt, ratio[0], V.res, { signal: ctl.signal, onWait: n => { if (job.stop) ctl.abort(); say(`제미나이가 영상을 만드는 중 (${(n + 1) * 5}초째)`, Math.min(0.95, 0.1 + n * 0.02)); } });
     });
@@ -89,8 +96,12 @@ async function makeVideo(c, V, ratio) {
 }
 function videoDialog() {
   const c = canvasOf(), okKey = settings.get('adult') && settings.get('apiKey').trim();
-  const V = { model: 'gemini-omni-1.1-flash', res: '720p', prompt: '', ...(settings.get('vid') || {}) };
-  const ratio = c ? RATIOS.reduce((a, b) => Math.abs(Math.log(b[1] / (c.w / c.h))) < Math.abs(Math.log(a[1] / (c.w / c.h))) ? b : a) : RATIOS[0];
+  const V = { model: 'gemini-omni-1.1-flash', res: '720p', prompt: '', fit: 'crop', ...(settings.get('vid') || {}), ratio: '' };
+  const auto = c ? RATIOS.reduce((a, b) => Math.abs(Math.log(b[1] / (c.w / c.h))) < Math.abs(Math.log(a[1] / (c.w / c.h))) ? b : a) : RATIOS[0];
+  const ratioNow = () => RATIOS.find(r => r[0] === V.ratio) || auto;
+  // 보낼 첫 장면 미리 보기: 비율과 맞추는 법을 바꾸면 바로 다시 그려요
+  const pre = h('canvas.aiv-pre', { 'aria-label': '보낼 첫 장면 미리 보기' }); let flatNow = null;
+  const drawPre = async () => { if (!c) return; flatNow = flatNow || await flatten(c); const f = firstFrame(flatNow, ratioNow()[1], V.fit), k = 300 / Math.max(f.width, f.height); pre.width = Math.round(f.width * k); pre.height = Math.round(f.height * k); pre.getContext('2d').drawImage(f, 0, 0, pre.width, pre.height); };
   const ta = h('textarea.text.area', { rows: 4, 'aria-label': '어떻게 움직일지', placeholder: '영어로 적으면 더 잘 알아들어요', value: V.prompt });
   const list = h('div.aiv-list'), urls = new Map(); let open = (vids()[0] || {}).id || null;
   const urlOf = async v => { if (!urls.has(v.id)) { const b = await idb.get('blobs', 'vid:' + v.id); urls.set(v.id, b ? URL.createObjectURL(b) : ''); } return urls.get(v.id); };
@@ -119,13 +130,16 @@ function videoDialog() {
   const go = () => {
     if (!c) { toast('먼저 이미지 작업실에서 그림을 열어 주세요.', 'err'); return; }
     if (!okKey) { toast('성인 확인과 제미나이 API 키가 필요해요. 설정 > AI와 API에서 넣어 주세요.', 'err'); return; }
-    V.prompt = ta.value.trim(); settings.set('vid', V); makeVideo(c, { ...V }, ratio);
+    V.prompt = ta.value.trim(); settings.set('vid', { ...V, ratio: undefined }); makeVideo(c, { ...V }, ratioNow());
   };
   const tick = setInterval(() => { if (RUN.some(r => r.status === 'run')) paint(); }, 1000);
   const d = dialog({ title: 'AI 영상', wide: true, onClose: () => { clearInterval(tick); vidPaint = null; urls.forEach(u => u && URL.revokeObjectURL(u)); },
     body: h('div.aiv', null,
       h('div.aiv-form', null,
-        h('p.dlg-text', null, c ? `지금 그림판(${c.name})을 첫 장면으로 삼아 짧은 영상을 만들어요. 화면 비율은 그림에 가장 가까운 ${ratio[0]}로 맞추고, 넘치는 곳은 가운데를 기준으로 잘라요.` : '이미지 작업실에서 그림을 열면 그 그림으로 영상을 만들 수 있어요. 전에 만든 영상은 오른쪽에서 볼 수 있어요.'),
+        h('p.dlg-text', null, c ? `지금 그림판(${c.name})을 첫 장면으로 삼아 짧은 영상을 만들어요. 영상은 가로(16:9)나 세로(9:16)로만 만들 수 있어서, 그림을 그 비율로 다듬어 보내요. 아래 그림이 보낼 첫 장면이에요.` : '이미지 작업실에서 그림을 열면 그 그림으로 영상을 만들 수 있어요. 전에 만든 영상은 오른쪽에서 볼 수 있어요.'),
+        c ? pre : null,
+        c ? h('label.field', null, h('span.field-name.w', null, '화면 비율'), h('select.text', { 'aria-label': '화면 비율', onchange: e => { V.ratio = e.target.value; drawPre(); } }, [['', `알아서 (${auto[0] === '16:9' ? '가로' : '세로'} ${auto[0]})`], ['16:9', '가로 16:9'], ['9:16', '세로 9:16']].map(([v, t]) => h('option', { value: v }, t)))) : null,
+        c ? h('label.field', null, h('span.field-name.w', null, '맞추는 법'), h('select.text', { 'aria-label': '맞추는 법', onchange: e => { V.fit = e.target.value; drawPre(); } }, FITS.map(([v, t]) => h('option', { value: v, selected: V.fit === v }, t)))) : null,
         h('label.stack', null, h('span.field-name', null, '어떻게 움직일지'), ta),
         h('div.btn-row.wrap', null, IDEAS.map(([t, p]) => h('button.btn.small', { onclick: () => { ta.value = (ta.value.trim() + ' ' + p).trim(); } }, t))),
         h('label.field', null, h('span.field-name.w', null, '화질'), h('select.text', { 'aria-label': '화질', onchange: e => { V.res = e.target.value; } }, ['720p', '1080p'].map(r => h('option', { value: r, selected: V.res === r }, r)))),
@@ -134,7 +148,7 @@ function videoDialog() {
         h('p.dlg-text', null, '영상은 결제를 연결한 키에서만 만들 수 있고 요금이 커요. 만드는 동안 이 창을 닫아도 계속 만들어지고, 다 되면 알려 드려요. 구글의 영상 거름막은 끌 수 없어서 수위 있는 그림은 거절될 수 있어요.')),
       h('div.aiv-side', null, h('h3.sec', null, '만든 영상'), list)),
     buttons: [{ label: '닫기' }] });
-  vidPaint = paint; paint();
+  vidPaint = paint; paint(); drawPre();
 }
 
 export function registerGeminiCmds() {

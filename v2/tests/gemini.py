@@ -51,6 +51,12 @@ with sync_playwright() as pw:
     # AI 영상: 그림판 → 요청 → 기다림 → 결과
     P(page, "window.__noSafety = false; __sent.length = 0")
     page.click('.mb-item >> text=AI'); page.click('.menu >> text=AI 영상 만들기')
+    # 영상 비율은 16:9와 9:16뿐: 고르는 칸에 그 둘만 있고, 보낼 첫 장면이 그 비율로 다듬어져요
+    assert [o for o in page.locator('select[aria-label="화면 비율"] option').all_inner_texts()][1:] == ['가로 16:9', '세로 9:16']
+    page.select_option('select[aria-label="화면 비율"]', '9:16'); page.select_option('select[aria-label="맞추는 법"]', 'blur'); page.wait_for_timeout(300)
+    pw_, ph_ = P(page, "[document.querySelector('.aiv-pre').width, document.querySelector('.aiv-pre').height]"); assert abs(pw_ / ph_ - 9 / 16) < 0.02, (pw_, ph_)
+    ff = P(page, "(() => { const s = document.createElement('canvas'); s.width = 400; s.height = 300; const f = __potato.gem.firstFrame(s, 16 / 9, 'crop'), g = __potato.gem.firstFrame(s, 9 / 16, 'black'); return [f.width, f.height, g.width, g.height]; })()"); assert ff == [1280, 720, 720, 1280], ff
+    page.select_option('select[aria-label="화면 비율"]', ''); page.select_option('select[aria-label="맞추는 법"]', 'crop')
     page.fill('textarea[aria-label="어떻게 움직일지"]', 'gentle wind'); shot(page, '61-video-ask')
     page.click('.aiv-form button:has-text("영상 만들기")')
     page.wait_for_selector('.aiv-item.run'); assert page.locator('.dlg >> text=AI 영상').count() >= 1   # 창이 꺼지지 않고, 만드는 중인 것이 바로 보여요

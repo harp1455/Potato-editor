@@ -371,3 +371,5 @@ label.batch-row { cursor: pointer; } .batch-row input[type=checkbox] { accent-co
 .job-bar.wait span { width: 35%; animation: aivwait 1.4s ease-in-out infinite alternate; } @keyframes aivwait { from { margin-left: 0; } to { margin-left: 65%; } }
 @media (prefers-reduced-motion: reduce) { .job-bar.wait span { animation: none; width: 100%; opacity: .5; } }
 @media (max-width: 900px) { .aiv { grid-template-columns: 1fr; } }
+
+.aiv-pre { max-width: 100%; height: auto; display: block; background: #000; border: 1px solid var(--line); justify-self: start; }
