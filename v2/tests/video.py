@@ -61,8 +61,12 @@ with sync_playwright() as pw:
     fc.value.set_files(wav); page.wait_for_function("(__potato.state.project.sequences[0].audios || []).length === 1")
     # 파형이 그려지고, 오른쪽 끝을 끌면 길이가 잘려요. 소리를 하나 더 넣으면 겹쳐져요
     page.wait_for_function("(() => { const c = document.querySelector('canvas.wave'); if (!c) return false; const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; for (let i = 3; i < d.length; i += 4) if (d[i]) return true; return false; })()")
-    wb = page.locator('canvas.wave').bounding_box(); page.mouse.move(wb['x'] + wb['width'] - 2, wb['y'] + 20); page.mouse.down(); page.mouse.move(wb['x'] + wb['width'] * 0.5, wb['y'] + 20, steps=3); page.mouse.up()
-    du = P(page, "__potato.state.project.sequences[0].audios[0].dur"); assert 0.4 < du < 0.6, du
+    du = None
+    for _ in range(5):   # 파형이 다시 그려지는 순간과 겹치면 끌기가 안 먹을 수 있어서, 될 때까지 몇 번 해 봐요
+        page.wait_for_timeout(300); wb = page.locator('canvas.wave').first.bounding_box(); page.mouse.move(wb['x'] + wb['width'] - 2, wb['y'] + 20); page.mouse.down(); page.mouse.move(wb['x'] + wb['width'] * 0.5, wb['y'] + 20, steps=3); page.mouse.up()
+        du = P(page, "__potato.state.project.sequences[0].audios[0].dur")
+        if du is not None: break
+    assert du is not None and 0.4 < du < 0.6, du
     with page.expect_file_chooser() as fc: page.click('.vid-side >> text=소리 파일 넣기')
     fc.value.set_files(wav); page.wait_for_function("__potato.state.project.sequences[0].audios.length === 2"); assert page.locator('.vid-chip.aud').count() == 2
     if P(page, "__potato.enc.canMp4() && typeof AudioEncoder !== 'undefined'"):
