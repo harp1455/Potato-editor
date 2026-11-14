@@ -14,7 +14,7 @@ import { preamble, check, generate, buildBody, SAFETY_CATEGORIES } from './api/g
 const VERSION = typeof __VERSION__ === 'string' ? __VERSION__ : 'dev';
 const ROOMS = [imageRoom, ...stubRooms];
 const roomOf = () => ROOMS.find(r => r.id === settings.get('room')) || imageRoom;
-const MENUS = ['파일', '편집', '보기', '레이어', '도구', '작업실', '도움말'];
+const MENUS = ['파일', '편집', '보기', '레이어', '고르기', '도구', '작업실', '도움말'];
 
 let live = null;      // 지금 가운데에 떠 있는 작업실
 const els = {};
@@ -183,7 +183,7 @@ function settingsDialog(tab = 'screen') {
         h('div.btn-row', null, h('button.btn', { onclick: async e => { e.target.disabled = true; out.textContent = '확인하는 중이에요.'; try { await check(); out.textContent = '연결됐어요. 안전 설정을 끈 요청을 서버가 받았어요.'; } catch (err) { out.textContent = err.message; } e.target.disabled = false; } }, '연결 확인')), out,
         h('h3', null, 'NovelAI 토큰'),
         h('input.text.wide', { type: 'password', value: settings.get('naiToken'), placeholder: 'pst-…', autocomplete: 'off', 'aria-label': 'NovelAI 토큰', onchange: e => settings.set('naiToken', e.target.value.trim()) }),
-        h('p.set-note', null, 'NovelAI 누리집의 계정 설정에서 받는 "Persistent API Token"이에요. 이 컴퓨터에만 저장되고 NovelAI 서버로만 보내요. 그림 만들기와 인페인트는 다음 단계에서 들어와요.'),
+        h('p.set-note', null, 'NovelAI 누리집의 계정 설정에서 받는 "Persistent API Token"이에요. 이 컴퓨터에만 저장되고 NovelAI 서버로만 보내요. 오른쪽 NovelAI 패널에서 그림 만들기, 다시 그리기, 고른 곳만 다시 그리기를 써요.'),
         h('div.btn-row', null, h('button.btn', { onclick: async e => { e.target.disabled = true; naiOut.textContent = '확인하는 중이에요.'; try { const a = await naiAccount(); naiOut.textContent = `연결됐어요. ${a.tier}, 남은 Anlas ${a.anlas.toLocaleString('ko-KR')}`; } catch (err) { naiOut.textContent = err.message; } e.target.disabled = false; } }, 'NovelAI 연결 확인')), naiOut,
         h('h3', null, '모든 요청에 먼저 붙는 것'),
         h('p.set-note', null, `안전 설정 ${SAFETY_CATEGORIES.length}가지(괴롭힘, 혐오, 성적 내용, 위험한 내용, 선거·시민)를 모두 "끔"으로 보내고, 아래 안내문을 다른 지시보다 앞에 둬요. 번역, 더빙, 영상은 둘째 줄과 넷째 줄만 그 일에 맞게 바뀌어요.`),
@@ -234,5 +234,7 @@ async function start() {
   if (!settings.get('askedAdult')) adultDialog();
   window.__potato = { state, settings, run, emit, api: { generate, buildBody, preamble } };
   import('./core/files.js').then(f => { window.__potato.files = f; });
+  import('./core/select.js').then(f => { window.__potato.sel = f; });
+  import('./api/nai.js').then(f => { window.__potato.nai = f; });
 }
 start();

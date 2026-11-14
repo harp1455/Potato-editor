@@ -2,10 +2,11 @@
 import { h, icon } from './dom.js';
 import { state, commit, emit, canvasOf, layerOf, history, jump } from '../core/store.js';
 import { run } from '../core/cmd.js';
-import { draw } from '../rooms/image.js';
+import { draw, ADJ } from '../rooms/image.js';
 import { showMenu, cmdItem } from './overlay.js';
 import { cmd } from '../core/cmd.js';
 import { binPanel } from './bin.js';
+import { naiPanel } from './naipanel.js';
 
 const num = (label, value, step, on, unit) => {
   const i = h('input.num', { type: 'number', value, step, 'aria-label': label, onchange: () => { const v = parseFloat(i.value); if (!isNaN(v)) on(v); } });
@@ -65,7 +66,16 @@ export const PANELS = {
         h('div.field-row', null, num('X', l.x, 1, v => { l.x = Math.round(v); commit('위치'); }, 'px'), num('Y', l.y, 1, v => { l.y = Math.round(v); commit('위치'); }, 'px')),
         h('div.field-row', null, num('크기', +(l.scale * 100).toFixed(1), 1, v => { l.scale = Math.min(50, Math.max(0.01, v / 100)); commit('크기'); }, '%'), num('회전', l.rot, 1, v => { l.rot = v; commit('회전'); }, '°')),
         h('h3.sec', null, '보이기'),
-        h('label.field', null, h('span.field-name', null, '불투명도'), op, opv));
+        h('label.field', null, h('span.field-name', null, '불투명도'), op, opv),
+        h('h3.sec', null, '보정'),
+        ...ADJ.map(([k, label, min, max]) => {
+          const v = (l.adj && l.adj[k]) || 0, out = h('span.field-unit', null, String(v));
+          return h('label.field', null, h('span.field-name.w', null, label), h('input.range', { type: 'range', min, max, value: v, 'aria-label': label,
+            oninput: e => { (l.adj || (l.adj = {}))[k] = +e.target.value; out.textContent = e.target.value; draw(); },
+            onchange: () => { if (l.adj && !Object.values(l.adj).some(Boolean)) delete l.adj; commit('보정: ' + label); } }), out);
+        }),
+        h('button.btn.small', { disabled: !l.adj, onclick: () => run('layer.resetAdj') }, '보정 처음으로'),
+        h('p.panel-note', null, '보정은 원본 그림을 바꾸지 않아요. 언제든 값을 되돌릴 수 있어요.'));
     },
   },
   history: {
@@ -75,6 +85,7 @@ export const PANELS = {
       const on = el.querySelector('.hist.on'); if (on) on.scrollIntoView({ block: 'nearest' });
     },
   },
+  nai: naiPanel,
   jobs: {
     title: 'AI 작업',
     render(el) {

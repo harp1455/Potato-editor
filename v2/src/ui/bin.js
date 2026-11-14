@@ -152,28 +152,28 @@ function folderEl(f, depth) {
 export const binPanel = {
   title: '보관함',
   render(el) {
-    const p = state.project, roots = folders().filter(f => !f.parent), loose = mediaIn(null, false);
+    const p = state.project, roots = folders().filter(f => !f.parent), loose = mediaIn(null, false), all = mediaIn(null);
     [...picked].forEach(id => { if (!p.media.some(m => m.id === id)) picked.delete(id); });
     const bar = h('div.bin-bar', null,
       h('button.icon-btn', { title: '그림 넣기', 'aria-label': '그림 넣기', onclick: () => pick(false) }, icon('imagePlus')),
       h('button.icon-btn', { title: '폴더째 넣기 (하위 폴더까지 그대로)', 'aria-label': '폴더째 넣기', onclick: () => pick(true) }, icon('folderIn')),
       h('button.icon-btn', { title: '새 폴더', 'aria-label': '새 폴더', onclick: () => run('bin.newFolder') }, icon('folderPlus')),
       h('span.grow'),
-      h('button.icon-btn', { title: '보관함 전체를 폴더째 저장', 'aria-label': '폴더째 저장', disabled: !p.media.length, onclick: () => run('bin.saveAll') }, icon('folderOut')));
+      h('button.icon-btn', { title: '보관함 전체를 폴더째 저장', 'aria-label': '폴더째 저장', disabled: !all.length, onclick: () => run('bin.saveAll') }, icon('folderOut')));
     const tree = target(h('div.bin-tree', {
-      oncontextmenu: e => { e.preventDefault(); showMenu([{ label: '그림 넣기…', run: () => pick(false) }, { label: '폴더째 넣기…', run: () => pick(true) }, { label: '새 폴더…', run: () => run('bin.newFolder') }, '-', { label: '보관함 전체를 폴더째 저장…', disabled: !p.media.length, run: () => run('bin.saveAll') }, { label: '모든 그림의 NAI 정보 지우기', disabled: !p.media.some(m => m.meta), run: () => stripAsk(p.media, '보관함의 모든') }], e.clientX, e.clientY); },
+      oncontextmenu: e => { e.preventDefault(); showMenu([{ label: '그림 넣기…', run: () => pick(false) }, { label: '폴더째 넣기…', run: () => pick(true) }, { label: '새 폴더…', run: () => run('bin.newFolder') }, '-', { label: '보관함 전체를 폴더째 저장…', disabled: !all.length, run: () => run('bin.saveAll') }, { label: '모든 그림의 NAI 정보 지우기', disabled: !all.some(m => m.meta), run: () => stripAsk(all, '보관함의 모든') }], e.clientX, e.clientY); },
       onclick: e => { if (e.target === tree && picked.size) { picked.clear(); emit(); } },
     }), null);
-    if (!p.media.length && !roots.length) tree.append(h('p.empty', null, '그림이나 폴더를 여기로 끌어다 놓으세요. 폴더째 넣으면 하위 폴더까지 그 모양 그대로 들어와요.'));
+    if (!all.length && !roots.length) tree.append(h('p.empty', null, '그림이나 폴더를 여기로 끌어다 놓으세요. 폴더째 넣으면 하위 폴더까지 그 모양 그대로 들어와요.'));
     else tree.append(...roots.map(f => folderEl(f, 0)), grid(loose) || '');
     el.classList.add('flush'); el.append(bar, tree);
-    if (p.media.length) el.append(h('p.bin-foot', null, picked.size > 1 ? `그림 ${picked.size}장을 골랐어요. 폴더 이름 위로 끌면 옮겨져요.` : '두 번 누르면 레이어로 올라가요. Ctrl이나 Shift로 여러 장을 골라요.'));
+    if (all.length) el.append(h('p.bin-foot', null, picked.size > 1 ? `그림 ${picked.size}장을 골랐어요. 폴더 이름 위로 끌면 옮겨져요.` : '두 번 누르면 레이어로 올라가요. Ctrl이나 Shift로 여러 장을 골라요.'));
   },
 };
 
 export function registerBinCmds() {
   addCmd({ id: 'file.openFolder', title: '폴더째 넣기…', menu: '파일', keys: 'Ctrl+Shift+I', words: '폴더 불러오기 import', run: () => pick(true) });
   addCmd({ id: 'bin.newFolder', title: '보관함에 새 폴더…', menu: '파일', group: 'bin', run: async () => { const n = await askText('새 폴더 이름', '새 폴더', '만들기'); if (n) newFolder(n); } });
-  addCmd({ id: 'bin.saveAll', title: '보관함 전체를 폴더째 저장…', menu: '파일', group: 'bin', keys: 'Ctrl+Shift+S', words: '내보내기 export zip', enabled: () => state.project.media.length > 0, run: () => saveDialog(state.project.media, { title: '보관함 전체 저장', zipName: state.project.name + '.zip' }) });
-  addCmd({ id: 'bin.strip', title: '모든 그림의 NAI 정보 지우기', menu: '파일', group: 'bin', words: '메타데이터 프롬프트 metadata', enabled: () => state.project.media.some(m => m.meta), run: () => stripAsk(state.project.media, '보관함의 모든') });
+  addCmd({ id: 'bin.saveAll', title: '보관함 전체를 폴더째 저장…', menu: '파일', group: 'bin', keys: 'Ctrl+Shift+S', words: '내보내기 export zip', enabled: () => mediaIn(null).length > 0, run: () => saveDialog(mediaIn(null), { title: '보관함 전체 저장', zipName: state.project.name + '.zip' }) });
+  addCmd({ id: 'bin.strip', title: '모든 그림의 NAI 정보 지우기', menu: '파일', group: 'bin', words: '메타데이터 프롬프트 metadata', enabled: () => mediaIn(null).some(m => m.meta), run: () => stripAsk(mediaIn(null), '보관함의 모든') });
 }

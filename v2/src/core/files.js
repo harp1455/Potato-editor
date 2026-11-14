@@ -137,3 +137,17 @@ export async function saveFiles(files, zipName) {
   download(await makeZip(files.map(f => ({ name: f.name.split('/').map(safe).join('/'), blob: f.blob }))), zipName);
   return 'zip';
 }
+
+// ZIP에서 첫 파일 꺼내기 (NovelAI가 그림을 ZIP에 담아 보내요)
+export async function unzipFirst(buf) {
+  const u = new Uint8Array(buf), dv = new DataView(u.buffer, u.byteOffset, u.byteLength);
+  let e = u.length - 22; while (e >= 0 && dv.getUint32(e, true) !== 0x06054b50) e--;
+  if (e < 0) throw new Error('ZIP이 아니에요');
+  const c = dv.getUint32(e + 16, true);
+  if (dv.getUint32(c, true) !== 0x02014b50) throw new Error('ZIP이 비어 있어요');
+  const method = dv.getUint16(c + 10, true), size = dv.getUint32(c + 20, true), local = dv.getUint32(c + 42, true);
+  const start = local + 30 + dv.getUint16(local + 26, true) + dv.getUint16(local + 28, true), data = u.slice(start, start + size);
+  if (method === 0) return data;
+  if (method !== 8) throw new Error('풀 수 없는 ZIP이에요');
+  return new Uint8Array(await new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer());
+}

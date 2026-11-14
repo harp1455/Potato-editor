@@ -14,6 +14,8 @@ const DEFAULTS = {
   hints: true,
   meta: 'strip',            // 저장할 때 NAI 정보: strip = 지우기, keep = 남기기
   naiToken: '',
+  nai: null,                // NovelAI 패널에 적어 둔 값
+  selOpt: {},               // 고르는 도구 값 (허용 범위, 붓 굵기, 번짐)
 };
 
 let data = { ...DEFAULTS };

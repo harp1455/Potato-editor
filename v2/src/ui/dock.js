@@ -6,21 +6,28 @@ import { PANELS } from './panels.js';
 
 const ZONES = ['left', 'right', 'bottom'];
 const BASE = {
-  image: { left: ['media'], right: ['layers', 'props', 'history'], bottom: [] },
+  image: { left: ['media'], right: ['layers', 'props', 'nai', 'history'], bottom: [] },
   other: { left: ['media'], right: ['history', 'jobs'], bottom: [] },
-  single: { left: ['media', 'history'], right: ['layers', 'props', 'jobs'], bottom: [] },
+  single: { left: ['media', 'history'], right: ['layers', 'props', 'nai', 'jobs'], bottom: [] },
 };
 const SIZE = { left: 232, right: 272, bottom: 180 };
 
 const keyOf = () => settings.get('layoutMode') === 'single' ? 'single' : 'room:' + settings.get('room');
 function fresh() {
   const b = settings.get('layoutMode') === 'single' ? BASE.single : (BASE[settings.get('room')] || BASE.other);
-  const L = {}; ZONES.forEach(z => { L[z] = { tabs: [...b[z]], active: b[z][0] || null, size: SIZE[z] }; });
+  const L = { known: Object.keys(PANELS) }; ZONES.forEach(z => { L[z] = { tabs: [...b[z]], active: b[z][0] || null, size: SIZE[z] }; });
   return L;
 }
 export function layout() {
   const all = settings.get('layouts'), L = all[keyOf()];
-  if (L && ZONES.every(z => L[z] && Array.isArray(L[z].tabs))) { ZONES.forEach(z => { L[z].tabs = L[z].tabs.filter(id => PANELS[id]); }); return L; }
+  if (L && ZONES.every(z => L[z] && Array.isArray(L[z].tabs))) {
+    ZONES.forEach(z => { L[z].tabs = L[z].tabs.filter(id => PANELS[id]); });
+    // 새 버전에서 생긴 패널은 제자리에 한 번 넣어 줘요 (그 뒤로 사용자가 빼면 다시 넣지 않아요)
+    const F = fresh(), known = L.known || ['media', 'layers', 'props', 'history', 'jobs'];
+    ZONES.forEach(z => F[z].tabs.forEach(id => { if (!known.includes(id) && !ZONES.some(y => L[y].tabs.includes(id))) L[z].tabs.push(id); }));
+    L.known = Object.keys(PANELS);
+    return L;
+  }
   return fresh();
 }
 function save(L) { settings.set('layouts', { ...settings.get('layouts'), [keyOf()]: L }); }

@@ -14,7 +14,7 @@ export async function importItems(items, base = null, onStep) {
   return { made, failed };
 }
 
-export const mediaIn = (fid, deep = true) => { const set = fid ? (deep ? folderDesc(fid) : new Set([fid])) : null; return state.project.media.filter(m => set ? set.has(m.folder) : deep || !m.folder); };
+export const mediaIn = (fid, deep = true) => { const set = fid ? (deep ? folderDesc(fid) : new Set([fid])) : null; return state.project.media.filter(m => !m.hidden && (set ? set.has(m.folder) : deep || !m.folder)); };
 
 export function moveMedia(ids, to) {
   const p = state.project; let n = 0;

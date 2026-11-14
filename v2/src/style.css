@@ -233,3 +233,20 @@ body[data-mode="single"] .rail { display: none; }
 .media-meta { position: absolute; right: 6px; top: 6px; width: 7px; height: 7px; border-radius: 50%; background: var(--potato); box-shadow: 0 0 0 2px var(--well); }
 .dlg-sub { font-size: 12px; font-weight: 600; color: var(--dim); margin: 14px 0 8px; }
 .toast.busy { background: var(--raise); color: var(--text); border: 1px solid var(--edge); }
+
+/* 도구 옵션 줄, 고르는 도구 */
+.tool-sep { width: 18px; height: 1px; background: var(--edge); margin: 4px 0; }
+.optbar { display: flex; align-items: center; gap: 12px; height: 32px; padding: 0 8px 0 12px; background: var(--panel); border-bottom: 1px solid var(--line); flex: none; overflow: hidden; white-space: nowrap; }
+.opt-name { color: var(--text); font-weight: 600; }
+.opt { display: flex; align-items: center; gap: 6px; color: var(--dim); } .opt .range { width: 110px; flex: none; }
+.opt-val { min-width: 34px; color: var(--faint); }
+.optbar .btn + .btn { margin-left: -6px; }
+.field-name.w { min-width: 34px; }
+
+/* NovelAI 패널 */
+.stack { display: grid; gap: 4px; align-self: stretch; }
+.text.area { height: auto; padding: 6px; resize: vertical; line-height: 1.5; font: inherit; min-height: 44px; }
+select.text { padding: 0 4px; }
+.btn-row.wide { align-self: stretch; } .btn-row.wide .btn { flex: 1; }
+.nai-busy { color: var(--potato); }
+.link.more { text-decoration: none; }
