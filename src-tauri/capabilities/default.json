@@ -18,6 +18,7 @@
     "fs:allow-exists",
     "fs:allow-stat",
     "fs:allow-read-dir",
+    "fs:allow-read-file",
     "dialog:default",
     "upload:default",
     "process:default",

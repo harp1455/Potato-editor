@@ -1,5 +1,6 @@
 // 영상 작업실 (첫 판): 장면을 이어 붙여 영상·움짤로 내보내요.
 // 장면 = 보관함 그림 + 보여 줄 시간. 글자·넘김 효과·소리·AI 중간 장면은 다음에 옮겨 와요.
+import { logErr } from '../core/errlog.js';
 import { makeFx } from '../legacy/fx.gen.js';
 import { h, icon, drag, clamp } from '../ui/dom.js';
 import { state, commit, emit, uid, ensureBitmap, addMedia, ensureFolder, idb } from '../core/store.js';
@@ -211,7 +212,11 @@ function draw() {
   const k = Math.min((W - 32) / s.w, (H - 32) / s.h), w = Math.max(1, Math.round(s.w * k)), hh = Math.max(1, Math.round(s.h * k));
   cv.style.width = w + 'px'; cv.style.height = hh + 'px';
   if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(hh * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(hh * dpr); }
-  renderSeq(cv.getContext('2d'), s, V.t, cv.width, cv.height);
+  // 한 장을 그리다 문제가 생겨도 다음 장이 밀리거나 틀어지지 않게, 매번 처음 상태에서 그리고 끝나면 되돌려요
+  const g = cv.getContext('2d'); g.setTransform(1, 0, 0, 1, 0, 0); g.globalAlpha = 1; g.globalCompositeOperation = 'source-over'; g.filter = 'none'; g.save();
+  try { renderSeq(g, s, V.t, cv.width, cv.height); }
+  catch (e) { if (!draw.said) { draw.said = true; logErr('영상 미리 보기', '화면을 그리다 문제가 생겼어요.', String(e && e.stack || e).split('\n').slice(0, 4).join(' | ')); } }
+  finally { g.restore(); }
 }
 function tickPlay(now) {
   const s = seqOf(); if (!V.playing || !s) return;
@@ -249,7 +254,7 @@ function exportDialog() {
       await Promise.all(s.scenes.map(x => ensureBitmap(x.mediaId)));
       const audio = F.fmt === 'mp4' ? await audioBuffer(s, total(s)).catch(() => null) : null;
       const blob = await encodeRender({ W: s.w, H: s.h, fps: s.fps, total: total(s), render: (g, t, w, hh) => renderSeq(g, s, t, w, hh) }, F.fmt, { size: F.size, loop: F.loop, quality: 90, audio }, p => b.set(`파일을 만드는 중이에요. ${Math.round(p * 100)}%`));
-      download(blob, `${s.name}.${F.fmt}`); b.done(`'${s.name}.${F.fmt}'로 저장했어요.`);
+      b.done(''); const ok = await download(blob, `${s.name}.${F.fmt}`); if (ok) toast(`'${s.name}.${F.fmt}'로 내보냈어요.`);
     } catch (e) { b.done(String(e && e.message) === 'nomp4' ? '이 컴퓨터에서는 MP4를 만들 수 없어요. WebP나 GIF로 저장해 주세요.' : '파일을 만들지 못했어요. ' + ((e && e.message) || ''), 'err'); }
   })(); } }] });
 }
@@ -262,6 +267,8 @@ export const videoRoom = {
     const bar = h('div.vid-bar'), strip = h('div.vid-strip'), side = h('div.vid-side'), lane = h('div.vid-lane', { 'aria-label': '얹는 그림과 자막이 나오는 때' });
     el.append(h('div.vid-room', null, h('div.vid-top', null, wrap, side), bar, lane, strip));
     strip.addEventListener('scroll', () => { lane.scrollLeft = strip.scrollLeft; });
+    // 창이나 패널 크기가 바뀌면 미리 보기를 그 크기에 맞춰 다시 그려요
+    new ResizeObserver(() => draw()).observe(wrap);
     const ro = new ResizeObserver(draw); ro.observe(wrap);
     const drop = e => { e.preventDefault(); strip.classList.remove('over'); let ids = []; try { ids = JSON.parse(e.dataTransfer.getData('application/x-potato-medias')) || []; } catch (_) { /* 보관함 그림이 아님 */ } if (ids.length) addScenes(ids); };
     strip.addEventListener('dragover', e => { e.preventDefault(); strip.classList.add('over'); }); strip.addEventListener('dragleave', () => strip.classList.remove('over')); strip.addEventListener('drop', drop);

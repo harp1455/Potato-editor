@@ -1,7 +1,7 @@
 // AI 도구: 인물만 고르기, 배경 지우기, 인물·배경 나누기, 화질 키우기. 팩이 없으면 받는 법을 안내해요.
 import { h } from './dom.js';
 import { state, commit, canvasOf, layerOf, addMedia, ensureBitmap, uid } from '../core/store.js';
-import { addCmd } from '../core/cmd.js';
+import { addCmd, run } from '../core/cmd.js';
 import { MAN, PACK_PAGE, canDownload, missingFiles, packGet, packAdd, packState, packDel, idsOfPack, mb } from '../core/packs.js';
 import { runJob, charMask, upscale, samMask, jobs, aiReset } from '../core/ai.js';
 import { sel, selFor, selMask, selBounds } from '../core/select.js';
@@ -123,6 +123,7 @@ export function registerAiCmds(openPacks) {
     const l = layerOf(), bmp = await layerPic(l); say('선을 따는 중', 0.3); aiLine.model = 'F'; aiLine.gain = 1;
     await overlay(l, await legacyAi().aiLineArt({ im: bmp, W: bmp.width, H: bmp.height }, j), l.name + ' 선화'); commit('선화 추출');
   }) });
+  addCmd({ id: 'ai.censorManual', title: '수동 흰칠 (가리기 붓)', menu: 'AI', group: 'cz', words: '모자이크 블러 가리기 직접 칠하기 흰칠', enabled: () => !!canvasOf(), run: () => { if (settings.get('room') !== 'image') settings.set('room', 'image'); run('tool.cover'); toast('가리기 붓이에요. 위쪽 줄에서 흰칠·모자이크·흐리게와 붓·타원·네모를 고른 뒤, 그림 위를 칠하거나 끌어 주세요.'); } });
   // 입체 움짤(8.x에서 옮김): 깊이를 재서 인물과 배경을 따로 움직여요. 미리 본 뒤 영상 작업실로 보내요
   addCmd({ id: 'ai.parallax', title: '입체 움짤 만들기…', menu: 'AI', group: 'fx', words: '패럴랙스 3d 깊이 depth 움직이는 사진', enabled: hasLayer, run: () => job('입체 움짤 준비', ['depth', 'isnet', 'lama'], async (j, say) => {
     const l = layerOf(), bmp = await layerPic(l), k = Math.min(1, 720 / Math.max(bmp.width, bmp.height)), W = Math.round(bmp.width * k), Hh = Math.round(bmp.height * k), A = legacyAi(), src = mk(W, Hh); src.getContext('2d').drawImage(bmp, 0, 0, W, Hh);

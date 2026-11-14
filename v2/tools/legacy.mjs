@@ -37,6 +37,29 @@ patch("if (b && (b.dataset.rgfx || b.dataset.rgfi)) {", "if (b && b.dataset.rgfn
 // (나) 이미지 작업실의 고르는 도구(마법 붓·AI로 고르기 등)로 고른 곳을 '칠한 곳'으로 가져오기
 patch('data-rga="sam" title="대충 칠한 곳을 AI가 물체 윤곽에 맞춰 줘요">AI로 윤곽 맞추기</button>', 'data-rga="sam" title="대충 칠한 곳을 AI가 물체 윤곽에 맞춰 줘요">AI로 윤곽 맞추기</button><button class="btn sm" data-rga="fromsel" title="이미지 작업실에서 마법 붓, 올가미, AI로 고르기로 고른 곳을 칠한 곳으로 가져와요">고른 곳 가져오기</button><button class="btn sm" data-rga="pick2" title="이 창을 잠시 접고, 그림판에서 마법 붓·올가미·AI로 고르기로 고른 뒤 돌아와요">그림판에서 고르기</button>', '윤곽 맞추기 단추');
 patch("else if (act === 'sam') {", "else if (act === 'pick2') { if (from.pickOutside && await from.pickOutside()) { const b2 = document.querySelector('#modalRoot [data-rga=fromsel]'); if (b2) b2.click(); } return; }\n    else if (act === 'fromsel') { const m = from.selMask ? await from.selMask() : null; if (!m) { toast('이미지 작업실에서 고른 곳이 없어요. 창을 닫고 마법 붓이나 AI로 고르기로 먼저 골라 주세요.'); return; } snap(); if (!st.pm) st.pm = newCanvas(Math.round(rig.W / 2), Math.round(rig.H / 2)); const g = st.pm.getContext('2d'); g.clearRect(0, 0, st.pm.width, st.pm.height); g.drawImage(m, 0, 0, st.pm.width, st.pm.height); g.globalCompositeOperation = 'source-in'; g.fillStyle = 'rgb(255,60,160)'; g.fillRect(0, 0, st.pm.width, st.pm.height); g.globalCompositeOperation = 'source-over'; st.pmAny = true; renderSide(); dirty(); toast('고른 곳을 가져왔어요. 붓으로 더 다듬거나 바로 떼어 낼 수 있어요.'); }\n    else if (act === 'sam') {", '윤곽 맞추기 처리');
+// 2.0에서 더한 것: 눌러서 고르기. 부위를 한 번 누르면 AI가 그 부위의 윤곽을 잡아 칠해 줘요. 더 누르면 넓어지고, Alt를 누른 채 누르면 그 자리는 빠져요.
+patch("/* ---- 메운 자리를 더 좋은 그림으로:", `// 누른 점들(P = [[x, y, 1(여기) 또는 0(여기는 빼기)], …])로 윤곽을 물어봐요
+async function rgSamPoints(rig, P, tk) {
+  const { W, H } = rig, E = await rgSamEnc(rig, tk), { s, tw, th } = E, plane = tw * th;
+  const r = await rgSamAsk(E, P.map(p => [p[0] * s, p[1] * s, p[2]]), null), m = r.m; let best = -1, bs = -1;
+  for (let k = 0; k < r.nm; k++) { let a = 0, ok = true; for (let i = 0; i < plane; i++) if (m[k * plane + i] > 0) a++; if (!a || a > plane * 0.9) continue;
+    for (const p of P) { const v = m[k * plane + clamp(Math.round(p[1] * s), 0, th - 1) * tw + clamp(Math.round(p[0] * s), 0, tw - 1)] > 0; if (v !== !!p[2]) ok = false; }   // 누른 점의 뜻(여기 / 빼기)을 지키는 후보를 먼저
+    const sc = (r.iou ? r.iou[k] : 0) + (ok ? 1 : 0); if (sc > bs) { bs = sc; best = k; } }
+  if (best < 0) return null;
+  const bin = new Uint8Array(plane); for (let i = 0; i < plane; i++) bin[i] = m[best * plane + i] > 0 ? 1 : 0;
+  return rgUpMask(bin, tw, th, W, H);
+}
+/* ---- 메운 자리를 더 좋은 그림으로:`, '눌러서 고르기 계산');
+patch(`data-rgb="sub" title="Alt를 누른 채 칠해도 돼요">지우기</button>`, `data-rgb="sub" title="Alt를 누른 채 칠해도 돼요">지우기</button><button class="btn sm \${st.brush === 'click' ? 'on' : ''}" data-rgb="click" title="떼고 싶은 부위를 한 번 누르면 AI가 그 부위의 윤곽을 잡아 칠해 줘요. 모자라면 더 눌러 넓히고, Alt를 누른 채 누르면 그 자리는 빠져요. 다 되면 떼어 내기를 눌러요">눌러서 고르기</button>`, '눌러서 고르기 단추');
+patch("    if (st.mode === 'part') { const smart = st.brush === 'smart'", `    if (st.mode === 'part' && st.brush === 'click') {
+      if (!st.pmAny || !st.pts) st.pts = []; st.pts.push([q.x, q.y, e.altKey ? 0 : 1]); const P = st.pts.slice();
+      if (!P.some(p => p[2])) { st.pts.pop(); toast('먼저 떼고 싶은 부위를 눌러 주세요. Alt를 누른 채 누르는 것은 빼고 싶은 자리예요.'); return; }
+      busy('AI가 누른 곳의 윤곽을 찾는 중…', async tk => { const N = await rgSamPoints(rig, P, tk); if (!N) { st.pts.pop(); toast('윤곽을 찾지 못했어요. 조금 옆을 눌러 보세요.'); return; } if (!st.pm) st.pm = newCanvas(Math.round(rig.W / 2), Math.round(rig.H / 2)); pmFrom(N); });
+      return;
+    }
+    if (st.mode === 'part') { const smart = st.brush === 'smart'`, '눌러서 고르기 누르기');
+patch("      if (st.pmTmp && st.tmpAny) { g.save(); g.globalAlpha = 0.22;", `      if (st.brush === 'click' && st.pts && st.pmAny) for (const p of st.pts) { g.beginPath(); g.arc(X(p[0]), Y(p[1]), 5 * d, 0, 7); g.fillStyle = p[2] ? '#35c46a' : '#e5484d'; g.fill(); g.strokeStyle = '#fff'; g.lineWidth = 1.5 * d; g.stroke(); }
+      if (st.pmTmp && st.tmpAny) { g.save(); g.globalAlpha = 0.22;`, '눌러서 고르기 점 표시');
 // 2.0에서 더한 것: 겹친 다리 떼기. 두 다리가 서로(또는 몸에) 겹쳐 한 덩어리로 보이면, 한쪽 다리를 따로 떼어요.
 patch("  return made;\n}\n// 그림을 SAM(윤곽 AI)에 한 번 읽혀 두기", `  return made;
 }

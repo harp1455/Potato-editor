@@ -111,14 +111,36 @@ export async function makeZip(files) {
   end.setUint32(0, 0x06054b50, true); end.setUint16(8, files.length, true); end.setUint16(10, files.length, true); end.setUint32(12, csize, true); end.setUint32(16, off, true);
   return new Blob([...parts, ...central, end.buffer], { type: 'application/zip' });
 }
-export function download(blob, name) {
-  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+// 설치판(Tauri)인지: 설치판은 브라우저식 내려받기가 먹지 않아서, 저장 창을 띄워 직접 파일을 써요
+const appApi = () => { const T = window.__TAURI__; return T && T.dialog && T.fs ? T : null; };
+// 파일 하나 저장. 설치판: 저장할 곳을 묻는 창 → 그 자리에 저장. HTML판: 브라우저의 내려받기. 결과: true | false(취소·실패)
+export async function download(blob, name) {
+  const T = appApi();
+  if (!T) { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 5000); return true; }
+  const { toast } = await import('../ui/overlay.js'), ext = (String(name).match(/\.([A-Za-z0-9]+)$/) || [])[1];
+  let path = null;
+  try { path = await T.dialog.save({ defaultPath: safe(name), filters: ext ? [{ name: ext.toUpperCase() + ' 파일', extensions: [ext] }] : [] }); }
+  catch (e) { toast('저장 창을 열지 못했어요. (' + String((e && e.message) || e).slice(0, 80) + ')', 'err'); return false; }
+  if (!path) return false;
+  try { await T.fs.writeFile(path, new Uint8Array(await blob.arrayBuffer())); toast(`저장했어요: ${path}`); return true; }
+  catch (e) { toast('파일을 저장하지 못했어요. (' + String((e && e.message) || e).slice(0, 80) + ')', 'err'); return false; }
 }
 const safe = s => String(s).replace(/[\\:*?"<>|]/g, '_').trim() || '이름 없음';
 // files = [{ name: '폴더/하위/그림.png', blob }]. 폴더를 고를 수 있으면 그 안에 폴더 모양 그대로, 아니면 ZIP 하나로.
 // 결과: 'dir' | 'zip' | false(취소)
 export async function saveFiles(files, zipName) {
+  const T = appApi();
+  if (T) {   // 설치판: 폴더를 골라 그 안에 바로 (하위 폴더 그대로)
+    let dir = null; try { dir = await T.dialog.open({ directory: true, recursive: true, title: '저장할 폴더 고르기' }); } catch (_) { /* 아래에서 취소로 봄 */ }
+    if (!dir) return false;
+    for (const f of files) {
+      const segs = String(f.name).split('/').map(safe), leaf = segs.pop(); let sub = dir; for (const sg of segs) sub = await T.path.join(sub, sg);
+      if (sub !== dir) await T.fs.mkdir(sub, { recursive: true });
+      let p = await T.path.join(sub, leaf), n = 2; while (await T.fs.exists(p)) p = await T.path.join(sub, leaf.replace(/(\.[^.]+)?$/, m => `(${n++})${m}`));
+      await T.fs.writeFile(p, new Uint8Array(await f.blob.arrayBuffer()));
+    }
+    return 'dir';
+  }
   if (window.showDirectoryPicker) {
     let root;
     try { root = await window.showDirectoryPicker({ mode: 'readwrite' }); }

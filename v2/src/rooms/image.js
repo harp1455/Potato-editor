@@ -1,5 +1,5 @@
 // 이미지 작업실: 그림판에 레이어를 올리고, 옮기고, 고르고, 고쳐요.
-import { PAINT_TOOLS, SHAPES, paintDown, paintOpt, setPaint, drawPaintDraft } from './paint.js';
+import { PAINT_TOOLS, SHAPES, COVERS, COVER_SHAPES, paintDown, paintOpt, setPaint, drawPaintDraft } from './paint.js';
 import { h, icon, clamp, drag } from '../ui/dom.js';
 import { state, commit, emit, tick, canvasOf, layerOf, newCanvas, addLayer, addMedia, uid, ensureBitmap } from '../core/store.js';
 import { settings } from '../core/settings.js';
@@ -203,7 +203,7 @@ function drawSel(dpr) {
   ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(ring, 0, 0); ctx.restore();
 }
 function drawDraft(g) {
-  if (view.draft && view.draft.kind === 'shape') return drawPaintDraft(g, view.draft);
+  if (view.draft && (view.draft.kind === 'shape' || view.draft.kind === 'cover')) return drawPaintDraft(g, view.draft);
   const d = view.draft; if (!d) return;
   g.save(); g.lineWidth = 1 / view.zoom; g.strokeStyle = '#eaf4ff'; g.setLineDash([4 / view.zoom, 3 / view.zoom]);
   const path = () => { g.beginPath(); d.pts.forEach((p, i) => i ? g.lineTo(p.x, p.y) : g.moveTo(p.x, p.y)); };
@@ -394,7 +394,7 @@ export const imageRoom = {
           selMagic(op, await flatten(c), d.pts, size, opt('spread', 35));
         });
       }
-      if (PAINT_TOOLS.some(t => t.id === tool)) return paintDown(e, c, p, tool, { view, at, draw, drag, layerFromBlob });
+      if (PAINT_TOOLS.some(t => t.id === tool)) return paintDown(e, c, p, tool, { view, at, draw, drag, layerFromBlob, flatten });
       const cur = layerOf();
       if (cur && !cur.locked && tool === 'move') { const q = toLocal(cur, p), r = 8 / view.zoom;
         if (Math.abs(q.x - q.w / 2) <= r && Math.abs(q.y + 22 / view.zoom) <= r) {   // 돌리기 손잡이. Shift를 누르면 15도씩
@@ -465,7 +465,9 @@ export const imageRoom = {
           t.id === 'wand' && h('label.check', null, h('input', { type: 'checkbox', checked: opt('contig', true), onchange: e => setOpt('contig', e.target.checked) }), '이어진 곳만'),
           t.id === 'magic' && range('붓 굵기', 'size', 6, 120, 28, 'px'),
           t.id === 'magic' && range('번짐', 'spread', 0, 100, 35, ''),
-          ...(PAINT_TOOLS.some(x => x.id === t.id) && t.id !== 'text' ? (() => { const o = paintOpt(), rg = (label, k, min, max, unit) => { const out = h('span.opt-val', null, o[k] + unit); return h('label.opt', null, h('span', null, label), h('input.range', { type: 'range', min, max, value: o[k], 'aria-label': label, oninput: e => { setPaint(k, +e.target.value); out.textContent = e.target.value + unit; } }), out); };
+          ...(t.id === 'cover' ? (() => { const o = paintOpt(), pick = (label, k, list) => h('select.text', { 'aria-label': label, style: 'width:auto', onchange: e => { setPaint(k, e.target.value); emit(); } }, list.map(([v, tt]) => h('option', { value: v, selected: o[k] === v }, tt))), rg = (label, k, min, max, unit) => { const out = h('span.opt-val', null, o[k] + unit); return h('label.opt', null, h('span', null, label), h('input.range', { type: 'range', min, max, value: o[k], 'aria-label': label, oninput: e => { setPaint(k, +e.target.value); out.textContent = e.target.value + unit; } }), out); };
+            return [pick('가리는 방식', 'cover', COVERS), pick('가리는 모양', 'cshape', COVER_SHAPES), o.cover === 'white' && h('label.opt', null, h('span', null, '색'), h('input', { type: 'color', value: o.ccolor, 'aria-label': '흰칠 색', onchange: e => setPaint('ccolor', e.target.value) })), o.cshape === 'brush' && rg('굵기', 'csize', 4, 400, 'px'), rg('가장자리 부드럽게', 'csoft', 0, 100, '%')]; })() : []),
+          ...(PAINT_TOOLS.some(x => x.id === t.id) && t.id !== 'text' && t.id !== 'cover' ? (() => { const o = paintOpt(), rg = (label, k, min, max, unit) => { const out = h('span.opt-val', null, o[k] + unit); return h('label.opt', null, h('span', null, label), h('input.range', { type: 'range', min, max, value: o[k], 'aria-label': label, oninput: e => { setPaint(k, +e.target.value); out.textContent = e.target.value + unit; } }), out); };
             return [t.id === 'shape' && h('select.text', { 'aria-label': '도형 모양', style: 'width:auto', onchange: e => { setPaint('shape', e.target.value); emit(); } }, SHAPES.map(([v, tt]) => h('option', { value: v, selected: o.shape === v }, tt))),
               t.id !== 'eraser' && h('label.opt', null, h('span', null, '색'), h('input', { type: 'color', value: o.color, 'aria-label': '그리는 색', onchange: e => setPaint('color', e.target.value) })),
               rg('굵기', 'size', 1, 200, 'px'), t.id !== 'eraser' && rg('진하기', 'alpha', 5, 100, '%'),

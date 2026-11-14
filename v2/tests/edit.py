@@ -142,7 +142,15 @@ with sync_playwright() as pw:
     assert P(page, PX + "(70, 60)")[3] == 0 and P(page, PX + "(150, 60)")[3] == 255
     page.keyboard.press('u'); c1 = P(page, D2S + "(40, 150)"); c2 = P(page, D2S + "(120, 200)"); page.mouse.move(vb['x'] + c1[0], vb['y'] + c1[1]); page.mouse.down(); m2 = P(page, C0 + ".layers.find(l => l.paint).mediaId"); page.mouse.move(vb['x'] + c2[0], vb['y'] + c2[1], steps=4); page.mouse.up(); page.wait_for_function(C0 + ".layers.find(l => l.paint).mediaId !== '%s'" % m2); page.wait_for_timeout(200)
     assert P(page, PX + "(80, 175)")[0] > 240 and P(page, C0 + ".layers.length") == nl + 1; shot(page, '32e-paint')
-    for _ in range(3): page.keyboard.press('Control+z')
+    # 가리기 붓(수동 흰칠): 타원으로 끌면 그 자리가 흰색으로 덮여요. 모자이크도 돼요
+    P(page, "__potato.settings.set('paint', { color: '#ff0000', size: 20, alpha: 100, shape: 'rect', fill: true, cover: 'white', cshape: 'ellipse', csize: 40, ccolor: '#ffffff', csoft: 0 })"); page.keyboard.press('k')
+    k1 = P(page, D2S + "(200, 40)"); k2 = P(page, D2S + "(280, 100)"); m3 = P(page, C0 + ".layers.find(l => l.paint).mediaId")
+    page.mouse.move(vb['x'] + k1[0], vb['y'] + k1[1]); page.mouse.down(); page.mouse.move(vb['x'] + k2[0], vb['y'] + k2[1], steps=4); page.mouse.up(); page.wait_for_function(C0 + ".layers.find(l => l.paint).mediaId !== '%s'" % m3); page.wait_for_timeout(200)
+    kp = P(page, PX + "(240, 70)"); assert kp[0] > 250 and kp[1] > 250 and kp[2] > 250 and kp[3] == 255, kp; assert P(page, PX + "(202, 42)")[3] == 0   # 타원 바깥 모서리는 안 덮여요
+    P(page, "__potato.settings.set('paint', { ...__potato.settings.get('paint'), cover: 'mosaic', cshape: 'rect' })"); m4 = P(page, C0 + ".layers.find(l => l.paint).mediaId")
+    k3 = P(page, D2S + "(200, 120)"); k4 = P(page, D2S + "(260, 170)"); page.mouse.move(vb['x'] + k3[0], vb['y'] + k3[1]); page.mouse.down(); page.mouse.move(vb['x'] + k4[0], vb['y'] + k4[1], steps=4); page.mouse.up(); page.wait_for_function(C0 + ".layers.find(l => l.paint).mediaId !== '%s'" % m4); page.wait_for_timeout(200)
+    assert P(page, PX + "(230, 145)")[3] == 255; shot(page, '32f-cover')
+    for _ in range(5): page.keyboard.press('Control+z')
     assert P(page, C0 + ".layers.length") == nl; page.keyboard.press('v')
     # 자유 변형(8.x에서 옮김): 그림판을 90도 돌리면 가로세로가 바뀌고, 한 번 더 반대로 돌리면 돌아와요
     wh0 = P(page, "[%s.w, %s.h]" % (C0, C0)); l0 = P(page, C0 + ".layers[0]"); P(page, "__potato.run('canvas.turnR')"); assert P(page, "[%s.w, %s.h]" % (C0, C0)) == wh0[::-1] and P(page, C0 + ".layers[0].rot") == (l0['rot'] + 90) % 360

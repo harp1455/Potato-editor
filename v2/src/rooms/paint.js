@@ -6,12 +6,14 @@ import { dialog } from '../ui/overlay.js';
 
 export const PAINT_TOOLS = [
   { id: 'brush', title: '붓', key: 'P', icon: 'brush', hint: '끌어서 그려요. 그린 것은 그리기 레이어에 들어가요. Shift를 누르고 누르면 앞서 찍은 곳에서 곧은 선으로 이어져요.' },
+  { id: 'cover', title: '가리기 붓 (수동 흰칠)', key: 'K', icon: 'cover', hint: '칠하거나 끌어서 가려요. 흰칠, 모자이크, 흐리게 중에서 고르고, 붓으로 칠하거나 타원으로 끌 수 있어요. 가린 것은 그리기 레이어에 들어가서 원래 그림은 그대로예요.' },
   { id: 'eraser', title: '지우개', key: 'X', icon: 'eraser', hint: '그리기 레이어에 그린 것을 지워요. 원래 그림은 지워지지 않아요.' },
   { id: 'shape', title: '도형', key: 'U', icon: 'shape', hint: '끌어서 네모, 동그라미, 선, 화살표를 그려요. Shift를 누르면 반듯한 모양이 돼요.' },
   { id: 'text', title: '글자', key: 'T', icon: 'text', hint: '누른 자리에 글자를 넣어요. 글자는 따로 레이어가 돼서 옮기고 크기를 바꿀 수 있어요.' },
 ];
+export const COVERS = [['white', '흰칠'], ['mosaic', '모자이크'], ['blur', '흐리게']], COVER_SHAPES = [['brush', '붓으로 칠하기'], ['ellipse', '타원으로 끌기'], ['rect', '네모로 끌기']];
 export const SHAPES = [['rect', '네모'], ['ellipse', '동그라미'], ['line', '선'], ['arrow', '화살표']];
-const P = () => ({ color: '#111111', size: 12, alpha: 100, shape: 'rect', fill: false, tsize: 64, tstroke: '#ffffff', tsw: 0, ...(settings.get('paint') || {}) });
+const P = () => ({ color: '#111111', size: 12, alpha: 100, shape: 'rect', fill: false, cover: 'white', cshape: 'brush', csize: 40, ccolor: '#ffffff', csoft: 20, tsize: 64, tstroke: '#ffffff', tsw: 0, ...(settings.get('paint') || {}) });
 export const paintOpt = P, setPaint = (k, v) => settings.set('paint', { ...P(), [k]: v });
 let lastPt = null, strokes = 0;
 
@@ -45,7 +47,28 @@ function drawShape(g, kind, a, b, o, k = 1) {
   g.restore();
 }
 // 도형을 끄는 동안의 미리 보기 (그림판 좌표)
-export function drawPaintDraft(g, d) { if (d && d.kind === 'shape') drawShape(g, d.shape, d.a, d.b, d.o); }
+export function drawPaintDraft(g, d) {
+  if (d && d.kind === 'shape') return drawShape(g, d.shape, d.a, d.b, d.o);
+  if (d && d.kind === 'cover') { g.save(); g.globalAlpha = 0.55; coverPath(g, d, d.o.cover === 'white' ? d.o.ccolor : '#4b9fe8'); g.restore(); }
+}
+// 가릴 곳의 모양을 칠해요 (붓 자국·타원·네모). 그림판 좌표
+function coverPath(g, d, color) {
+  g.fillStyle = g.strokeStyle = color; g.lineCap = g.lineJoin = 'round'; g.lineWidth = d.o.csize;
+  if (d.o.cshape === 'brush') { g.beginPath(); g.arc(d.pts[0].x, d.pts[0].y, d.o.csize / 2, 0, Math.PI * 2); g.fill(); g.beginPath(); g.moveTo(d.pts[0].x, d.pts[0].y); for (const q of d.pts) g.lineTo(q.x, q.y); g.stroke(); }
+  else { const a = d.pts[0], b = d.pts[d.pts.length - 1]; g.beginPath(); if (d.o.cshape === 'ellipse') g.ellipse((a.x + b.x) / 2, (a.y + b.y) / 2, Math.abs(b.x - a.x) / 2, Math.abs(b.y - a.y) / 2, 0, 0, Math.PI * 2); else g.rect(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.abs(b.x - a.x), Math.abs(b.y - a.y)); g.fill(); }
+}
+// 가리기: 모양대로 흰칠·모자이크·흐림을 만들어 그리기 레이어에 얹어요
+async function applyCover(c, d, flatten) {
+  const o = d.o, m = document.createElement('canvas'); m.width = c.w; m.height = c.h; const mg = m.getContext('2d'); if (o.csoft > 0) mg.filter = `blur(${(o.csize * o.csoft / 200).toFixed(1)}px)`; coverPath(mg, d, '#000');
+  const out = document.createElement('canvas'); out.width = c.w; out.height = c.h; const g = out.getContext('2d');
+  if (o.cover === 'white') { g.fillStyle = o.ccolor; g.fillRect(0, 0, c.w, c.h); }
+  else { const src = await flatten(c), size = Math.max(6, Math.round(Math.max(c.w, c.h) / (o.cover === 'mosaic' ? 60 : 50)));
+    if (o.cover === 'mosaic') { const sm = document.createElement('canvas'); sm.width = Math.max(1, Math.round(c.w / size)); sm.height = Math.max(1, Math.round(c.h / size)); sm.getContext('2d').drawImage(src, 0, 0, sm.width, sm.height); g.imageSmoothingEnabled = false; g.drawImage(sm, 0, 0, c.w, c.h); }
+    else { g.filter = `blur(${size}px)`; g.drawImage(src, 0, 0); g.filter = 'none'; } }
+  g.globalCompositeOperation = 'destination-in'; g.drawImage(m, 0, 0);
+  const S = await begin(c); S.g.save(); S.g.setTransform(S.k, 0, 0, S.k, -S.l.x * S.k, -S.l.y * S.k); S.g.drawImage(out, 0, 0); S.g.restore();
+  await S.done({ white: '흰칠', mosaic: '모자이크로 가리기', blur: '흐리게 가리기' }[o.cover]);
+}
 
 function textDialog(c, p, layerFromBlob) {
   const o = P(), ta = h('textarea.text.area', { rows: 3, 'aria-label': '넣을 글자', placeholder: '여기에 글자를 적어요' });
@@ -67,6 +90,10 @@ function textDialog(c, p, layerFromBlob) {
 export async function paintDown(e, c, p, tool, api) {
   const o = P(), { view, at, draw, drag } = api;
   if (tool === 'text') return textDialog(c, p, api.layerFromBlob);
+  if (tool === 'cover') {
+    const d = view.draft = { kind: 'cover', pts: [p], o }; let moved = o.cshape === 'brush';
+    return drag(e, ev => { const q = at(ev); d.pts.push(q); moved = true; draw(); }, async () => { view.draft = null; const a = d.pts[0], b = d.pts[d.pts.length - 1]; if (!moved || (o.cshape !== 'brush' && Math.hypot(b.x - a.x, b.y - a.y) < 3)) { draw(); return; } await applyCover(c, d, api.flatten); });
+  }
   if (tool === 'shape') {
     view.draft = { kind: 'shape', shape: o.shape, a: p, b: p, o }; let moved = false;
     return drag(e, ev => { let q = at(ev); if (ev.shiftKey) { const dx = q.x - p.x, dy = q.y - p.y; if (o.shape === 'line' || o.shape === 'arrow') { const an = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * Math.PI / 4, L = Math.hypot(dx, dy); q = { x: p.x + Math.cos(an) * L, y: p.y + Math.sin(an) * L }; } else { const m = Math.max(Math.abs(dx), Math.abs(dy)); q = { x: p.x + Math.sign(dx || 1) * m, y: p.y + Math.sign(dy || 1) * m }; } } view.draft.b = q; moved = true; draw(); },
