@@ -15,7 +15,7 @@ if (/<\/script/i.test(js)) throw new Error('묶은 코드 안에 </script 가 �
 // AI 실행 도구(onnxruntime-web, MIT)를 일꾼에서 바로 쓸 수 있는 모양으로 바꿔 같이 넣어요
 mkdirSync(join(here, '..', 'dist'), { recursive: true });
 const ortOut = join(here, '..', 'dist', '.ort_classic.js');
-execFileSync('python3', ['-I', join(here, '..', 'tools', 'ort_classic.py'), join(here, '..', 'vendor', 'ort', 'ort.webgpu.bundle.min.mjs'), ortOut], { stdio: 'ignore' });
+execFileSync(process.env.PYTHON || (process.platform === 'win32' ? 'python' : 'python3'), ['-I', join(here, '..', 'tools', 'ort_classic.py'), join(here, '..', 'vendor', 'ort', 'ort.webgpu.bundle.min.mjs'), ortOut], { stdio: 'ignore' });
 const ort = readFileSync(ortOut, 'utf8');
 for (const bad of ['</script', '<!--', '<script']) if (ort.toLowerCase().includes(bad)) throw new Error('실행 도구 안에 ' + bad + ' 가 있어요');
 const notice = readFileSync(join(here, '..', 'tools', 'notice.txt'), 'utf8').trim();

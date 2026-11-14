@@ -1,0 +1,94 @@
+# 감자 편집기 2.0 미리보기판 내기: v2 가지에서 v2/package.json의 version을 올려 올리면,
+# 그 버전(v2.0.0-alpha.4 등) 릴리스가 아직 없을 때 윈도우 설치 파일과 HTML판을 만들어 '사전 릴리스'로 올려요.
+# 사전 릴리스라서 8.x의 자동 업데이트(최신 정식 릴리스를 봄)에는 영향을 주지 않아요.
+# 설치판은 이름과 식별자가 달라서('감자 편집기 2') 8.x와 나란히 설치돼요.
+name: release-v2
+on:
+  push:
+    branches: [v2]
+    paths: ['v2/package.json', '.github/workflows/release-v2.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.v.outputs.tag }}
+      version: ${{ steps.v.outputs.version }}
+      skip: ${{ steps.v.outputs.skip }}
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        run: |
+          version="$(python3 -c "import json; print(json.load(open('v2/package.json'))['version'])")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"; echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          if gh release view "v$version" -R "${{ github.repository }}" >/dev/null 2>&1; then echo "skip=1" >> "$GITHUB_OUTPUT"; echo "v$version 릴리스가 이미 있어요"; fi
+  test:
+    needs: check
+    if: needs.check.outputs.skip != '1'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm --prefix v2 ci && node v2/build.mjs
+      - run: pip install playwright && python -m playwright install --with-deps chrome
+      - run: cd v2 && python tests/smoke.py && python tests/bin.py && python tests/edit.py
+  windows:
+    needs: [check, test]
+    runs-on: windows-latest
+    env:
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm ci
+      - name: 2.0 설정 만들기 (버전 넣기)
+        shell: bash
+        run: |
+          python -c "import json; c=json.load(open('src-tauri/v2.conf.json',encoding='utf-8')); c['version']='${{ needs.check.outputs.version }}'; json.dump(c,open('src-tauri/v2.build.json','w',encoding='utf-8'),ensure_ascii=False)"
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ needs.check.outputs.tag }}
+          releaseCommitish: ${{ github.sha }}
+          releaseName: 감자 편집기 ${{ needs.check.outputs.tag }} (미리보기판)
+          releaseBody: |
+            감자 편집기 2.0을 만드는 중에 내는 미리보기판이에요. 8.x와 따로 설치되고, 작업도 따로 보관돼요.
+            아직 옮기지 않은 기능은 8.x에서 써 주세요.
+          releaseDraft: false
+          prerelease: true
+          assetNamePattern: PotatoEditor2_[version]_[arch][setup][ext]
+          args: --config src-tauri/v2.build.json
+  html:
+    needs: [check, windows]
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm --prefix v2 ci && node v2/build.mjs
+      - name: HTML판 올리기
+        run: |
+          cp "dist/감자편집기2.html" "dist/PotatoEditor2_${{ needs.check.outputs.tag }}_html.html"
+          gh release upload "${{ needs.check.outputs.tag }}" "dist/PotatoEditor2_${{ needs.check.outputs.tag }}_html.html" --clobber -R "${{ github.repository }}"

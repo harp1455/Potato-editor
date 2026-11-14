@@ -1,0 +1,18 @@
+{
+  "productName": "감자 편집기 2",
+  "mainBinaryName": "potato-editor-2",
+  "identifier": "com.harp1455.potatoeditor2",
+  "build": {
+    "frontendDist": "../dist/v2",
+    "beforeBuildCommand": "npm --prefix v2 ci && node v2/build.mjs"
+  },
+  "app": {
+    "windows": [
+      { "label": "main", "title": "감자 편집기 2", "width": 1440, "height": 900, "minWidth": 900, "minHeight": 600, "center": true, "dragDropEnabled": false, "maximized": true }
+    ]
+  },
+  "bundle": {
+    "createUpdaterArtifacts": false,
+    "shortDescription": "감자 편집기 2.0 (미리보기판)"
+  }
+}
