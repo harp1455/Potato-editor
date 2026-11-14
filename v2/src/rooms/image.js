@@ -18,6 +18,7 @@ const TOOLS = [
   { id: 'lasso', title: '올가미', key: 'L', icon: 'lasso', sel: 1, hint: '원하는 모양을 따라 그리면 그 안이 골라져요. Shift를 누르면 더하고, Alt를 누르면 빼요.' },
   { id: 'wand', title: '비슷한 색 고르기', key: 'W', icon: 'wand', sel: 1, hint: '누른 곳과 비슷한 색이 이어진 곳을 골라요. 위의 허용 범위로 넓이를 정해요.' },
   { id: 'magic', title: '마법 붓', key: 'B', icon: 'magic', sel: 1, hint: '펜처럼 그으면 그 둘레의 비슷한 곳을 선(경계)까지 골라요. Shift를 누르면 더하고, Alt를 누르면 빼요.' },
+  { id: 'sam', title: 'AI로 고르기', key: 'A', icon: 'aiSel', sel: 1, hint: '고르고 싶은 것을 누르면 AI가 외곽선을 따요. Shift를 누르고 누르면 같은 것에 점을 더하고, Alt를 누르고 누르면 그 자리는 빼요. 끌면 그 상자 안에서 찾아요.' },
   { id: 'hand', title: '화면 옮기기', key: 'H', icon: 'hand', hint: '끌어서 화면을 옮겨요. 다른 도구를 쓰는 중에도 Space를 누르고 끌면 돼요.' },
   { id: 'zoom', title: '확대', key: 'Z', icon: 'zoom', hint: '눌러서 확대, Alt를 누르고 눌러서 축소해요. 마우스 휠로도 돼요.' },
 ];
@@ -239,6 +240,18 @@ export const imageRoom = {
       const p = toDoc(sx, sy), tool = view.tool, op = e.altKey ? 'sub' : e.shiftKey ? 'add' : 'new';
       if (toolOf().sel) {
         selFor(c);
+        if (tool === 'sam') {
+          // 누르기 = 점 하나, 끌기 = 상자. Shift·Alt는 지금 고르던 것에 '이것'·'아님' 점을 더해요
+          view.draft = { kind: 'rect', x: p.x, y: p.y, w: 0, h: 0 };
+          return drag(e, ev => { const q = at(ev); Object.assign(view.draft, { x: Math.min(p.x, q.x), y: Math.min(p.y, q.y), w: Math.abs(q.x - p.x), h: Math.abs(q.y - p.y) }); draw(); }, () => {
+            const d = view.draft; view.draft = null; draw();
+            const isBox = d.w * view.zoom > 6 && d.h * view.zoom > 6;
+            if (op === 'new' || isBox || !samPick || samPick.id !== c.id) samPick = { id: c.id, pts: [], box: null };
+            if (isBox) samPick.box = [d.x, d.y, d.x + d.w, d.y + d.h]; else samPick.pts.push([p.x, p.y, op === 'sub' ? 0 : 1]);
+            if (!samPick.pts.some(q => q[2] === 1) && !samPick.box) { samPick = null; return; }
+            run('sel.sam');
+          });
+        }
         if (tool === 'wand') return flatten(c).then(img => selWand(op, img, p.x, p.y, opt('tol', 20), opt('contig', true)));
         if (tool === 'rect' || tool === 'ellipse') {
           view.draft = { kind: tool, x: p.x, y: p.y, w: 0, h: 0 };
@@ -316,6 +329,7 @@ export const imageRoom = {
           h('span.grow'),
           sel.any && h('button.btn.small', { onclick: () => run('sel.toLayer') }, '새 레이어로'),
           sel.any && h('button.btn.small', { onclick: () => run('sel.erase') }, '지우기'),
+          sel.any && h('button.btn.small', { title: '고른 곳을 둘레에 어울리게 메워요', onclick: () => run('ai.erase') }, 'AI로 지우기'),
           sel.any && h('button.btn.small', { onclick: () => run('sel.invert') }, '반대로'),
           sel.any && h('button.btn.small', { onclick: () => run('sel.none') }, '고르기 풀기'),
         ].filter(Boolean)));
@@ -336,6 +350,7 @@ export const imageRoom = {
   zoomText: () => canvasOf() ? Math.round(view.zoom * 100) + '%' : '',
 };
 
+export let samPick = null;   // 'AI로 고르기'로 찍은 점들과 상자
 let menuItem = id => ({ label: id, run() {} });
 export const setMenuItem = f => { menuItem = f; };
 

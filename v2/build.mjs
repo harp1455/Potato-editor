@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const version = JSON.parse(readFileSync(join(here, 'package.json'), 'utf8')).version;
+execFileSync(process.execPath, [join(here, 'tools', 'legacy.mjs')], { stdio: 'inherit' });
 const out = await build({ entryPoints: [join(here, 'src/main.js')], bundle: true, format: 'iife', target: 'es2020', write: false, charset: 'utf8', define: { __VERSION__: JSON.stringify(version), __PACKS__: readFileSync(join(here, 'packs.json'), 'utf8') } });
 const js = out.outputFiles[0].text;
 if (/<\/script/i.test(js)) throw new Error('묶은 코드 안에 </script 가 있어요');
@@ -19,7 +20,7 @@ execFileSync(process.env.PYTHON || (process.platform === 'win32' ? 'python' : 'p
 const ort = readFileSync(ortOut, 'utf8');
 for (const bad of ['</script', '<!--', '<script']) if (ort.toLowerCase().includes(bad)) throw new Error('실행 도구 안에 ' + bad + ' 가 있어요');
 const notice = readFileSync(join(here, '..', 'tools', 'notice.txt'), 'utf8').trim();
-const css = readFileSync(join(here, 'src/style.css'), 'utf8');
+const css = readFileSync(join(here, 'src/style.css'), 'utf8') + '\n' + readFileSync(join(here, 'src/legacy/rig.gen.css'), 'utf8') + '\n' + readFileSync(join(here, 'src/legacy/legacy.css'), 'utf8');
 const html = `<!doctype html>
 <html lang="ko">
 <head>

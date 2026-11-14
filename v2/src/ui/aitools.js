@@ -3,9 +3,10 @@ import { h } from './dom.js';
 import { state, commit, canvasOf, layerOf, addMedia, ensureBitmap, uid } from '../core/store.js';
 import { addCmd } from '../core/cmd.js';
 import { MAN, PACK_PAGE, canDownload, missingFiles, packGet, packAdd, packState, packDel, idsOfPack, mb } from '../core/packs.js';
-import { runJob, charMask, upscale, jobs, aiReset } from '../core/ai.js';
-import { selFor, selMask } from '../core/select.js';
-import { flatten } from '../rooms/image.js';
+import { runJob, charMask, upscale, samMask, jobs, aiReset } from '../core/ai.js';
+import { sel, selFor, selMask, selBounds } from '../core/select.js';
+import { fillHole } from '../legacy/shim.js';
+import { flatten, samPick, layerFromBlob } from '../rooms/image.js';
 import { dialog, toast, busy, confirmBox } from './overlay.js';
 
 const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
@@ -17,8 +18,9 @@ function pickPackFiles() {
   return new Promise(res => { const i = h('input', { type: 'file', multiple: true, accept: '.gz' }); i.onchange = () => res([...i.files]); i.oncancel = () => res([]); i.click(); });
 }
 // 필요한 팩이 다 있는지 보고, 없으면 받거나 넣게 해요. 준비되면 true
-export async function ensurePacks(models) {
-  const packs = ['czWasm', ...models.map(m => 'czM_' + m)];
+export const ensurePacks = models => ensureModels(['czWasm', ...models.map(m => 'czM_' + m)]);
+// packs = 모델 파일 이름(id)들
+export async function ensureModels(packs) {
   let miss = await missingFiles(packs);
   if (!miss.length) return true;
   const names = [...new Set(miss.map(f => MAN.packs[f.pack].label))].join(', '), size = mb(miss.reduce((a, f) => a + f.size, 0));
@@ -68,6 +70,26 @@ export function registerAiCmds(openPacks) {
   addCmd({ id: 'ai.bgSelect', title: '인물만 고르기', menu: 'AI', words: '누끼 배경 선택 캐릭터', enabled: hasCanvas, run: () => job('인물만 고르기', ['isnet'], async (j, say) => {
     const c = canvasOf(), l = layerOf(), mask = await charMask(await flatten(c, l ? l.id : null), j, say);
     selFor(c); selMask('new', mask);
+  }) });
+  // 'AI로 고르기' 도구가 부르는 명령: 찍어 둔 점·상자로 외곽선을 따서 고른 곳으로
+  addCmd({ id: 'sel.sam', title: '', run: () => job('AI로 고르기', ['samE', 'samD'], async (j, say) => {
+    const c = canvasOf(), pick = samPick; if (!c || !pick) return;
+    const img = await flatten(c), key = 'v2:' + c.id + ':' + c.layers.map(l => l.id + l.mediaId + l.x + ',' + l.y + ',' + l.scale + ',' + l.rot + (l.visible ? 1 : 0)).join('|');
+    selFor(c); selMask('new', await samMask(img, key, pick.pts, pick.box, j, say));
+  }) });
+  // AI 지우개: 고른 곳을 둘레에 어울리게 메워요. 고른 곳 둘레만 잘라서 처리하니 큰 그림에서도 또렷해요
+  addCmd({ id: 'ai.erase', title: '고른 곳을 AI로 지우기', menu: 'AI', group: 'erase', words: '지우개 메우기 인페인트 lama', enabled: () => !!canvasOf() && sel.any, run: () => job('AI로 지우기', ['lama'], async (j, say) => {
+    const c = canvasOf(), b = selBounds(); if (!b) return;
+    const pad = Math.max(48, Math.round(Math.max(b.w, b.h) * 0.6)), x0 = Math.max(0, b.x - pad), y0 = Math.max(0, b.y - pad), x1 = Math.min(c.w, b.x + b.w + pad), y1 = Math.min(c.h, b.y + b.h + pad), W = x1 - x0, H = y1 - y0;
+    const img = mk(W, H), g = img.getContext('2d', { willReadFrequently: true }); g.drawImage(await flatten(c), -x0, -y0);
+    const m = mk(W, H), mg = m.getContext('2d', { willReadFrequently: true }); mg.filter = `blur(${Math.max(1, Math.round(Math.max(W, H) / 300))}px)`; mg.drawImage(sel.cv, -x0, -y0);
+    const px = g.getImageData(0, 0, W, H).data, md = mg.getImageData(0, 0, W, H).data, hole = new Float32Array(W * H);
+    for (let i = 0; i < hole.length; i++) hole[i] = Math.min(1, md[i * 4 + 3] / 255 * 2.2);   // 가장자리를 조금 넉넉하게
+    say('둘레에 어울리게 메우는 중', 0.3);
+    const r = await fillHole(px, hole, W, H, j);
+    const out = new ImageData(new Uint8ClampedArray(r.px), W, H); for (let i = 0; i < hole.length; i++) out.data[i * 4 + 3] = Math.round(hole[i] * 255);
+    g.clearRect(0, 0, W, H); g.putImageData(out, 0, 0);
+    await layerFromBlob(c, await png(img), '지운 자리', { x: x0, y: y0, hidden: true }); commit('AI로 지우기');
   }) });
   addCmd({ id: 'ai.bgCut', title: '배경 지우기', menu: 'AI', words: '누끼 투명', enabled: hasLayer, run: () => job('배경 지우기', ['isnet'], async (j, say) => {
     const l = layerOf(), bmp = await ensureBitmap(l.mediaId);

@@ -5,7 +5,7 @@ import { emit } from './store.js';
 
 function workerMain() {
   let ort = null, ep = 'wasm';
-  const S = {}, B = {};
+  const S = {}, B = {}, K = {};
   const make = (key, gpu) => ort.InferenceSession.create(B[key], { executionProviders: [gpu ? 'webgpu' : 'wasm'], graphOptimizationLevel: 'all', logSeverityLevel: 3 });
   self.onmessage = async e => {
     const m = e.data, reply = (o, tr) => self.postMessage(Object.assign({ id: m.id, ok: true }, o), tr || []);
@@ -27,6 +27,15 @@ function workerMain() {
         let r;
         try { r = await run(); } catch (err) { if (!S[m.key] || !S[m.key].gpu) throw err; S[m.key] = await make(m.key, false); r = await run(); }   // 그래픽카드에서 안 되면 CPU로
         reply({ data: r.d, dims: r.dims, ep: S[m.key].gpu ? 'webgpu' : 'wasm' }, [r.d.buffer]);
+      } else if (m.t === 'run2') {   // 입력·출력이 여러 개인 모델. keep: 다음에 쓸 결과를 일꾼 안에 보관, ref: 보관한 결과를 입력으로
+        const feeds = {};
+        for (const [k, v] of Object.entries(m.feeds)) feeds[k] = v.ref ? K[v.ref] : new ort.Tensor('float32', v.data, v.dims);
+        let out;
+        try { out = await S[m.key].run(feeds); } catch (err) { if (!S[m.key] || !S[m.key].gpu) throw err; S[m.key] = await make(m.key, false); out = await S[m.key].run(feeds); }
+        for (const k of m.keep || []) K[k] = new ort.Tensor('float32', new Float32Array(out[k].data), out[k].dims);
+        const res = {}, tr = [];
+        for (const k of m.outs || []) { const d = new Float32Array(out[k].data); res[k] = { data: d, dims: out[k].dims }; tr.push(d.buffer); }
+        reply({ out: res, ep: S[m.key].gpu ? 'webgpu' : 'wasm' }, tr);
       }
     } catch (err) { self.postMessage({ id: m.id, ok: false, err: String((err && err.message) || err) }); }
   };
@@ -40,7 +49,7 @@ function call(msg, tr) {   // 한 번에 하나씩 차례로
 function reset(err) {
   if (A.w) { try { A.w.terminate(); } catch (_) { /* 이미 끝남 */ } }
   for (const p of A.wait.values()) p.rej(err || new Error('reset'));
-  A.w = null; A.ready = null; A.loaded = {}; A.wait.clear(); A.ep = ''; A.q = Promise.resolve();
+  A.w = null; A.ready = null; A.loaded = {}; A.wait.clear(); A.ep = ''; A.q = Promise.resolve(); samState.samEnc = '';
 }
 function init() {
   if (A.ready) return A.ready;
@@ -65,6 +74,9 @@ export function aiLoad(key) {
   return A.loaded[key];
 }
 export const aiRun = (key, data, dims) => call({ t: 'run', key, data, dims }, [data.buffer]);
+export const aiCall = (msg, tr) => call(msg, tr);
+// 윤곽 AI(SAM)가 지금 어떤 그림을 읽어 두었는지. 캐릭터 움직이기와 'AI로 고르기'가 같이 써요
+export const samState = { samEnc: '' };
 export const aiDevice = () => A.ep === 'webgpu' ? '그래픽카드' : A.ep === 'wasm' ? 'CPU' : '';
 export const aiReset = reset;
 
@@ -119,4 +131,37 @@ export async function upscale(src, scale, model, job, say) {
   g.globalCompositeOperation = 'destination-in'; g.imageSmoothingQuality = 'high'; g.drawImage(src, 0, 0, OW, OH);   // 투명한 곳은 투명하게
   if (scale !== 4) { const c2 = mk(Math.round(W * scale), Math.round(H * scale)), g2 = c2.getContext('2d'); g2.imageSmoothingQuality = 'high'; g2.drawImage(c, 0, 0, c2.width, c2.height); c = c2; }
   return c;
+}
+
+// AI로 고르기: 그림을 윤곽 AI(MobileSAM)에 한 번 읽혀 두고(key가 같으면 다시 안 읽음), 점·상자로 물어봐요.
+//   pts = [[x, y, 1(이것) | 0(아님)]…], box = [x0, y0, x1, y1] (그림 좌표) → 가림막 캔버스(그림 크기)
+export async function samMask(src, key, pts, box, job, say) {
+  say && say('모델을 불러오는 중'); await aiLoad('samE'); await aiLoad('samD'); job && check(job);
+  const W = src.width, H = src.height, s = 1024 / Math.max(W, H), tw = Math.max(1, Math.round(W * s)), th = Math.max(1, Math.round(H * s));
+  if (samState.samEnc !== key) {
+    say && say(`그림을 읽는 중 (${aiDevice() || 'AI'})`, 0.2);
+    const c = mk(tw, th), g = c.getContext('2d', { willReadFrequently: true }); g.imageSmoothingQuality = 'high'; g.drawImage(src, 0, 0, tw, th);
+    const px = g.getImageData(0, 0, tw, th).data, x = new Float32Array(tw * th * 3); for (let i = 0, j = 0; i < tw * th; i++, j += 4) { x[i * 3] = px[j]; x[i * 3 + 1] = px[j + 1]; x[i * 3 + 2] = px[j + 2]; }
+    samState.samEnc = ''; await aiCall({ t: 'run2', key: 'samE', feeds: { input_image: { data: x, dims: [th, tw, 3] } }, keep: ['image_embeddings'], outs: [] }, [x.buffer]); samState.samEnc = key;
+    job && check(job);
+  }
+  say && say('윤곽을 따는 중', 0.7);
+  const np = pts.length + (box ? 2 : 1), pc = new Float32Array(np * 2), pl = new Float32Array(np);
+  pts.forEach(([x, y, l], i) => { pc[i * 2] = x * s; pc[i * 2 + 1] = y * s; pl[i] = l; });
+  if (box) { pc.set([box[0] * s, box[1] * s, box[2] * s, box[3] * s], pts.length * 2); pl[pts.length] = 2; pl[pts.length + 1] = 3; } else pl[pts.length] = -1;
+  const r = await aiCall({ t: 'run2', key: 'samD', outs: ['masks', 'iou_predictions'], feeds: { image_embeddings: { ref: 'image_embeddings' }, point_coords: { data: pc, dims: [1, np, 2] }, point_labels: { data: pl, dims: [1, np] },
+    mask_input: { data: new Float32Array(256 * 256), dims: [1, 1, 256, 256] }, has_mask_input: { data: new Float32Array([0]), dims: [1] }, orig_im_size: { data: new Float32Array([th, tw]), dims: [2] } } });
+  const m = r.out.masks.data, nm = r.out.masks.dims[1] || 1, iou = r.out.iou_predictions ? r.out.iou_predictions.data : null, n = tw * th;
+  // 후보가 여럿이면 점수가 비슷한 것 중 가장 넓은 것 (눈 하나보다 얼굴, 얼굴보다 사람)
+  let best = 0;
+  if (iou && nm > 1) {
+    const size = k => { let c = 0; for (let i = 0; i < n; i++) if (m[k * n + i] > 0) c++; return c; };
+    let top = 0; for (let k = 1; k < nm; k++) if (iou[k] > iou[top]) top = k;
+    let bs = -1; for (let k = 0; k < nm; k++) if (iou[k] >= iou[top] - 0.08) { const sz = size(k); if (sz > bs && sz < n * 0.92) { bs = sz; best = k; } }
+  }
+  const c = mk(tw, th), g = c.getContext('2d'), id = g.createImageData(tw, th);
+  for (let i = 0; i < n; i++) { const on = m[best * n + i] > 0; id.data[i * 4] = id.data[i * 4 + 1] = id.data[i * 4 + 2] = 255; id.data[i * 4 + 3] = on ? 255 : 0; }
+  g.putImageData(id, 0, 0);
+  const M = mk(W, H), gm = M.getContext('2d'); gm.imageSmoothingQuality = 'high'; gm.drawImage(c, 0, 0, W, H);
+  return M;
 }
