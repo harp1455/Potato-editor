@@ -91,6 +91,11 @@ with sync_playwright() as pw:
     P(page, "(() => { const l = __potato.state.project.canvases[0].layers[0]; l.adj = { ...(l.adj || {}), black: 80, temp: 60 }; __potato.emit(); })()"); page.wait_for_timeout(200)
     px1 = P(page, FLAT); print('톤 보정 전후:', px0[:3], px1[:3]); assert px1[:3] != px0[:3] and px1[2] < px0[2], (px0, px1)
     assert page.locator('input[aria-label="색온도"]').count() == 1
+    # 고급 보정(8.x에서 옮김): 노출을 올리면 밝아지고, 활기를 -100으로 내리면 색이 빠져요
+    e0 = P(page, FLAT); P(page, "(() => { const l = __potato.state.project.canvases[0].layers[0]; l.adj = { ...(l.adj || {}), black: 0, temp: 0, bright: 0, exposure: 40 }; __potato.emit(); })()"); e1 = P(page, FLAT)
+    P(page, "(() => { const l = __potato.state.project.canvases[0].layers[0]; l.adj = { exposure: 0, vib: -100 }; __potato.emit(); })()"); e2 = P(page, FLAT); print('고급 보정:', e0[:3], e1[:3], e2[:3])
+    assert page.locator('input[aria-label="노출"]').count() == 1 and page.locator('input[aria-label="선명하게"]').count() == 1
+    P(page, "(() => { const l = __potato.state.project.canvases[0].layers[0]; l.adj = { bright: -60, black: 80, temp: 60 }; __potato.emit(); })()")
     # 곡선: 가운데 점을 위로 끌면 중간 밝기가 밝아져요. 두 번 누르면 처음으로
     cb = page.locator('canvas.curve').bounding_box(); pxa = P(page, FLAT)
     page.mouse.move(cb['x'] + cb['width'] / 2, cb['y'] + cb['height'] / 2); page.mouse.down(); page.mouse.move(cb['x'] + cb['width'] / 2, cb['y'] + cb['height'] * 0.2, steps=3); page.mouse.up()
@@ -139,6 +144,10 @@ with sync_playwright() as pw:
     assert P(page, PX + "(80, 175)")[0] > 240 and P(page, C0 + ".layers.length") == nl + 1; shot(page, '32e-paint')
     for _ in range(3): page.keyboard.press('Control+z')
     assert P(page, C0 + ".layers.length") == nl; page.keyboard.press('v')
+    # 자유 변형(8.x에서 옮김): 그림판을 90도 돌리면 가로세로가 바뀌고, 한 번 더 반대로 돌리면 돌아와요
+    wh0 = P(page, "[%s.w, %s.h]" % (C0, C0)); l0 = P(page, C0 + ".layers[0]"); P(page, "__potato.run('canvas.turnR')"); assert P(page, "[%s.w, %s.h]" % (C0, C0)) == wh0[::-1] and P(page, C0 + ".layers[0].rot") == (l0['rot'] + 90) % 360
+    P(page, "__potato.run('canvas.turnL')"); l1 = P(page, C0 + ".layers[0]"); assert P(page, "[%s.w, %s.h]" % (C0, C0)) == wh0 and abs(l1['x'] - l0['x']) <= 1 and abs(l1['y'] - l0['y']) <= 1 and l1['rot'] == l0['rot']
+    page.keyboard.press('Control+z'); page.keyboard.press('Control+z')
     # 가림막: 고른 곳만 보이게 하면 바깥은 투명해지고, 없애면 돌아와요
     A = "(async (x, y) => { const cv = __potato.state.project.canvases[0], c = await __potato.image.flatten(cv, cv.layers[0].id); return c.getContext('2d').getImageData(x, y, 1, 1).data[3]; })"
     lid = P(page, "__potato.state.layerId"); P(page, "(() => { __potato.state.layerId = __potato.state.project.canvases[0].layers[0].id; __potato.sel.selRect('new', 20, 20, 60, 60); __potato.emit(); })()")

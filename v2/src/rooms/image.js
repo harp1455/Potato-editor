@@ -13,7 +13,7 @@ export const view = { tool: 'move', zoom: 1, ox: 0, oy: 0, fitted: null, space: 
 let cv = null, ctx = null, wrap = null, checker = null, ring = null;
 
 const TOOLS = [
-  { id: 'move', title: '옮기기', key: 'V', icon: 'move', hint: '레이어를 끌어 옮겨요. 모서리 점을 끌면 크기가 바뀌어요. Shift를 누르면 가로·세로로만 움직여요.' },
+  { id: 'move', title: '옮기기', key: 'V', icon: 'move', hint: '레이어를 끌어 옮겨요. 모서리 점을 끌면 크기가 바뀌고, 위쪽 동그라미를 끌면 돌아가요. Shift를 누르면 가로·세로로만 움직여요.' },
   { id: 'rect', title: '사각형으로 고르기', key: 'M', icon: 'selRect', sel: 1, hint: '끌어서 사각형으로 골라요. Shift를 누르면 더하고, Alt를 누르면 빼요.' },
   { id: 'ellipse', title: '타원으로 고르기', key: 'E', icon: 'selEllipse', sel: 1, hint: '끌어서 타원으로 골라요. Shift를 누르면 더하고, Alt를 누르면 빼요.' },
   { id: 'lasso', title: '올가미', key: 'L', icon: 'lasso', sel: 1, hint: '원하는 모양을 따라 그리면 그 안이 골라져요. Shift를 누르면 더하고, Alt를 누르면 빼요.' },
@@ -68,7 +68,7 @@ export function zoomAt(f, px, py) {
 // 보정 값(밝기·대비·채도·색조·흐림)은 레이어에 숫자로만 남겨 두고 그릴 때 입혀요. 원본 그림은 그대로예요.
 export const ADJ = [['bright', '밝기', -100, 100], ['contrast', '대비', -100, 100], ['sat', '채도', -100, 100], ['hue', '색조', -180, 180], ['blur', '흐림', 0, 40]];
 // 톤 보정: 어두운 곳·밝은 곳의 끝점, 중간 밝기, 색온도. 색 단계표를 만들어 필터로 입혀요.
-export const TONE = [['black', '어두운 곳 조이기', 0, 100], ['white', '밝은 곳 조이기', 0, 100], ['gamma', '중간 밝기', -100, 100], ['temp', '색온도', -100, 100]];
+export const TONE = [['exposure', '노출', -100, 100], ['hl', '밝은 곳', -100, 100], ['sh', '어두운 곳', -100, 100], ['black', '어두운 끝 조이기', 0, 100], ['white', '밝은 끝 조이기', 0, 100], ['gamma', '중간 밝기', -100, 100], ['temp', '색온도', -100, 100], ['tint', '색조 (초록–자주)', -100, 100], ['vib', '활기', -100, 100], ['sharp', '선명하게', 0, 100]];
 const luts = new Map();
 // 곡선: 밝기 0, 25, 50, 75, 100%인 곳이 각각 얼마나 밝아질지 다섯 점으로 정해요. 점 사이는 부드럽게 이어요.
 export const CURVE0 = [0, 0.25, 0.5, 0.75, 1];
@@ -78,16 +78,22 @@ export function curveAt(cu, v) {
   return Math.min(1, Math.max(0, 0.5 * (2 * p1 + (p2 - p0) * f + (2 * p0 - 5 * p1 + 4 * p2 - p3) * f * f + (3 * p1 - p0 - 3 * p2 + p3) * f * f * f)));
 }
 function lutOf(a) {
-  const cu = a.curve && a.curve.length === 5 ? a.curve : null, key = [a.black | 0, a.white | 0, a.gamma | 0, a.temp | 0].join('_') + (cu ? '_c' + cu.map(v => Math.round(v * 100)).join('x') : ''); if (key === '0_0_0_0') return '';
+  const cu = a.curve && a.curve.length === 5 ? a.curve : null, key = [a.black | 0, a.white | 0, a.gamma | 0, a.temp | 0, a.exposure | 0, a.hl | 0, a.sh | 0, a.tint | 0, a.vib | 0, a.sharp | 0].join('_') + (cu ? '_c' + cu.map(v => Math.round(v * 100)).join('x') : ''); if (/^0(_0)*$/.test(key)) return '';
   if (luts.has(key)) return luts.get(key);
   let svg = document.getElementById('adjLuts');
   if (!svg) { svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); svg.id = 'adjLuts'; svg.setAttribute('width', 0); svg.setAttribute('height', 0); svg.style.position = 'absolute'; document.body.append(svg); }
   const lo = (a.black || 0) / 200, hi = 1 - (a.white || 0) / 200, ex = Math.pow(2, -(a.gamma || 0) / 100), t = (a.temp || 0) / 100;
-  const table = gain => Array.from({ length: 33 }, (_, i) => Math.min(1, Math.max(0, curveAt(cu, Math.pow(Math.min(1, Math.max(0, (i / 32 - lo) / Math.max(0.02, hi - lo))), ex)) * gain)).toFixed(4)).join(' ');
+  // 고급 보정: 노출(전체 빛의 양), 밝은 곳·어두운 곳만 따로, 색조(초록–자주), 활기, 선명하게
+  const ev = Math.pow(2, (a.exposure || 0) / 50), hl = (a.hl || 0) / 100, sh = (a.sh || 0) / 100, ti = (a.tint || 0) / 100;
+  const tone = v => { v = Math.min(1, Math.max(0, v * ev)); v = Math.pow(Math.min(1, Math.max(0, (v - lo) / Math.max(0.02, hi - lo))), ex); v += sh * 0.3 * (1 - v) * (1 - v) * Math.min(1, v * 8) + hl * 0.3 * v * v * Math.min(1, (1 - v) * 8); return curveAt(cu, Math.min(1, Math.max(0, v))); };
+  const table = gain => Array.from({ length: 33 }, (_, i) => Math.min(1, Math.max(0, tone(i / 32) * gain)).toFixed(4)).join(' ');
   const id = 'lut' + key.replace(/-/g, 'm').replace(/[^\w]/g, ''), NS = 'http://www.w3.org/2000/svg', f = document.createElementNS(NS, 'filter'), ct = document.createElementNS(NS, 'feComponentTransfer');
   f.id = id; f.setAttribute('color-interpolation-filters', 'sRGB');
-  for (const [ch, gain] of [['R', 1 + t * 0.18], ['G', 1], ['B', 1 - t * 0.18]]) { const fn = document.createElementNS(NS, 'feFunc' + ch); fn.setAttribute('type', 'table'); fn.setAttribute('tableValues', table(gain)); ct.append(fn); }
-  f.append(ct); svg.append(f); luts.set(key, `url(#${id})`);
+  for (const [ch, gain] of [['R', (1 + t * 0.18) * (1 + ti * 0.06)], ['G', 1 - ti * 0.14], ['B', (1 - t * 0.18) * (1 + ti * 0.06)]]) { const fn = document.createElementNS(NS, 'feFunc' + ch); fn.setAttribute('type', 'table'); fn.setAttribute('tableValues', table(gain)); ct.append(fn); }
+  f.append(ct);
+  if (a.vib) { const m = document.createElementNS(NS, 'feColorMatrix'); m.setAttribute('type', 'saturate'); m.setAttribute('values', String(Math.max(0, 1 + a.vib / 100 * 0.6))); f.append(m); }
+  if (a.sharp) { const k = a.sharp / 100 * 0.8, cm = document.createElementNS(NS, 'feConvolveMatrix'); cm.setAttribute('order', '3'); cm.setAttribute('preserveAlpha', 'true'); cm.setAttribute('kernelMatrix', `0 ${-k} 0 ${-k} ${1 + 4 * k} ${-k} 0 ${-k} 0`); f.append(cm); }
+  svg.append(f); luts.set(key, `url(#${id})`);
   return luts.get(key);
 }
 function filterOf(l) {
@@ -173,6 +179,8 @@ function guides(g) {
   g.lineWidth = px; g.strokeStyle = '#4b9fe8'; g.strokeRect(-s.w / 2, -s.h / 2, s.w, s.h);
   g.fillStyle = '#fff';
   for (const [x, y] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) { const r = 3.5 * px; g.fillRect(x * s.w / 2 - r, y * s.h / 2 - r, r * 2, r * 2); g.strokeRect(x * s.w / 2 - r, y * s.h / 2 - r, r * 2, r * 2); }
+  // 돌리기 손잡이: 위쪽 가운데의 동그라미
+  g.beginPath(); g.moveTo(0, -s.h / 2); g.lineTo(0, -s.h / 2 - 22 * px); g.stroke(); g.beginPath(); g.arc(0, -s.h / 2 - 22 * px, 4.5 * px, 0, Math.PI * 2); g.fill(); g.stroke();
   g.restore();
 }
 // 고른 곳: 옅은 파랑으로 덮고 테두리를 그려요
@@ -388,6 +396,11 @@ export const imageRoom = {
       }
       if (PAINT_TOOLS.some(t => t.id === tool)) return paintDown(e, c, p, tool, { view, at, draw, drag, layerFromBlob });
       const cur = layerOf();
+      if (cur && !cur.locked && tool === 'move') { const q = toLocal(cur, p), r = 8 / view.zoom;
+        if (Math.abs(q.x - q.w / 2) <= r && Math.abs(q.y + 22 / view.zoom) <= r) {   // 돌리기 손잡이. Shift를 누르면 15도씩
+          const s0 = layerSize(cur), cx = cur.x + s0.w / 2, cy = cur.y + s0.h / 2; let moved = false;
+          return drag(e, ev => { const z = at(ev); let a = Math.atan2(z.y - cy, z.x - cx) * 180 / Math.PI + 90; if (ev.shiftKey) a = Math.round(a / 15) * 15; cur.rot = Math.round(((a % 360) + 360) % 360 * 10) / 10; moved = true; draw(); emit(); }, () => moved && commit('돌리기'));
+        } }
       const corner = cur && !cur.locked ? cornerHit(cur, p) : null;
       if (corner) {
         const s0 = layerSize(cur), sc0 = cur.scale, cx = cur.x + s0.w / 2, cy = cur.y + s0.h / 2;
@@ -531,6 +544,10 @@ export function registerImageCmds() {
   addCmd({ id: 'view.in', title: '확대', menu: '보기', keys: 'Ctrl+=', enabled: hasCanvas, run: () => zoomAt(1.25) });
   addCmd({ id: 'view.out', title: '축소', menu: '보기', keys: 'Ctrl+-', enabled: hasCanvas, run: () => zoomAt(0.8) });
   addCmd({ id: 'file.openNew', title: '그림을 새 그림판(탭)으로 열기…', menu: '파일', words: '새 탭 캔버스', run: () => { const i = h('input', { type: 'file', accept: 'image/*', multiple: true }); i.onchange = () => importFiles(i.files, { asNew: true }); i.click(); } });
+  // 그림판 전체를 90도 돌리기: 그림판 크기를 바꾸고 레이어들을 그 자리에 맞게 옮겨 돌려요
+  const turn = dir => { const c = canvasOf(), W = c.w, H = c.h; c.layers.forEach(l => { const s = layerSize(l), cx = l.x + s.w / 2, cy = l.y + s.h / 2, nx = dir > 0 ? H - cy : cy, ny = dir > 0 ? cx : W - cx; l.rot = (((l.rot || 0) + 90 * dir) % 360 + 360) % 360; l.x = Math.round(nx - s.w / 2); l.y = Math.round(ny - s.h / 2); }); c.w = H; c.h = W; delete c.lines; selNone(); commit(dir > 0 ? '그림판 오른쪽으로 돌리기' : '그림판 왼쪽으로 돌리기'); fit(); };
+  addCmd({ id: 'canvas.turnR', title: '그림판을 오른쪽으로 90도 돌리기', menu: '레이어', group: 'canvas', words: '회전 rotate', enabled: hasCanvas, run: () => turn(1) });
+  addCmd({ id: 'canvas.turnL', title: '그림판을 왼쪽으로 90도 돌리기', menu: '레이어', group: 'canvas', words: '회전 rotate', enabled: hasCanvas, run: () => turn(-1) });
   addCmd({ id: 'layer.flipX', title: '레이어 좌우로 뒤집기', menu: '레이어', group: 'flip', words: '반전 flip', enabled: hasLayer, run: () => { const l = layerOf(); l.flipX = !l.flipX; commit('좌우로 뒤집기'); } });
   addCmd({ id: 'layer.flipY', title: '레이어 위아래로 뒤집기', menu: '레이어', group: 'flip', words: '반전 flip', enabled: hasLayer, run: () => { const l = layerOf(); l.flipY = !l.flipY; commit('위아래로 뒤집기'); } });
   addCmd({ id: 'layer.rot90', title: '레이어 90도 돌리기', menu: '레이어', group: 'flip', enabled: hasLayer, run: () => { const l = layerOf(); l.rot = ((l.rot || 0) + 90) % 360; commit('90도 돌리기'); } });
