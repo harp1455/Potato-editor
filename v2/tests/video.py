@@ -97,6 +97,12 @@ with sync_playwright() as pw:
     # 얹는 그림 움직이기: 끝 값을 주면 나오는 동안 모습이 바뀌어요
     assert P(page, R + "(0.6)") == P(page, R + "(1.4)")
     P(page, "(() => { __potato.state.project.sequences[0].overs[0].to = { x: 80, y: 50, size: 20, opacity: 1 }; __potato.emit(); })()"); assert P(page, R + "(0.6)") != P(page, R + "(1.4)")
+    # 움직임 점 여러 개: 처음 → 가운데 점 → 끝 점으로 이어져요. 예전의 끝 값(to)도 그대로 읽어요
+    v = P(page, "[0, 0.5, 1, 1.5, 2].map(t => +__potato.video.valAt(50, [{ t: 1, x: 90 }, { t: 2, x: 10 }], t, 'x').toFixed(1))"); assert v == [50, 70, 90, 50, 10], v
+    assert P(page, "__potato.video.keysOf({ dur: 2, to: { x: 80 } })") == [{'t': 2, 'x': 80}]
+    P(page, "(() => { const s = __potato.state.project.sequences[0], x = s.scenes[0]; s.overs = []; delete x.move; x.keys = [{ t: 1, zoom: 180, x: 0, y: 0 }, { t: 2, zoom: 100, x: 0, y: 0 }]; __potato.emit(); })()")
+    a, b, c = P(page, R + "(0.02)"), P(page, R + "(1.0)"), P(page, R + "(1.98)"); assert a != b and b != c, (a, b, c)
+    page.click('.vid-scene >> nth=0'); assert page.locator('.vid-side .key').count() == 2; shot(page, '76-keys')
     assert not errs, errs
     br.close()
 print('통과')

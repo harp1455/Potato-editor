@@ -37,6 +37,41 @@ patch("if (b && (b.dataset.rgfx || b.dataset.rgfi)) {", "if (b && b.dataset.rgfn
 // (나) 이미지 작업실의 고르는 도구(마법 붓·AI로 고르기 등)로 고른 곳을 '칠한 곳'으로 가져오기
 patch('data-rga="sam" title="대충 칠한 곳을 AI가 물체 윤곽에 맞춰 줘요">AI로 윤곽 맞추기</button>', 'data-rga="sam" title="대충 칠한 곳을 AI가 물체 윤곽에 맞춰 줘요">AI로 윤곽 맞추기</button><button class="btn sm" data-rga="fromsel" title="이미지 작업실에서 마법 붓, 올가미, AI로 고르기로 고른 곳을 칠한 곳으로 가져와요">고른 곳 가져오기</button><button class="btn sm" data-rga="pick2" title="이 창을 잠시 접고, 그림판에서 마법 붓·올가미·AI로 고르기로 고른 뒤 돌아와요">그림판에서 고르기</button>', '윤곽 맞추기 단추');
 patch("else if (act === 'sam') {", "else if (act === 'pick2') { if (from.pickOutside && await from.pickOutside()) { const b2 = document.querySelector('#modalRoot [data-rga=fromsel]'); if (b2) b2.click(); } return; }\n    else if (act === 'fromsel') { const m = from.selMask ? await from.selMask() : null; if (!m) { toast('이미지 작업실에서 고른 곳이 없어요. 창을 닫고 마법 붓이나 AI로 고르기로 먼저 골라 주세요.'); return; } snap(); if (!st.pm) st.pm = newCanvas(Math.round(rig.W / 2), Math.round(rig.H / 2)); const g = st.pm.getContext('2d'); g.clearRect(0, 0, st.pm.width, st.pm.height); g.drawImage(m, 0, 0, st.pm.width, st.pm.height); g.globalCompositeOperation = 'source-in'; g.fillStyle = 'rgb(255,60,160)'; g.fillRect(0, 0, st.pm.width, st.pm.height); g.globalCompositeOperation = 'source-over'; st.pmAny = true; renderSide(); dirty(); toast('고른 곳을 가져왔어요. 붓으로 더 다듬거나 바로 떼어 낼 수 있어요.'); }\n    else if (act === 'sam') {", '윤곽 맞추기 처리');
+// 2.0에서 더한 것: 겹친 다리 떼기. 두 다리가 서로(또는 몸에) 겹쳐 한 덩어리로 보이면, 한쪽 다리를 따로 떼어요.
+patch("  return made;\n}\n// 그림을 SAM(윤곽 AI)에 한 번 읽혀 두기", `  return made;
+}
+// 단추로만 불러요(처음 준비할 때 알아서 떼지는 않아요: 치마·긴 옷을 다리로 잘못 뗄 수 있어서). force = 겹쳤는지 따지지 않고 해 봄
+async function rgAutoLegs(rig, tk, chars, force) {
+  const { W, H } = rig, J = rig.joints, made = []; if (rig.stdOff || !J.aHip || !J.bHip) return made;
+  const base = rig.layers.find(l => l.base), A = rgAlpha(base, W, H), sw = Math.hypot(J.aSho.x - J.bSho.x, J.aSho.y - J.bSho.y), hw = Math.hypot(J.aHip.x - J.bHip.x, J.aHip.y - J.bHip.y), th = Math.max(hw * 0.85, sw * 0.3);
+  // 뼈를 따라가며 옆으로 잰 폭이 다리 하나보다 훨씬 넓은 곳의 비율 (겹쳐 있으면 넓게 나와요)
+  const wide = (a, b, t0) => { let n = 0, k = 0; const dx = b.x - a.x, dy = b.y - a.y, l = Math.hypot(dx, dy) || 1, nx = -dy / l, ny = dx / l; for (let t = t0; t <= 1.001; t += 0.125) { const x = a.x + dx * t, y = a.y + dy * t; let w = 0; for (const sg of [1, -1]) for (let d = 0; d < th * 3; d += 2) { const xx = Math.round(x + nx * d * sg), yy = Math.round(y + ny * d * sg); if (xx < 0 || yy < 0 || xx >= W || yy >= H || A[yy * W + xx] < 128) break; w += 2; } n++; if (w > th * 1.7) k++; } return n ? k / n : 0; };
+  const cand = [];
+  for (const pre of ['a', 'b']) {
+    const Hp = pre + 'Hip', Kn = pre + 'Knee', An = pre + 'Ank', To = pre + 'Toe', oth = pre === 'a' ? 'b' : 'a'; if (!rgOn(rig, Kn) || !rgOn(rig, An)) continue;
+    const low = wide(J[Kn], J[An], 0.15), up = wide(J[Hp], J[Kn], 0.4); if (!force && low < 0.5) continue;
+    cand.push({ pre, oth, Hp, Kn, An, To, low, up });
+  }
+  cand.sort((p, q) => q.low - p.low);
+  for (const c of cand) {
+    const whole = c.up > 0.6 || force, path = [...(whole ? [J[c.Hp]] : []), J[c.Kn], J[c.An], ...(rgOn(rig, c.To) ? [J[c.To]] : [])];
+    const cv = newCanvas(W, H), g = cv.getContext('2d', { willReadFrequently: true }); g.strokeStyle = '#fff'; g.lineWidth = th * 0.55; g.lineCap = g.lineJoin = 'round'; g.beginPath();
+    const p0 = { x: path[0].x + (path[1].x - path[0].x) * 0.2, y: path[0].y + (path[1].y - path[0].y) * 0.2 }; g.moveTo(p0.x, p0.y); for (const p of path.slice(1)) g.lineTo(p.x, p.y); g.stroke();
+    const d = g.getImageData(0, 0, W, H).data, M = new Uint8ClampedArray(W * H); let am = 0; for (let i = 0; i < M.length; i++) { M[i] = d[i * 4 + 3] > 128 && A[i] > 128 ? 255 : 0; if (M[i]) am++; }
+    if (am < 80) continue;
+    tk && tk.set('겹친 다리를 떼어 내는 중…');
+    const N = await rgSamRefine(rig, M, tk); if (!N) continue;
+    let an = 0, it = 0; for (let i = 0; i < N.length; i++) { if (A[i] < 128) N[i] = 0; if (N[i] > 128) { an++; if (M[i]) it++; } }
+    const inN = p => !!p && N[clamp(Math.round(p.y), 0, H - 1) * W + clamp(Math.round(p.x), 0, W - 1)] > 128;
+    // 윤곽이 다리 하나를 넘어서면(몸통·반대쪽 다리까지 잡히면) 그만둬요
+    if (an > am * 4.5 || it < am * 0.55 || inN(J.waist) || inN(J.spine) || inN(J.chest) || (rgOn(rig, c.oth + 'Knee') && inN(J[c.oth + 'Knee'])) || (rgOn(rig, c.oth + 'Ank') && inN(J[c.oth + 'Ank']))) continue;
+    const L = await rgSplit(rig, base, N, rgSideName(rig, c.pre === 'a' ? 'legA' : 'legB') + (whole ? '' : ' 아래쪽'), tk, chars); if (L) { L.auto = true; made.push(L); break; }   // 한쪽을 떼면 다른 쪽은 이미 따로예요
+  }
+  return made;
+}
+// 그림을 SAM(윤곽 AI)에 한 번 읽혀 두기`, '겹친 다리 떼기');
+patch('<button class="btn sm" data-rga="pick2"', '<button class="btn sm" data-rga="autolegs" title="겹친 다리를 따로 떼어요. 뼈대가 맞춰져 있으면 알아서 찾고, 아니면 다리를 따라 붓으로 한 번 그은 뒤 누르면 윤곽을 맞춰 바로 떼어요">겹친 다리 떼기</button><button class="btn sm" data-rga="pick2"', '겹친 다리 단추');
+patch("else if (act === 'pick2') {", "else if (act === 'autolegs') { const M0 = pmMask(); busy('겹친 다리를 떼어 내는 중…', async tk => { const before = shot(); if (M0) { let N = await rgSamRefine(rig, M0, tk); if (N) { const n = M0.length, f = new Float32Array(n); for (let i = 0; i < n; i++) f[i] = M0[i] / 255; const bl = dpBox(f, rig.W, rig.H, Math.max(4, Math.round(Math.max(rig.W, rig.H) / 110))); for (let i = 0; i < n; i++) N[i] = bl[i] > 0.97 ? 255 : bl[i] < 0.03 ? 0 : N[i]; } else N = M0; const P = await rgSplit(rig, base(), N, '다리 ' + rig.layers.length, tk, chars()); if (!P) { toast('칠한 곳에 캐릭터가 거의 없어요'); return; } st.undo.push(before); st.redo.length = 0; st.selLayer = P.id; st.pm.getContext('2d').clearRect(0, 0, st.pm.width, st.pm.height); st.pmAny = false; toast(`'${P.name}'를 따로 떼어 냈어요. ③ 움직임 만들기에서 움직여 보세요.`, 4600); return; } const made = await rgAutoLegs(rig, tk, chars(), true); if (!made.length) { toast('뼈대만으로는 떼어 낼 다리를 찾지 못했어요. 떼고 싶은 다리를 따라 붓으로 한 번 그은 뒤 이 단추를 다시 눌러 주세요. 윤곽을 맞춰서 바로 떼어 드려요.', 6500); return; } rig.ver++; st.undo.push(before); st.redo.length = 0; toast(`'${made[0].name}'를 따로 떼어 냈어요. 모자라거나 넘친 곳은 붓으로 고칠 수 있어요.`, 4600); }); return; }\n    else if (act === 'pick2') {", '겹친 다리 처리');
 
 // 2) rig.js가 쓰는 8.x의 작은 계산 함수들을 그대로 가져와요
 function pick(file, names) {

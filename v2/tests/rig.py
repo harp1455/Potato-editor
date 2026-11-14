@@ -67,6 +67,9 @@ with sync_playwright() as pw:
     P(page, "(() => { const c = __potato.state.project.canvases[0]; __potato.sel.selEllipse('new', c.w * 0.3, c.h * 0.2, c.w * 0.3, c.h * 0.3); })()"); shot(page, '53c-away')
     page.click('.away-bar >> text=다 골랐어요'); page.wait_for_selector('#modalRoot .rg-modal'); assert page.locator('.away-bar').count() == 0 and P(page, "__potato.settings.get('room')") == 'character'
     page.wait_for_timeout(600); assert page.locator('.toast >> text=고른 곳을 가져왔어요').count() >= 1
+    # 2.0에서 더한 것 ①-3: 겹친 다리 떼기. 붓으로 그은 곳이 있으면 윤곽을 맞춰 바로 떼어요
+    n0 = page.locator('#modalRoot').inner_text().count('부위 ') ; page.click('#modalRoot [data-rga="autolegs"]')
+    page.wait_for_function("[...document.querySelectorAll('.toast')].some(t => /따로 떼어 냈어요|거의 없어요/.test(t.textContent))", timeout=TIME); print('겹친 다리 떼기:', P(page, "[...document.querySelectorAll('.toast')].map(t => t.textContent).at(-1)")[:30])
     # 2.0에서 더한 것 ②: 메운 자리를 NovelAI로 바로 다시 그리기 (흉내 응답)
     import io, json, zipfile
     zb = io.BytesIO(); zipfile.ZipFile(zb, 'w').writestr('image_0.png', open(src, 'rb').read())

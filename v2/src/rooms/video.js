@@ -26,6 +26,13 @@ const total = s => s.scenes.reduce((a, x) => a + x.dur, 0);
 function sceneAt(s, t) { let a = 0; for (const x of s.scenes) { if (t < a + x.dur) return x; a += x.dur; } return s.scenes[s.scenes.length - 1] || null; }
 const startOf = (s, id) => { let a = 0; for (const x of s.scenes) { if (x.id === id) return a; a += x.dur; } return 0; };
 let fadeCv = null;
+// 움직임 점: 처음 값(base)에서 시작해, 점마다 적힌 시각(t초)에 그 값이 되도록 부드럽게 이어 가요. 점은 몇 개든 둘 수 있어요
+export const keysOf = o => (o.keys && o.keys.length ? [...o.keys].sort((a, b) => a.t - b.t) : o.to ? [{ t: o.dur, ...o.to }] : []);
+export function valAt(base, keys, t, k) {
+  let a = { t: 0, [k]: base }, v = base;
+  for (const q of keys) { if (q[k] == null) continue; if (t >= q.t) { a = q; v = q[k]; continue; } const p = clamp((t - a.t) / Math.max(1e-6, q.t - a.t), 0, 1), e = p * p * (3 - 2 * p); return a[k] + (q[k] - a[k]) * e; }
+  return v;
+}
 // 화면 움직임: 장면이 이어지는 동안 그림이 천천히 다가오거나 멀어지거나 옆으로 흘러요 (p = 장면 안에서 0~1)
 export const MOVES = [['', '없음'], ['in', '천천히 다가가기'], ['out', '천천히 멀어지기'], ['left', '왼쪽으로 흐르기'], ['right', '오른쪽으로 흐르기'], ['up', '위로 흐르기'], ['down', '아래로 흐르기']];
 function drawScene(g, x, w, h, p = 0) {
@@ -34,7 +41,9 @@ function drawScene(g, x, w, h, p = 0) {
   const m = x.move, amt = (x.moveAmt ?? 12) / 100, e = p * p * (3 - 2 * p);   // 처음과 끝은 부드럽게
   const z = m === 'in' ? 1 + amt * e : m === 'out' ? 1 + amt * (1 - e) : m ? 1 + amt : 1, sh = amt / 2 * (1 - 2 * e);
   const ox = m === 'left' ? sh * w : m === 'right' ? -sh * w : 0, oy = m === 'up' ? sh * h : m === 'down' ? -sh * h : 0;
-  g.save(); g.beginPath(); g.rect(0, 0, w, h); g.clip(); g.translate(w / 2 + ox, h / 2 + oy); g.scale(z, z);
+  // 점으로 직접 정한 움직임이 있으면 그것을 써요 (zoom = 확대 %, x·y = 화면 크기에 견준 밀기 %)
+  const K = keysOf(x), tt = p * x.dur, zz = K.length ? valAt(100, K, tt, 'zoom') / 100 : z, kx = K.length ? valAt(0, K, tt, 'x') / 100 * w : ox, ky = K.length ? valAt(0, K, tt, 'y') / 100 * h : oy;
+  g.save(); g.beginPath(); g.rect(0, 0, w, h); g.clip(); g.translate(w / 2 + kx, h / 2 + ky); g.scale(zz, zz);
   g.imageSmoothingQuality = 'high'; g.drawImage(b, -dw / 2, -dh / 2, dw, dh); g.restore();
 }
 export function renderSeq(g, s, t, w, h) {
@@ -54,7 +63,7 @@ export function renderSeq(g, s, t, w, h) {
     if (t < o.t0 || t >= o.t0 + o.dur) continue;
     const b = state.bitmaps.get(o.mediaId); if (!b) { ensureBitmap(o.mediaId); continue; }
     // 끝 값(to)이 있으면 나오는 동안 처음 값에서 끝 값으로 부드럽게 바뀌어요
-    const p = (t - o.t0) / o.dur, e = p * p * (3 - 2 * p), at = (k, def) => { const a = o[k] ?? def; return o.to && o.to[k] != null ? a + (o.to[k] - a) * e : a; };
+    const K = keysOf(o), at = (k, def) => valAt(o[k] ?? def, K, t - o.t0, k);
     const dw = w * at('size', 30) / 100, dh = dw * b.height / b.width;
     g.save(); g.globalAlpha = clamp(at('opacity', 1), 0, 1); g.imageSmoothingQuality = 'high'; g.drawImage(b, w * at('x', 50) / 100 - dw / 2, h * at('y', 50) / 100 - dh / 2, dw, dh); g.restore();
   }
@@ -200,6 +209,15 @@ export const videoRoom = {
     const update = () => {
       const s = seqOf(), T = s ? total(s) : 0;
       if (s) { [...V.sel].forEach(id => { if (!s.scenes.some(x => x.id === id)) V.sel.delete(id); }); V.t = clamp(V.t, 0, Math.max(0, T - 0.0001)); }
+      // 움직임 점 목록: 점마다 시각과 값. '지금 시각에 점 넣기'는 그때의 모습을 그대로 점으로 남겨요
+      const keyRows = (o, fields, what, now) => {
+        if (o.to && !o.keys) { o.keys = [{ t: o.dur, ...o.to }]; delete o.to; }
+        const K = o.keys || [], pct = k => k === 'opacity', shown = (k, v) => (pct(k) ? Math.round(v * 100) : +(+v).toFixed(1)), stored = (k, v) => (pct(k) ? v / 100 : v);
+        return [...[...K].sort((a, b) => a.t - b.t).map(q => h('div.key', null,
+          h('div.field-row', null, num('때', +q.t.toFixed(2), 0.1, 0.05, v => { q.t = clamp(v, 0.05, o.dur); commit(what + ' 움직임 점'); }, '초'), h('button.icon-btn', { title: '이 점 지우기', 'aria-label': `${q.t.toFixed(2)}초 점 지우기`, onclick: () => { o.keys = o.keys.filter(z => z !== q); if (!o.keys.length) delete o.keys; commit(what + ' 움직임 점 지우기'); } }, icon('trash'))),
+          h('div.field-row.wrap', null, fields.map(([k, label, min, max]) => num(label, shown(k, q[k]), 1, min, v => { q[k] = stored(k, clamp(v, min, max)); commit(what + ' 움직임 점'); }, '%'))))),
+          h('button.btn.small', { title: '지금 재생 막대가 있는 시각에, 그때의 모습 그대로 점을 넣어요. 그다음 값을 바꾸면 그 시각에 그 모습이 돼요.', onclick: () => { const t = +clamp(now, 0.05, o.dur).toFixed(2), kk = keysOf(o), q = { t }; fields.forEach(([k, , , , def]) => { q[k] = valAt(o[k] ?? def, kk, t, k); }); o.keys = [...(o.keys || []).filter(z => Math.abs(z.t - t) > 0.01), q]; commit(what + ' 움직임 점 넣기'); } }, '지금 시각에 움직임 점 넣기')];
+      };
       const one = s && V.sel.size === 1 ? s.scenes.find(x => V.sel.has(x.id)) : null, many = s ? s.scenes.filter(x => V.sel.has(x.id)) : [];
       bar.replaceChildren(
         h('button.btn.small', { disabled: !T, onclick: () => play(!V.playing), title: 'Space' }, V.playing ? '멈춤' : '재생'),
@@ -232,6 +250,7 @@ export const videoRoom = {
         many.length ? h('label.field', null, h('span.field-name.w', null, '맞춤'), h('select.text', { 'aria-label': '맞춤', onchange: e => { many.forEach(x => { x.fit = e.target.value; }); commit('장면 맞춤'); } }, [['contain', '다 보이게'], ['cover', '꽉 채우게']].map(([v, t]) => h('option', { value: v, selected: many[0].fit === v }, t)))) : null,
         many.length ? h('label.field', null, h('span.field-name.w', null, '화면 움직임'), h('select.text', { 'aria-label': '화면 움직임', onchange: e => { many.forEach(x => { if (e.target.value) x.move = e.target.value; else delete x.move; }); commit('화면 움직임'); } }, MOVES.map(([v, t]) => h('option', { value: v, selected: (many[0].move || '') === v }, t)))) : null,
         many.length && many[0].move ? num('움직이는 정도', many[0].moveAmt ?? 12, 1, 1, v => { many.forEach(x => { x.moveAmt = clamp(v, 1, 60); }); commit('움직이는 정도'); }, '%') : null,
+        ...(one ? [h('p.panel-note', null, '움직임을 직접 정하려면 점을 넣어요. 점이 있으면 위의 화면 움직임 대신 점대로 움직여요.'), ...keyRows(one, [['zoom', '확대', 10, 800, 100], ['x', '가로 밀기', -100, 100, 0], ['y', '세로 밀기', -100, 100, 0]], '장면', V.t - startOf(s, one.id))] : []),
         many.length ? num('겹쳐 바뀜', +(many[0].fade || 0).toFixed(2), 0.1, 0, v => { many.forEach(x => { x.fade = clamp(v, 0, 10); }); commit('겹쳐 바뀜'); }, '초') : null,
         many.length ? h('div.btn-row', null, h('button.btn.small', { title: '고른 장면과 다음 장면 사이에 AI가 중간 장면을 그려 넣어 부드럽게 이어요', onclick: () => run('video.interp') }, 'AI 중간 장면 넣기')) : null,
         many.length ? h('div.btn-row', null, h('button.icon-btn', { title: '앞으로 옮기기', 'aria-label': '앞으로 옮기기', onclick: () => run('video.left') }, icon('up')), h('button.icon-btn', { title: '뒤로 옮기기', 'aria-label': '뒤로 옮기기', onclick: () => run('video.right') }, icon('down')), h('span.grow'), h('button.icon-btn', { title: '장면 지우기', 'aria-label': '장면 지우기', onclick: () => run('video.delete') }, icon('trash'))) : null,
@@ -246,10 +265,7 @@ export const videoRoom = {
           h('div.field-row', null, num('시작', +o.t0.toFixed(2), 0.1, 0, v => { o.t0 = Math.max(0, v); commit('얹는 그림 시작'); }, '초'), num('길이', +o.dur.toFixed(2), 0.1, 0.1, v => { o.dur = Math.max(0.1, v); commit('얹는 그림 길이'); }, '초')),
           h('div.field-row', null, num('가로', o.x ?? 50, 1, -50, v => { o.x = clamp(v, -50, 150); commit('얹는 그림 자리'); }, '%'), num('세로', o.y ?? 50, 1, -50, v => { o.y = clamp(v, -50, 150); commit('얹는 그림 자리'); }, '%')),
           h('div.field-row', null, num('크기', o.size ?? 30, 1, 1, v => { o.size = clamp(v, 1, 400); commit('얹는 그림 크기'); }, '%'), num('진하기', Math.round((o.opacity ?? 1) * 100), 5, 0, v => { o.opacity = clamp(v, 0, 100) / 100; commit('얹는 그림 불투명도'); }, '%')),
-          h('label.check', null, h('input', { type: 'checkbox', checked: !!o.to, onchange: e => { if (e.target.checked) o.to = { x: o.x ?? 50, y: o.y ?? 50, size: o.size ?? 30, opacity: o.opacity ?? 1 }; else delete o.to; commit('얹는 그림 움직임'); } }), '나오는 동안 움직이기'),
-          ...(o.to ? [h('p.panel-note', null, '위는 처음 값, 아래는 끝날 때의 값이에요.'),
-            h('div.field-row', null, num('끝 가로', o.to.x, 1, -50, v => { o.to.x = clamp(v, -50, 150); commit('얹는 그림 끝 자리'); }, '%'), num('끝 세로', o.to.y, 1, -50, v => { o.to.y = clamp(v, -50, 150); commit('얹는 그림 끝 자리'); }, '%')),
-            h('div.field-row', null, num('끝 크기', o.to.size, 1, 1, v => { o.to.size = clamp(v, 1, 400); commit('얹는 그림 끝 크기'); }, '%'), num('끝 진하기', Math.round(o.to.opacity * 100), 5, 0, v => { o.to.opacity = clamp(v, 0, 100) / 100; commit('얹는 그림 끝 진하기'); }, '%'))] : []),
+          ...keyRows(o, [['x', '가로', -50, 150, 50], ['y', '세로', -50, 150, 50], ['size', '크기', 1, 400, 30], ['opacity', '진하기', 0, 100, 1]], '얹는 그림', V.t - o.t0),
           h('div.btn-row', null, h('span.grow'), h('button.icon-btn', { title: '얹는 그림 빼기', 'aria-label': '얹는 그림 빼기', onclick: () => { s.overs = s.overs.filter(x => x !== o); commit('얹는 그림 빼기'); } }, icon('trash')))); }),
         h('button.btn.small', { disabled: !picked.size, title: picked.size ? '' : '보관함에서 얹을 그림을 먼저 골라 주세요', onclick: () => run('video.addOver') }, '고른 그림을 지금 시각에 얹기'),
         h('h3.sec', null, '소리'),
