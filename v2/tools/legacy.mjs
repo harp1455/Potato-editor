@@ -154,4 +154,25 @@ ${pick('gif2.js', ['riPlane', 'riRun'])}
   return { czCfg, czNewState, czAnalyze, czComposeMask, czDilate, aiLineArt, dpDepth, dpOtsu, dpDof, riRun };
 }
 `);
+// 6) 움짤 연출: 움직임 97가지(Animate.css), 장면 넘김 196가지(gl-transitions), 입자·화면 효과, 카메라 화면
+{
+  const an = read('anim.js'), e2 = read('edit2.js'), cut = (t, a, b) => { const i = t.indexOf(a), j = t.indexOf(b, i); if (i < 0 || j < 0) throw new Error(`연출 코드에서 '${a}' 부분을 찾지 못했어요`); return t.slice(i, j); };
+  const tm0 = e2.indexOf('const TMPL_KINDS'), tm1 = e2.indexOf('function drawTmplEl('); if (tm0 < 0 || tm1 < tm0) throw new Error('edit2.js에서 카메라 화면 부분을 찾지 못했어요');
+  writeFileSync(join(out, 'fx.gen.js'), `// 자동으로 만든 파일이에요. 고치지 마세요 (tools/legacy.mjs가 8.x의 anim.js·presets.js·edit2.js에서 만들어요)
+/* eslint-disable */
+export function makeFx(deps) {
+  const { newCanvas, clamp, uid, gsTotal, gs } = deps;
+  const DEG = Math.PI / 180, bezC = new Map(), hash1 = (a, b) => { const x = Math.sin(a * 127.1 + b * 311.7) * 43758.5453; return x - Math.floor(x); };
+  const fontCss = () => '"Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif', doc = { defaults: { text: { font: '' } } };
+  let fxCopyC = null, fxNoiseC = null;
+${read('presets.js')}
+${e2.slice(tm0, tm1)}
+${cut(an, 'function bezier(', 'const TX_IN')}
+${cut(an, 'const FX_KINDS', 'const FX_PRESETS')}
+${cut(an, 'function fxCopy(', 'function gsRenderExtras(')}
+${cut(an, 'const GLT_KO', 'function gltPickRandom(')}
+  return { ANIM_CSS, AN_KO, AN_ALL, AN_LOOP, AN_IN, AN_OUT, animAt, animApply, FX_KINDS, FXK, FX_DEF, fxParticles, fxScreen, GL_TRANS, GLT_KO, GLT_TOP, gltRender, glt: () => glt };
+}
+`);
+}
 console.log(`캐릭터 움직이기 묶음: 코드 ${(rig.length / 1024).toFixed(0)} KB, 꾸밈 규칙 ${rules.length}개`);

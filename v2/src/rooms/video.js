@@ -1,5 +1,6 @@
 // 영상 작업실 (첫 판): 장면을 이어 붙여 영상·움짤로 내보내요.
 // 장면 = 보관함 그림 + 보여 줄 시간. 글자·넘김 효과·소리·AI 중간 장면은 다음에 옮겨 와요.
+import { makeFx } from '../legacy/fx.gen.js';
 import { h, icon, drag, clamp } from '../ui/dom.js';
 import { state, commit, emit, uid, ensureBitmap, addMedia, ensureFolder, idb } from '../core/store.js';
 import { runJob, aiLoad } from '../core/ai.js';
@@ -46,12 +47,35 @@ function drawScene(g, x, w, h, p = 0) {
   g.save(); g.beginPath(); g.rect(0, 0, w, h); g.clip(); g.translate(w / 2 + kx, h / 2 + ky); g.scale(zz, zz);
   g.imageSmoothingQuality = 'high'; g.drawImage(b, -dw / 2, -dh / 2, dw, dh); g.restore();
 }
+// 움짤 연출(8.x에서 가져온 것): 움직임 97가지, 장면 넘김 196가지, 입자·화면 효과. 처음 쓸 때 한 번 준비해요
+let FXM = null;
+export const fxLib = () => FXM || (FXM = makeFx({ newCanvas: (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }, clamp, uid: () => uid('f'), gsTotal: () => (seqOf() ? total(seqOf()) : 0), gs: { get set() { return { bg: (seqOf() || {}).bg || '#000000' }; } } }));
+const frac = v => v - Math.floor(v), strHash = s => { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return Math.abs(h); };
+let glA = null, glB = null;
+function glTrans(g, s, prev, x, k, p, w, h) {
+  const F = fxLib(), bad = F.glt().bad, name = x.trans === 'gl:*' ? F.GLT_TOP.filter(n => !bad.has(n))[strHash(x.id) % Math.max(1, F.GLT_TOP.length)] : String(x.trans).slice(3); if (!name || bad.has(name)) return false;
+  if (!glA || glA.width !== w || glA.height !== h) { glA = document.createElement('canvas'); glB = document.createElement('canvas'); glA.width = glB.width = w; glA.height = glB.height = h; }
+  const ga = glA.getContext('2d'), gb = glB.getContext('2d'); ga.fillStyle = gb.fillStyle = s.bg || '#000'; ga.fillRect(0, 0, w, h); gb.fillRect(0, 0, w, h); drawScene(ga, prev, w, h, 1); drawScene(gb, x, w, h, p);
+  let out = null; try { out = F.gltRender(name, glA, glB, k, w, h); } catch (_) { bad.add(name); }
+  if (!out) return false; g.drawImage(out, 0, 0, w, h); return true;
+}
+// 글자 얹기: 글자를 그림으로 만들어 두고 얹는 그림처럼 다뤄요
+const textCache = new Map();
+function textPic(o) {
+  const key = [o.text, o.color, o.sc, o.sw, o.bold].join('|'); let c = textCache.get(key); if (c) return c;
+  const fs = 160, lines = String(o.text || ' ').split('\n'), font = `${o.bold === false ? 500 : 800} ${fs}px "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif`, sw = fs * (o.sw ?? 12) / 100;
+  c = document.createElement('canvas'); let g = c.getContext('2d'); g.font = font; const tw = Math.max(1, ...lines.map(l => g.measureText(l).width)); c.width = Math.ceil(tw + sw * 2 + 8); c.height = Math.ceil(lines.length * fs * 1.25 + sw * 2 + 8);
+  g = c.getContext('2d'); g.font = font; g.textAlign = 'center'; g.textBaseline = 'middle'; g.lineJoin = 'round';
+  lines.forEach((l, i) => { const y = sw + 4 + fs * 0.62 + i * fs * 1.25; if (sw > 0) { g.strokeStyle = o.sc || '#000000'; g.lineWidth = sw; g.strokeText(l, c.width / 2, y); } g.fillStyle = o.color || '#ffffff'; g.fillText(l, c.width / 2, y); });
+  if (textCache.size > 60) textCache.clear(); textCache.set(key, c); return c;
+}
 export function renderSeq(g, s, t, w, h) {
   g.fillStyle = s.bg || '#000'; g.fillRect(0, 0, w, h);
   let a = 0, i = 0; for (; i < s.scenes.length - 1 && t >= a + s.scenes[i].dur; i++) a += s.scenes[i].dur;
   const x = s.scenes[i]; if (!x) return;
   const f = Math.min(x.fade || 0, x.dur), prev = s.scenes[i - 1];
-  if (f > 0 && prev && t - a < f) {   // 앞 장면 위에 이 장면을 (바탕까지 그린 뒤) 점점 진하게
+  if (f > 0 && prev && t - a < f && x.trans && glTrans(g, s, prev, x, (t - a) / f, (t - a) / x.dur, w, h)) { /* 특수 넘김으로 그렸어요 */ }
+  else if (f > 0 && prev && t - a < f) {   // 앞 장면 위에 이 장면을 (바탕까지 그린 뒤) 점점 진하게
     drawScene(g, prev, w, h, 1);
     if (!fadeCv || fadeCv.width !== w || fadeCv.height !== h) { fadeCv = document.createElement('canvas'); fadeCv.width = w; fadeCv.height = h; }
     const fg = fadeCv.getContext('2d'); fg.fillStyle = s.bg || '#000'; fg.fillRect(0, 0, w, h); drawScene(fg, x, w, h, (t - a) / x.dur);
@@ -59,14 +83,22 @@ export function renderSeq(g, s, t, w, h) {
   }
   else drawScene(g, x, w, h, Math.min(1, (t - a) / x.dur));
   // 얹는 그림: 장면 위, 자막 아래. 자리는 가운데 기준 %, 크기는 영상 너비의 %
+  const live = (s.fx || []).filter(f => t >= (f.t0 || 0) && t <= (f.t1 == null ? 1e9 : f.t1) + 1e-6), kindOf = f => (fxLib().FXK[f.kind] || [])[2];
+  for (const f of live) if (kindOf(f) === 'p') fxLib().fxParticles(g, f, t, w, h);
   for (const o of s.overs || []) {
     if (t < o.t0 || t >= o.t0 + o.dur) continue;
-    const b = state.bitmaps.get(o.mediaId); if (!b) { ensureBitmap(o.mediaId); continue; }
+    const b = o.text != null ? textPic(o) : state.bitmaps.get(o.mediaId); if (!b) { ensureBitmap(o.mediaId); continue; }
     // 끝 값(to)이 있으면 나오는 동안 처음 값에서 끝 값으로 부드럽게 바뀌어요
     const K = keysOf(o), at = (k, def) => valAt(o[k] ?? def, K, t - o.t0, k);
     const dw = w * at('size', 30) / 100, dh = dw * b.height / b.width;
-    g.save(); g.globalAlpha = clamp(at('opacity', 1), 0, 1); g.imageSmoothingQuality = 'high'; g.drawImage(b, w * at('x', 50) / 100 - dw / 2, h * at('y', 50) / 100 - dh / 2, dw, dh); g.restore();
+    g.save(); g.globalAlpha = clamp(at('opacity', 1), 0, 1); g.imageSmoothingQuality = 'high'; g.translate(w * at('x', 50) / 100, h * at('y', 50) / 100);
+    // 나타날 때 · 있는 동안 · 사라질 때의 움직임
+    if (o.ain || o.aloop || o.aout) { const F = fxLib(), lt = t - o.t0, left = o.dur - lt, base = Math.min(w, h) / 1000, on = (n, p) => F.ANIM_CSS[n] && F.animApply(g, F.animAt(n, clamp(p, 0, 1), dw, dh, base));
+      if (o.aloop) on(o.aloop.n, frac(lt / Math.max(0.1, o.aloop.d || 1)));
+      if (o.ain && lt < (o.ain.d || 0.6)) on(o.ain.n, lt / (o.ain.d || 0.6)); else if (o.aout && left < (o.aout.d || 0.6)) on(o.aout.n, 1 - left / (o.aout.d || 0.6)); }
+    g.drawImage(b, -dw / 2, -dh / 2, dw, dh); g.restore();
   }
+  for (const f of live) if (kindOf(f) === 's') fxLib().fxScreen(g, f, t, w, h);
   // 자막: 영상 높이에 맞춰 크기를 정해요
   for (const c of s.caps || []) {
     if (t < c.t0 || t >= c.t0 + c.dur || !String(c.text || '').trim()) continue;
@@ -74,6 +106,7 @@ export function renderSeq(g, s, t, w, h) {
     g.font = `700 ${size}px "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.lineJoin = 'round';
     lines.forEach((ln, k) => { g.strokeStyle = c.sc || '#000000'; g.lineWidth = size * 0.16; g.strokeText(ln, w / 2, y0 + k * lh); g.fillStyle = c.color || '#ffffff'; g.fillText(ln, w / 2, y0 + k * lh); });
   }
+  for (const f of live) if (kindOf(f) === 'c') fxLib().fxScreen(g, f, t, w, h);   // 카메라 화면은 맨 위에
 }
 // 보관함 그림들을 장면으로. 영상이 비어 있으면 첫 그림 크기에 맞춰요
 export function addScenes(mediaIds, dur, label) {
@@ -228,9 +261,9 @@ export const videoRoom = {
         h('button.btn.small.primary', { disabled: !T, onclick: () => run('video.export') }, '내보내기'));
       // 둘째 줄: 얹는 그림과 자막이 언제 나오는지 막대로 보여요. 누르면 그 시각으로 가요
       const xOf = tt => { let a = 0, px = 8; for (const x of s.scenes) { if (tt < a + x.dur) return px + (tt - a) / x.dur * widthOf(x); a += x.dur; px += widthOf(x); } return px; };
-      const bars = s && s.scenes.length ? [...(s.overs || []).map(o => [o, 'over', (state.project.media.find(m => m.id === o.mediaId) || {}).name || '그림']), ...(s.caps || []).map(c => [c, 'cap', String(c.text || '').split('\n')[0]]), ...tracksOf(s).map(a => [{ t0: a.t0 || 0, dur: lenOf(a, AUD.get(a.id)) || 1 }, 'aud', a.name])] : [];
+      const bars = s && s.scenes.length ? [...(s.overs || []).map(o => [o, 'over', o.text != null ? String(o.text).split('\n')[0] : (state.project.media.find(m => m.id === o.mediaId) || {}).name || '그림']), ...(s.fx || []).map(f => [{ t0: f.t0 || 0, dur: (f.t1 == null ? total(s) : f.t1) - (f.t0 || 0) }, 'fx', (fxLib().FXK[f.kind] || [0, f.kind])[1]]), ...(s.caps || []).map(c => [c, 'cap', String(c.text || '').split('\n')[0]]), ...tracksOf(s).map(a => [{ t0: a.t0 || 0, dur: lenOf(a, AUD.get(a.id)) || 1 }, 'aud', a.name])] : [];
       lane.hidden = !bars.length;
-      lane.replaceChildren(h('div.vid-lane-in', { style: `width:${s ? xOf(1e9) + 8 : 0}px` }, bars.map(([o, kind, name]) => h('button.vid-chip.' + kind, { style: `left:${xOf(o.t0)}px;width:${Math.max(10, xOf(o.t0 + o.dur) - xOf(o.t0))}px`, title: `${kind === 'over' ? '얹는 그림' : kind === 'aud' ? '소리' : '자막'}: ${name}, ${o.t0.toFixed(2)}초부터 ${o.dur.toFixed(2)}초 동안`, onclick: () => { V.t = o.t0; emit(); } }, name))));
+      lane.replaceChildren(h('div.vid-lane-in', { style: `width:${s ? xOf(1e9) + 8 : 0}px` }, bars.map(([o, kind, name]) => h('button.vid-chip.' + kind, { style: `left:${xOf(o.t0)}px;width:${Math.max(10, xOf(o.t0 + o.dur) - xOf(o.t0))}px`, title: `${{ over: '얹는 것', aud: '소리', fx: '효과' }[kind] || '자막'}: ${name}, ${o.t0.toFixed(2)}초부터 ${o.dur.toFixed(2)}초 동안`, onclick: () => { V.t = o.t0; emit(); } }, name))));
       lane.scrollLeft = strip.scrollLeft;
       strip.replaceChildren(...(s && s.scenes.length ? [
         ...s.scenes.map((x, i) => h('button.vid-scene' + (V.sel.has(x.id) ? '.on' : ''), { style: `width:${widthOf(x)}px`, title: `${i + 1}번 장면, ${x.dur.toFixed(2)}초`, 'aria-pressed': String(V.sel.has(x.id)),
@@ -251,6 +284,8 @@ export const videoRoom = {
         many.length ? h('label.field', null, h('span.field-name.w', null, '화면 움직임'), h('select.text', { 'aria-label': '화면 움직임', onchange: e => { many.forEach(x => { if (e.target.value) x.move = e.target.value; else delete x.move; }); commit('화면 움직임'); } }, MOVES.map(([v, t]) => h('option', { value: v, selected: (many[0].move || '') === v }, t)))) : null,
         many.length && many[0].move ? num('움직이는 정도', many[0].moveAmt ?? 12, 1, 1, v => { many.forEach(x => { x.moveAmt = clamp(v, 1, 60); }); commit('움직이는 정도'); }, '%') : null,
         ...(one ? [h('p.panel-note', null, '움직임을 직접 정하려면 점을 넣어요. 점이 있으면 위의 화면 움직임 대신 점대로 움직여요.'), ...keyRows(one, [['zoom', '확대', 10, 800, 100], ['x', '가로 밀기', -100, 100, 0], ['y', '세로 밀기', -100, 100, 0]], '장면', V.t - startOf(s, one.id))] : []),
+        many.length ? h('label.field', null, h('span.field-name.w', null, '넘김 모양'), h('select.text', { 'aria-label': '넘김 모양', onchange: e => { many.forEach(x => { if (e.target.value) { x.trans = e.target.value; if (!x.fade) x.fade = 0.6; } else delete x.trans; }); commit('넘김 모양'); } },
+          [['', '겹쳐 바뀜 (기본)'], ['gl:*', '무작위 (장면마다 다르게)'], ...fxLib().GLT_TOP.map(n => ['gl:' + n, fxLib().GLT_KO[n] || n]), ...fxLib().GL_TRANS.filter(x => !fxLib().GLT_KO[x.name]).map(x => ['gl:' + x.name, x.name])].map(([v, t]) => h('option', { value: v, selected: (many[0].trans || '') === v }, t)))) : null,
         many.length ? num('겹쳐 바뀜', +(many[0].fade || 0).toFixed(2), 0.1, 0, v => { many.forEach(x => { x.fade = clamp(v, 0, 10); }); commit('겹쳐 바뀜'); }, '초') : null,
         many.length ? h('div.btn-row', null, h('button.btn.small', { title: '고른 장면과 다음 장면 사이에 AI가 중간 장면을 그려 넣어 부드럽게 이어요', onclick: () => run('video.interp') }, 'AI 중간 장면 넣기')) : null,
         many.length ? h('div.btn-row', null, h('button.icon-btn', { title: '앞으로 옮기기', 'aria-label': '앞으로 옮기기', onclick: () => run('video.left') }, icon('up')), h('button.icon-btn', { title: '뒤로 옮기기', 'aria-label': '뒤로 옮기기', onclick: () => run('video.right') }, icon('down')), h('span.grow'), h('button.icon-btn', { title: '장면 지우기', 'aria-label': '장면 지우기', onclick: () => run('video.delete') }, icon('trash'))) : null,
@@ -260,14 +295,23 @@ export const videoRoom = {
           h('div.field-row', null, num('시작', +c.t0.toFixed(2), 0.1, 0, v => { c.t0 = Math.max(0, v); commit('자막 시작'); }, '초'), num('길이', +c.dur.toFixed(2), 0.1, 0.1, v => { c.dur = Math.max(0.1, v); commit('자막 길이'); }, '초')),
           h('div.btn-row', null, h('select.text', { 'aria-label': '자막 자리', style: 'width:auto', onchange: e => { c.pos = e.target.value; commit('자막 자리'); } }, [['bottom', '아래'], ['middle', '가운데'], ['top', '위']].map(([v, t]) => h('option', { value: v, selected: (c.pos || 'bottom') === v }, t))), h('span.grow'), h('button.icon-btn', { title: '자막 지우기', 'aria-label': '자막 지우기', onclick: () => { s.caps = s.caps.filter(x => x !== c); commit('자막 지우기'); } }, icon('trash'))))),
         h('button.btn.small', { onclick: () => { (s.caps || (s.caps = [])).push({ id: uid('k'), text: '자막', t0: +V.t.toFixed(2), dur: 2, pos: 'bottom', size: 5 }); commit('자막 넣기'); } }, '지금 시각에 자막 넣기'),
-        h('h3.sec', null, '얹는 그림'),
-        ...(s.overs || []).map(o => { const m = state.project.media.find(x => x.id === o.mediaId); return h('div.cap', null, h('p.clip-text', { title: m ? m.name : '' }, m ? m.name : '지워진 그림'),
+        h('h3.sec', null, '얹는 그림과 글자'),
+        ...(s.overs || []).map(o => { const m = state.project.media.find(x => x.id === o.mediaId); const anim = (label, key, list) => h('div.field-row', null, h('label.field', { style: 'flex:1' }, h('span.field-name.w', null, label), h('select.text', { 'aria-label': label, onchange: e => { if (e.target.value) o[key] = { n: e.target.value, d: (o[key] && o[key].d) || (key === 'aloop' ? 1.2 : 0.6) }; else delete o[key]; commit('얹는 것 움직임'); } }, [h('option', { value: '' }, '없음'), ...list.map(n => h('option', { value: n, selected: !!o[key] && o[key].n === n }, fxLib().AN_KO[n] || n))])), o[key] ? num('', o[key].d, 0.1, 0.1, v => { o[key].d = clamp(v, 0.1, 20); commit('얹는 것 움직임 길이'); }, '초') : null);
+          return h('div.cap', null, o.text != null ? h('textarea.text.area', { rows: 2, 'aria-label': '얹는 글자', value: o.text, onchange: e => { o.text = e.target.value; commit('얹는 글자'); } }) : h('p.clip-text', { title: m ? m.name : '' }, m ? m.name : '지워진 그림'),
+          o.text != null ? h('div.field-row', null, h('label.field', null, h('span.field-name', null, '색'), h('input', { type: 'color', value: o.color || '#ffffff', 'aria-label': '글자 색', onchange: e => { o.color = e.target.value; commit('글자 색'); } })), h('label.field', null, h('span.field-name', null, '테두리'), h('input', { type: 'color', value: o.sc || '#000000', 'aria-label': '테두리 색', onchange: e => { o.sc = e.target.value; commit('테두리 색'); } })), num('굵기', o.sw ?? 12, 1, 0, v => { o.sw = clamp(v, 0, 40); commit('테두리 굵기'); }, '')) : null,
+          anim('나타날 때', 'ain', fxLib().AN_IN), anim('있는 동안', 'aloop', fxLib().AN_LOOP), anim('사라질 때', 'aout', fxLib().AN_OUT),
           h('div.field-row', null, num('시작', +o.t0.toFixed(2), 0.1, 0, v => { o.t0 = Math.max(0, v); commit('얹는 그림 시작'); }, '초'), num('길이', +o.dur.toFixed(2), 0.1, 0.1, v => { o.dur = Math.max(0.1, v); commit('얹는 그림 길이'); }, '초')),
           h('div.field-row', null, num('가로', o.x ?? 50, 1, -50, v => { o.x = clamp(v, -50, 150); commit('얹는 그림 자리'); }, '%'), num('세로', o.y ?? 50, 1, -50, v => { o.y = clamp(v, -50, 150); commit('얹는 그림 자리'); }, '%')),
           h('div.field-row', null, num('크기', o.size ?? 30, 1, 1, v => { o.size = clamp(v, 1, 400); commit('얹는 그림 크기'); }, '%'), num('진하기', Math.round((o.opacity ?? 1) * 100), 5, 0, v => { o.opacity = clamp(v, 0, 100) / 100; commit('얹는 그림 불투명도'); }, '%')),
           ...keyRows(o, [['x', '가로', -50, 150, 50], ['y', '세로', -50, 150, 50], ['size', '크기', 1, 400, 30], ['opacity', '진하기', 0, 100, 1]], '얹는 그림', V.t - o.t0),
           h('div.btn-row', null, h('span.grow'), h('button.icon-btn', { title: '얹는 그림 빼기', 'aria-label': '얹는 그림 빼기', onclick: () => { s.overs = s.overs.filter(x => x !== o); commit('얹는 그림 빼기'); } }, icon('trash')))); }),
-        h('button.btn.small', { disabled: !picked.size, title: picked.size ? '' : '보관함에서 얹을 그림을 먼저 골라 주세요', onclick: () => run('video.addOver') }, '고른 그림을 지금 시각에 얹기'),
+        h('div.btn-row', null, h('button.btn.small', { disabled: !picked.size, title: picked.size ? '' : '보관함에서 얹을 그림을 먼저 골라 주세요', onclick: () => run('video.addOver') }, '고른 그림 얹기'), h('button.btn.small', { onclick: () => run('video.addText') }, '글자 얹기')),
+        h('h3.sec', null, '효과'),
+        ...(s.fx || []).map(f => { const K = fxLib().FXK[f.kind] || [f.kind, f.kind, 's']; return h('div.cap', null, h('p.clip-text', null, K[1]),
+          h('div.field-row', null, num('시작', +(f.t0 || 0).toFixed(2), 0.1, 0, v => { f.t0 = Math.max(0, v); commit('효과 시작'); }, '초'), num('끝', f.t1 == null ? +total(s).toFixed(2) : +f.t1.toFixed(2), 0.1, 0, v => { f.t1 = v >= total(s) - 0.01 ? null : Math.max((f.t0 || 0) + 0.1, v); commit('효과 끝'); }, '초')),
+          h('div.field-row', null, K[2] === 'p' ? num('양', f.n ?? 50, 5, 1, v => { f.n = clamp(v, 1, 600); commit('효과 양'); }, '') : num('세기', Math.round((f.amt ?? 1) * 100), 10, 0, v => { f.amt = clamp(v, 0, 400) / 100; commit('효과 세기'); }, '%'), num('빠르기', Math.round((f.speed ?? 1) * 100), 10, 10, v => { f.speed = clamp(v, 10, 500) / 100; commit('효과 빠르기'); }, '%')),
+          h('div.btn-row', null, K[2] !== 'c' ? h('label.field', null, h('span.field-name', null, '색'), h('input', { type: 'color', value: f.color || '#ffffff', 'aria-label': '효과 색', onchange: e => { f.color = e.target.value; commit('효과 색'); } })) : null, h('span.grow'), h('button.icon-btn', { title: '효과 빼기', 'aria-label': `${K[1]} 빼기`, onclick: () => { s.fx = s.fx.filter(x => x !== f); commit('효과 빼기'); } }, icon('trash')))); }),
+        h('select.text', { 'aria-label': '효과 넣기', onchange: e => { const k = e.target.value; if (!k) return; const f = fxLib().FX_DEF(k, +V.t.toFixed(2)); (s.fx || (s.fx = [])).push(f); commit('효과 넣기'); } }, [h('option', { value: '' }, '효과 넣기…'), ...[['p', '날리는 것'], ['s', '화면 효과'], ['c', '카메라 화면']].map(([g2, label]) => h('optgroup', { label }, fxLib().FX_KINDS.filter(x => x[2] === g2).map(x => h('option', { value: x[0] }, x[1]))))]),
         h('h3.sec', null, '소리'),
         ...tracksOf(s).map((a0, ti) => { const A = () => ownTracks(s)[ti]; return h('div.cap', null, h('p.clip-text', { title: a0.name }, a0.name), waveBox(new Proxy(a0, { set: (_, k, v) => { A()[k] = v; a0[k] = v; return true; } })),
           h('div.field-row', null, num('영상의', +(a0.t0 || 0).toFixed(2), 0.1, 0, v => { A().t0 = Math.max(0, v); commit('소리 시작'); }, '초부터'), num('크기', Math.round((a0.vol ?? 1) * 100), 5, 0, v => { A().vol = clamp(v, 0, 200) / 100; commit('소리 크기'); }, '%')),
@@ -339,6 +383,7 @@ export function registerVideoCmds() {
   const inRoom = () => !!cv, has = () => inRoom() && !!seqOf() && V.sel.size > 0;
   const shift = d => { const s = seqOf(), ids = s.scenes.filter(x => V.sel.has(x.id)); (d < 0 ? ids : ids.reverse()).forEach(x => { const i = s.scenes.indexOf(x), j = i + d; if (j >= 0 && j < s.scenes.length && !V.sel.has(s.scenes[j].id)) { s.scenes.splice(i, 1); s.scenes.splice(j, 0, x); } }); commit('장면 옮기기'); };
   addCmd({ id: 'video.addOver', title: '보관함에서 고른 그림을 장면 위에 얹기', menu: '영상', words: '로고 스티커 워터마크 오버레이', enabled: () => picked.size > 0 && !!seqOf() && seqOf().scenes.length > 0, run: () => { const s = seqOf(); [...picked].forEach(id => { (s.overs || (s.overs = [])).push({ id: uid('o'), mediaId: id, t0: +V.t.toFixed(2), dur: 2, x: 50, y: 50, size: 30, opacity: 1 }); ensureBitmap(id); }); commit('그림 얹기'); } });
+  addCmd({ id: 'video.addText', title: '지금 시각에 글자 얹기', menu: '영상', words: '자막 스티커 타이틀 텍스트', enabled: () => !!seqOf() && seqOf().scenes.length > 0, run: () => { const s = seqOf(); (s.overs || (s.overs = [])).push({ id: uid('o'), text: '글자를 적어 주세요', color: '#ffffff', sc: '#000000', sw: 12, t0: +V.t.toFixed(2), dur: Math.min(3, Math.max(0.5, total(s) - V.t)), x: 50, y: 50, size: 50, opacity: 1, ain: { n: 'bounceIn', d: 0.6 } }); commit('글자 얹기'); } });
   addCmd({ id: 'video.addPicked', title: '보관함에서 고른 그림을 장면으로', menu: '영상', enabled: () => picked.size > 0, run: () => { const n = addScenes([...picked]); if (n) toast(`장면 ${n}개를 넣었어요.`); } });
   addCmd({ id: 'video.export', title: '영상 내보내기…', menu: '영상', enabled: () => !!seqOf() && seqOf().scenes.length > 0, run: exportDialog });
   addCmd({ id: 'video.play', title: '재생·멈춤', menu: '영상', group: 'play', enabled: () => inRoom() && !!seqOf(), run: () => play(!V.playing) });

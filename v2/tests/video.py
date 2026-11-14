@@ -109,6 +109,17 @@ with sync_playwright() as pw:
     lays = P(page, "__potato.state.project.canvases.reduce((a, c) => a + c.layers.length, 0)"); page.keyboard.press('Control+b')
     sc = P(page, "__potato.state.project.sequences[0].scenes.slice(0, 2).map(x => x.dur)"); assert P(page, "__potato.state.project.sequences[0].scenes.length") == n + 1 and abs(sc[0] - 0.8) < 0.01 and abs(sc[1] - 1.2) < 0.01, sc
     page.keyboard.press('Escape'); P(page, "(() => { __potato.state.project.sequences[0]; })()"); page.keyboard.press('v'); assert P(page, "__potato.state.project.canvases.reduce((a, c) => a + c.layers.length, 0)") == lays
+    # 움짤 연출(8.x에서 옮김): 특수 넘김, 얹는 것의 움직임, 날리는 효과, 글자 얹기
+    P(page, "(() => { const s = __potato.state.project.sequences[0]; s.overs = []; s.fx = []; s.caps = []; s.scenes.forEach(x => { delete x.keys; delete x.move; x.fade = 0; }); s.scenes[0].dur = 1; s.scenes[1].dur = 2; s.scenes[1].fade = 1; __potato.emit(); })()")
+    F = P(page, "(() => { const L = __potato.video.fxLib(); return [L.AN_ALL.length, L.GL_TRANS.length, L.FX_KINDS.length]; })()"); assert F[0] == 97 and F[1] == 196 and F[2] >= 25, F
+    ti = P(page, "(() => { const s = __potato.state.project.sequences[0]; s.scenes.forEach(x => { x.dur = 1; x.fade = 0; }); const i = s.scenes.findIndex((x, k) => k > 0 && x.mediaId !== s.scenes[k - 1].mediaId); s.scenes[i].fade = 1; __potato.emit(); return i; })()")
+    P(page, R + "(%f)" % (ti + 0.5)); page.wait_for_timeout(300); plain = P(page, R + "(%f)" % (ti + 0.5))
+    P(page, "(() => { __potato.state.project.sequences[0].scenes[%d].trans = 'gl:' + __potato.video.fxLib().GLT_TOP[0]; __potato.emit(); })()" % ti); tr = P(page, R + "(%f)" % (ti + 0.5)); assert plain != tr, '특수 넘김이 안 그려졌어요'
+    P(page, "(() => { const x = __potato.state.project.sequences[0].scenes[%d]; delete x.trans; x.fade = 0; })()" % ti)
+    P(page, "(() => { const s = __potato.state.project.sequences[0]; __potato.video.seek(0.2); })()"); P(page, "__potato.run('video.addText')")
+    o = P(page, "__potato.state.project.sequences[0].overs[0]"); assert o['text'] and o['ain']['n'] == 'bounceIn'; assert P(page, R + "(0.25)") != P(page, R + "(0.75)")   # 나타나는 동안과 다 나타난 뒤가 달라요
+    base = P(page, R + "(0.9)"); P(page, "(() => { const s = __potato.state.project.sequences[0]; s.fx = [__potato.video.fxLib().FX_DEF('snow', 0)]; __potato.emit(); })()"); assert P(page, R + "(0.9)") != base
+    assert page.locator('.vid-chip.fx').count() == 1 and page.locator('select[aria-label="효과 넣기"]').count() == 1; shot(page, '77-fx')
     assert not errs, errs
     br.close()
 print('통과')
