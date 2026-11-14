@@ -69,6 +69,33 @@ function textPic(o) {
   lines.forEach((l, i) => { const y = sw + 4 + fs * 0.62 + i * fs * 1.25; if (sw > 0) { g.strokeStyle = o.sc || '#000000'; g.lineWidth = sw; g.strokeText(l, c.width / 2, y); } g.fillStyle = o.color || '#ffffff'; g.fillText(l, c.width / 2, y); });
   if (textCache.size > 60) textCache.clear(); textCache.set(key, c); return c;
 }
+// 한 글자씩: 글자마다 따로 그림을 만들어 두고, 글자마다 시간 차를 두어 움직여요
+export const PER = [['', '한꺼번에'], ['each', '한 글자씩 (나타날 때 움직임을 글자마다)'], ['type', '타자기 (한 글자씩 찍기)'], ['blur', '흐릿하다 또렷하게'], ['drop', '위에서 툭 떨어지기']];
+export const TFX = [['', '없음'], ['wave', '물결'], ['float', '둥실둥실'], ['shiver', '덜덜 떨기'], ['rainbow', '무지개 색'], ['flicker', '깜빡임']];
+const glyphCache = new Map(), hash1 = (a, b) => { const x = Math.sin(a * 127.1 + b * 311.7) * 43758.5453; return x - Math.floor(x); };
+function glyphsOf(o, color) {
+  const key = [o.text, color, o.sc, o.sw, o.bold].join('|'); let G = glyphCache.get(key); if (G) return G;
+  const fs = 160, lines = String(o.text || ' ').split('\n'), font = `${o.bold === false ? 500 : 800} ${fs}px "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif`, sw = fs * (o.sw ?? 12) / 100, pad = sw + 4, m = document.createElement('canvas').getContext('2d'); m.font = font;
+  const rows = lines.map(l => { const seg = window.Intl && Intl.Segmenter ? [...new Intl.Segmenter('ko', { granularity: 'grapheme' }).segment(l)].map(x => x.segment) : Array.from(l); return seg.map(ch => ({ ch, w: m.measureText(ch).width })); });
+  const W = Math.ceil(Math.max(1, ...rows.map(r => r.reduce((a, x) => a + x.w, 0))) + pad * 2), H = Math.ceil(lines.length * fs * 1.25 + pad * 2), list = []; let i = 0;
+  rows.forEach((r, li) => { let x = (W - r.reduce((a, q) => a + q.w, 0)) / 2; for (const q of r) { if (q.ch.trim()) { const c = document.createElement('canvas'); c.width = Math.ceil(q.w + pad * 2); c.height = Math.ceil(fs * 1.25 + pad * 2); const g = c.getContext('2d'); g.font = font; g.textAlign = 'center'; g.textBaseline = 'middle'; g.lineJoin = 'round'; if (sw > 0) { g.strokeStyle = o.sc || '#000000'; g.lineWidth = sw; g.strokeText(q.ch, c.width / 2, c.height / 2); } g.fillStyle = color; g.fillText(q.ch, c.width / 2, c.height / 2); list.push({ c, x: x + q.w / 2, y: pad + fs * 0.62 + li * fs * 1.25, i: i++ }); } x += q.w; } });
+  G = { W, H, list }; if (glyphCache.size > 40) glyphCache.clear(); glyphCache.set(key, G); return G;
+}
+function drawGlyphs(g, o, lt, dw, w, h) {
+  const rainbow = o.tfx === 'rainbow', G = glyphsOf(o, rainbow ? '#ff4040' : (o.color || '#ffffff')), k = dw / G.W, F = fxLib(), gap = o.gap ?? 0.07, base = Math.min(w, h) / 1000, ad = (o.ain && o.ain.d) || 0.6;
+  for (const q of G.list) {
+    const d = q.i * gap, gw = q.c.width * k, gh = q.c.height * k; let a = 1, blur = 0, dy = 0, dx = 0, rot = 0;
+    if (o.per === 'type') { if (lt < d) continue; }
+    else if (o.per === 'blur') { const p = clamp((lt - d) / 0.45, 0, 1); if (p <= 0) continue; a = p; blur = (1 - p) * 14 * k * 4; }
+    else if (o.per === 'drop') { const p = clamp((lt - d) / 0.4, 0, 1); if (p <= 0) continue; const e = 1 - Math.pow(1 - p, 3); a = Math.min(1, p * 2); dy = -(1 - e) * G.H * k * 0.9; }
+    if (o.tfx === 'wave') dy += Math.sin(lt * 5 - q.i * 0.55) * G.H * k * 0.1; else if (o.tfx === 'float') { dy += Math.sin(lt * 2 + q.i * 0.9) * G.H * k * 0.05; rot = Math.sin(lt * 1.6 + q.i) * 0.06; }
+    else if (o.tfx === 'shiver') { const f = Math.floor(lt * 24); dx += (hash1(f, q.i) - 0.5) * gw * 0.08; dy += (hash1(q.i, f) - 0.5) * gw * 0.08; } else if (o.tfx === 'flicker') a *= hash1(Math.floor(lt * 12), q.i) > 0.22 ? 1 : 0.3;
+    g.save(); g.translate((q.x - G.W / 2) * k + dx, (q.y - G.H / 2) * k + dy); if (rot) g.rotate(rot); g.globalAlpha *= a;
+    if (o.per === 'each' && o.ain && F.ANIM_CSS[o.ain.n]) { const p = (lt - d) / ad; if (p < 0) { g.restore(); continue; } if (p < 1) F.animApply(g, F.animAt(o.ain.n, p, gw, gh, base)); }
+    if (blur > 0.3 || rainbow) g.filter = `${blur > 0.3 ? `blur(${blur.toFixed(1)}px) ` : ''}${rainbow ? `hue-rotate(${Math.round((lt * 140 + q.i * 32) % 360)}deg)` : ''}`;
+    g.drawImage(q.c, -gw / 2, -gh / 2, gw, gh); g.restore();
+  }
+}
 export function renderSeq(g, s, t, w, h) {
   g.fillStyle = s.bg || '#000'; g.fillRect(0, 0, w, h);
   let a = 0, i = 0; for (; i < s.scenes.length - 1 && t >= a + s.scenes[i].dur; i++) a += s.scenes[i].dur;
@@ -95,8 +122,9 @@ export function renderSeq(g, s, t, w, h) {
     // 나타날 때 · 있는 동안 · 사라질 때의 움직임
     if (o.ain || o.aloop || o.aout) { const F = fxLib(), lt = t - o.t0, left = o.dur - lt, base = Math.min(w, h) / 1000, on = (n, p) => F.ANIM_CSS[n] && F.animApply(g, F.animAt(n, clamp(p, 0, 1), dw, dh, base));
       if (o.aloop) on(o.aloop.n, frac(lt / Math.max(0.1, o.aloop.d || 1)));
-      if (o.ain && lt < (o.ain.d || 0.6)) on(o.ain.n, lt / (o.ain.d || 0.6)); else if (o.aout && left < (o.aout.d || 0.6)) on(o.aout.n, 1 - left / (o.aout.d || 0.6)); }
-    g.drawImage(b, -dw / 2, -dh / 2, dw, dh); g.restore();
+      if (o.ain && !o.per && lt < (o.ain.d || 0.6)) on(o.ain.n, lt / (o.ain.d || 0.6)); else if (o.aout && left < (o.aout.d || 0.6)) on(o.aout.n, 1 - left / (o.aout.d || 0.6)); }
+    if (o.text != null && (o.per || o.tfx)) drawGlyphs(g, o, t - o.t0, dw, w, h); else g.drawImage(b, -dw / 2, -dh / 2, dw, dh);
+    g.restore();
   }
   for (const f of live) if (kindOf(f) === 's') fxLib().fxScreen(g, f, t, w, h);
   // 자막: 영상 높이에 맞춰 크기를 정해요
@@ -299,13 +327,14 @@ export const videoRoom = {
         ...(s.overs || []).map(o => { const m = state.project.media.find(x => x.id === o.mediaId); const anim = (label, key, list) => h('div.field-row', null, h('label.field', { style: 'flex:1' }, h('span.field-name.w', null, label), h('select.text', { 'aria-label': label, onchange: e => { if (e.target.value) o[key] = { n: e.target.value, d: (o[key] && o[key].d) || (key === 'aloop' ? 1.2 : 0.6) }; else delete o[key]; commit('얹는 것 움직임'); } }, [h('option', { value: '' }, '없음'), ...list.map(n => h('option', { value: n, selected: !!o[key] && o[key].n === n }, fxLib().AN_KO[n] || n))])), o[key] ? num('', o[key].d, 0.1, 0.1, v => { o[key].d = clamp(v, 0.1, 20); commit('얹는 것 움직임 길이'); }, '초') : null);
           return h('div.cap', null, o.text != null ? h('textarea.text.area', { rows: 2, 'aria-label': '얹는 글자', value: o.text, onchange: e => { o.text = e.target.value; commit('얹는 글자'); } }) : h('p.clip-text', { title: m ? m.name : '' }, m ? m.name : '지워진 그림'),
           o.text != null ? h('div.field-row', null, h('label.field', null, h('span.field-name', null, '색'), h('input', { type: 'color', value: o.color || '#ffffff', 'aria-label': '글자 색', onchange: e => { o.color = e.target.value; commit('글자 색'); } })), h('label.field', null, h('span.field-name', null, '테두리'), h('input', { type: 'color', value: o.sc || '#000000', 'aria-label': '테두리 색', onchange: e => { o.sc = e.target.value; commit('테두리 색'); } })), num('굵기', o.sw ?? 12, 1, 0, v => { o.sw = clamp(v, 0, 40); commit('테두리 굵기'); }, '')) : null,
+          ...(o.text != null ? [['글자마다', 'per', PER], ['글자 효과', 'tfx', TFX]].map(([label, key, list]) => h('label.field', null, h('span.field-name.w', null, label), h('select.text', { 'aria-label': label, onchange: e => { if (e.target.value) o[key] = e.target.value; else delete o[key]; commit('글자 움직임'); } }, list.map(([v, tt]) => h('option', { value: v, selected: (o[key] || '') === v }, tt))))) : []),
           anim('나타날 때', 'ain', fxLib().AN_IN), anim('있는 동안', 'aloop', fxLib().AN_LOOP), anim('사라질 때', 'aout', fxLib().AN_OUT),
           h('div.field-row', null, num('시작', +o.t0.toFixed(2), 0.1, 0, v => { o.t0 = Math.max(0, v); commit('얹는 그림 시작'); }, '초'), num('길이', +o.dur.toFixed(2), 0.1, 0.1, v => { o.dur = Math.max(0.1, v); commit('얹는 그림 길이'); }, '초')),
           h('div.field-row', null, num('가로', o.x ?? 50, 1, -50, v => { o.x = clamp(v, -50, 150); commit('얹는 그림 자리'); }, '%'), num('세로', o.y ?? 50, 1, -50, v => { o.y = clamp(v, -50, 150); commit('얹는 그림 자리'); }, '%')),
           h('div.field-row', null, num('크기', o.size ?? 30, 1, 1, v => { o.size = clamp(v, 1, 400); commit('얹는 그림 크기'); }, '%'), num('진하기', Math.round((o.opacity ?? 1) * 100), 5, 0, v => { o.opacity = clamp(v, 0, 100) / 100; commit('얹는 그림 불투명도'); }, '%')),
           ...keyRows(o, [['x', '가로', -50, 150, 50], ['y', '세로', -50, 150, 50], ['size', '크기', 1, 400, 30], ['opacity', '진하기', 0, 100, 1]], '얹는 그림', V.t - o.t0),
           h('div.btn-row', null, h('span.grow'), h('button.icon-btn', { title: '얹는 그림 빼기', 'aria-label': '얹는 그림 빼기', onclick: () => { s.overs = s.overs.filter(x => x !== o); commit('얹는 그림 빼기'); } }, icon('trash')))); }),
-        h('div.btn-row', null, h('button.btn.small', { disabled: !picked.size, title: picked.size ? '' : '보관함에서 얹을 그림을 먼저 골라 주세요', onclick: () => run('video.addOver') }, '고른 그림 얹기'), h('button.btn.small', { onclick: () => run('video.addText') }, '글자 얹기')),
+        h('div.btn-row', null, h('button.btn.small', { disabled: !picked.size, title: picked.size ? '' : '보관함에서 얹을 그림을 먼저 골라 주세요', onclick: () => run('video.addOver') }, '고른 그림 얹기'), h('button.btn.small', { onclick: () => run('video.addText') }, '글자 얹기'), h('button.btn.small', { onclick: () => run('video.addEmoji') }, '이모지 얹기')),
         h('h3.sec', null, '효과'),
         ...(s.fx || []).map(f => { const K = fxLib().FXK[f.kind] || [f.kind, f.kind, 's']; return h('div.cap', null, h('p.clip-text', null, K[1]),
           h('div.field-row', null, num('시작', +(f.t0 || 0).toFixed(2), 0.1, 0, v => { f.t0 = Math.max(0, v); commit('효과 시작'); }, '초'), num('끝', f.t1 == null ? +total(s).toFixed(2) : +f.t1.toFixed(2), 0.1, 0, v => { f.t1 = v >= total(s) - 0.01 ? null : Math.max((f.t0 || 0) + 0.1, v); commit('효과 끝'); }, '초')),
@@ -335,10 +364,11 @@ export const videoRoom = {
 };
 
 // 영상·GIF·WebP 파일 → 장면들 (긴 쪽 1280까지, 최대 600장)
-async function importClip() {
-  const inp = h('input', { type: 'file', accept: 'video/*,image/gif,image/webp' });
-  inp.onchange = async () => {
-    const f = inp.files[0]; if (!f) return; const b = busy('파일에서 장면을 꺼내는 중이에요.'), frames = []; let fps = 12;
+function importClip() { const inp = h('input', { type: 'file', accept: 'video/*,image/gif,image/webp' }); inp.onchange = () => { if (inp.files[0]) clipToScenes(inp.files[0]); }; inp.click(); }
+// 영상·움짤 파일(또는 AI가 만든 영상)을 장면들로 풀어 넣어요
+export async function clipToScenes(f) {
+  {
+    const b = busy('파일에서 장면을 꺼내는 중이에요.'), frames = []; let fps = 12;
     const grab = (src, w, hh) => { const k = Math.min(1, 1280 / Math.max(w, hh)), c = document.createElement('canvas'); c.width = Math.round(w * k); c.height = Math.round(hh * k); c.getContext('2d').drawImage(src, 0, 0, c.width, c.height); return c; };
     try {
       if (/^image\//.test(f.type)) {
@@ -355,8 +385,7 @@ async function importClip() {
       const name = f.name.replace(/\.[a-z0-9]+$/i, ''), n = await addFramesTo('영상 장면/' + name, frames, fps, name, (i, t) => b.set(`장면을 보관함에 넣는 중이에요. ${i} / ${t}`));
       b.done(`장면 ${n}개를 넣었어요.`);
     } catch (e) { b.done(e.message || '파일을 읽지 못했어요.', 'err'); }
-  };
-  inp.click();
+  }
 }
 // 고른 장면마다 다음 장면과의 사이에 중간 장면 하나를 그려 넣어요 (길이는 반씩 나눠 전체 길이는 그대로)
 async function interp() {
@@ -384,6 +413,7 @@ export function registerVideoCmds() {
   const shift = d => { const s = seqOf(), ids = s.scenes.filter(x => V.sel.has(x.id)); (d < 0 ? ids : ids.reverse()).forEach(x => { const i = s.scenes.indexOf(x), j = i + d; if (j >= 0 && j < s.scenes.length && !V.sel.has(s.scenes[j].id)) { s.scenes.splice(i, 1); s.scenes.splice(j, 0, x); } }); commit('장면 옮기기'); };
   addCmd({ id: 'video.addOver', title: '보관함에서 고른 그림을 장면 위에 얹기', menu: '영상', words: '로고 스티커 워터마크 오버레이', enabled: () => picked.size > 0 && !!seqOf() && seqOf().scenes.length > 0, run: () => { const s = seqOf(); [...picked].forEach(id => { (s.overs || (s.overs = [])).push({ id: uid('o'), mediaId: id, t0: +V.t.toFixed(2), dur: 2, x: 50, y: 50, size: 30, opacity: 1 }); ensureBitmap(id); }); commit('그림 얹기'); } });
   addCmd({ id: 'video.addText', title: '지금 시각에 글자 얹기', menu: '영상', words: '자막 스티커 타이틀 텍스트', enabled: () => !!seqOf() && seqOf().scenes.length > 0, run: () => { const s = seqOf(); (s.overs || (s.overs = [])).push({ id: uid('o'), text: '글자를 적어 주세요', color: '#ffffff', sc: '#000000', sw: 12, t0: +V.t.toFixed(2), dur: Math.min(3, Math.max(0.5, total(s) - V.t)), x: 50, y: 50, size: 50, opacity: 1, ain: { n: 'bounceIn', d: 0.6 } }); commit('글자 얹기'); } });
+  addCmd({ id: 'video.addEmoji', title: '지금 시각에 이모지 얹기…', menu: '영상', words: '스티커 하트 emoji', enabled: () => !!seqOf() && seqOf().scenes.length > 0, run: () => { const d = dialog({ title: '이모지 얹기', body: h('div.emoji-grid', null, fxLib().EMOJIS.map(em => h('button.emoji', { 'aria-label': em, onclick: () => { const s = seqOf(); (s.overs || (s.overs = [])).push({ id: uid('o'), text: em, color: '#ffffff', sw: 0, bold: false, t0: +V.t.toFixed(2), dur: Math.min(3, Math.max(0.5, total(s) - V.t)), x: 50, y: 40, size: 18, opacity: 1, ain: { n: 'bounceIn', d: 0.6 }, aloop: { n: 'pulse', d: 1.2 } }); commit('이모지 얹기'); d.close(); } }, em))), buttons: [{ label: '닫기' }] }); } });
   addCmd({ id: 'video.addPicked', title: '보관함에서 고른 그림을 장면으로', menu: '영상', enabled: () => picked.size > 0, run: () => { const n = addScenes([...picked]); if (n) toast(`장면 ${n}개를 넣었어요.`); } });
   addCmd({ id: 'video.export', title: '영상 내보내기…', menu: '영상', enabled: () => !!seqOf() && seqOf().scenes.length > 0, run: exportDialog });
   addCmd({ id: 'video.play', title: '재생·멈춤', menu: '영상', group: 'play', enabled: () => inRoom() && !!seqOf(), run: () => play(!V.playing) });

@@ -359,3 +359,15 @@ label.batch-row { cursor: pointer; } .batch-row input[type=checkbox] { accent-co
 .err-list { max-height: 56vh; overflow: auto; display: grid; gap: 8px; } .err-row { display: grid; gap: 2px; padding: 6px 8px; background: var(--well); border-left: 2px solid var(--bad); } .err-row b { font-weight: 600; } .err-row code { font: 11px/1.4 ui-monospace, Consolas, monospace; color: var(--dim); white-space: pre-wrap; word-break: break-all; }
 .toast.err { cursor: pointer; }
 .toast.err { pointer-events: auto; }
+
+.emoji-grid { display: grid; grid-template-columns: repeat(auto-fill, 44px); gap: 4px; max-height: 50vh; overflow: auto; } .emoji { width: 44px; height: 44px; border: 0; border-radius: 4px; background: none; font-size: 26px; line-height: 1; cursor: pointer; } .emoji:hover { background: var(--hover); }
+
+.aiv { display: grid; grid-template-columns: minmax(260px, 340px) 1fr; gap: 18px; align-items: start; } .aiv-form { display: grid; gap: 10px; }
+.aiv-side { min-width: 0; } .aiv-list { display: grid; gap: 8px; max-height: 64vh; overflow: auto; }
+.aiv-item { display: grid; gap: 6px; padding: 8px 10px; background: var(--well); border-left: 2px solid var(--edge); } .aiv-item.on { border-left-color: var(--potato); } .aiv-item.run { border-left-color: var(--pick); } .aiv-item.fail { border-left-color: var(--bad); }
+.aiv-head { display: flex; align-items: center; gap: 8px; } .aiv-name { border: 0; background: none; color: var(--text); font: inherit; font-weight: 600; padding: 0; cursor: pointer; text-align: left; } .aiv-meta { color: var(--faint); font-size: 11px; white-space: nowrap; }
+.aiv-text { margin: 0; color: var(--dim); } .aiv-prompt { margin: 0; color: var(--faint); font-size: 12px; white-space: pre-wrap; word-break: break-word; }
+.aiv-item .vid-out { width: 100%; max-height: 46vh; background: #000; display: block; }
+.job-bar.wait span { width: 35%; animation: aivwait 1.4s ease-in-out infinite alternate; } @keyframes aivwait { from { margin-left: 0; } to { margin-left: 65%; } }
+@media (prefers-reduced-motion: reduce) { .job-bar.wait span { animation: none; width: 100%; opacity: .5; } }
+@media (max-width: 900px) { .aiv { grid-template-columns: 1fr; } }

@@ -1,7 +1,7 @@
 import { h, icon, fmtKeys } from './ui/dom.js';
 import { settings } from './core/settings.js';
 import { addCmd, cmds, cmd, run, handleKey, keysOf, keyName, setErrHandler } from './core/cmd.js';
-import { state, canvasOf, boot, onChange, onTick, emit, commit, undo, redo, canUndo, canRedo, saveNow, newProject, openProject, listProjects, deleteProject } from './core/store.js';
+import { state, canvasOf, tidyMedia, boot, onChange, onTick, emit, commit, undo, redo, canUndo, canRedo, saveNow, newProject, openProject, listProjects, deleteProject } from './core/store.js';
 import { showMenu, closeMenu, cmdItem, toast, dialog, confirmBox, palette, busy, setErrUi } from './ui/overlay.js';
 import { errLog, errClear, errText, logErr, noteDetail } from './core/errlog.js';
 import { renderDock, updatePanels, togglePanel, hasPanel, resetLayout } from './ui/dock.js';
@@ -64,6 +64,7 @@ function registerCmds() {
   addCmd({ id: 'view.full', title: '전체 화면', menu: '보기', keys: 'F11', checked: () => !!document.fullscreenElement, run: async () => { const T = window.__TAURI__; try { if (T && T.window) { const w = T.window.getCurrentWindow(); await w.setFullscreen(!(await w.isFullscreen())); } else if (document.fullscreenElement) await document.exitFullscreen(); else await document.documentElement.requestFullscreen(); } catch (_) { toast('전체 화면으로 바꾸지 못했어요.', 'err'); } } });
   addCmd({ id: 'help.guide', title: '사용법', menu: '도움말', keys: 'F1', run: helpDialog });
   addCmd({ id: 'help.changes', title: '업데이트 기록', menu: '도움말', run: () => { const u = 'https://github.com/harp1455/Potato-editor/releases', T = window.__TAURI__; if (T && T.opener && T.opener.openUrl) T.opener.openUrl(u); else window.open(u, '_blank', 'noopener'); } });
+  addCmd({ id: 'file.tidy', title: '안 쓰는 그림 정리', menu: '파일', words: '용량 청소 붓 그리기 임시', run: async () => { const r = await tidyMedia(); toast(r.n ? `안 쓰는 그림 ${r.n}장을 지웠어요 (${(r.bytes / 1048576).toFixed(1)}MB). 보관함에 보이는 그림과 되돌리기에 필요한 그림은 그대로예요.` : '지울 것이 없어요. 붓으로 그린 흔적 같은 안 쓰는 그림은 작업을 열 때와 그리는 중에도 저절로 정리돼요.'); } });
   addCmd({ id: 'help.errors', title: '오류 기록…', menu: '도움말', words: '로그 log 에러 거절', run: errDialog });
   addCmd({ id: 'help.plan', title: '2.0에서 달라지는 것', menu: '도움말', run: planDialog });
   addCmd({ id: 'help.update', title: '새 판 확인', menu: '도움말', run: () => checkUpdate(false) });
@@ -359,7 +360,7 @@ async function start() {
   addEventListener('error', e => logErr('알 수 없는 오류', e.message, `${e.filename || ''}:${e.lineno || ''} ${e.error && e.error.stack ? String(e.error.stack).split('\n').slice(0, 4).join(' | ') : ''}`));
   addEventListener('unhandledrejection', e => { const r = e.reason || {}; logErr('알 수 없는 오류', r.message || String(r), (r.code ? r.code + ' / ' : '') + (r.detail ? r.detail + ' / ' : '') + String(r.stack || '').split('\n').slice(0, 4).join(' | ')); });
   registerCmds(); build();
-  await boot();
+  await boot(); tidyMedia();   // 작업을 열 때 안 쓰는 그림을 치워요
   renderChrome(); mountRoom(); refresh();
   onChange(refresh); onTick(renderStatus);
   settings.on(k => {
@@ -385,6 +386,7 @@ async function start() {
   import('./ui/geminitools.js').then(f => { window.__potato.gem = f; });
   import('./rooms/cut.js').then(f => { window.__potato.cut = f; });
   window.__potato.liq = { makeField, stroke, warp };
+  window.__potato.tidy = tidyMedia; import('./core/store.js').then(f => { window.__potato.store = f; });
   import('./ui/bin.js').then(f => { window.__potato.picked = f.picked; });
   window.__potato.toastErr = m => toast(m, 'err');
   window.__potato.link = { linkState, startWatch, stopWatch, sendOut };

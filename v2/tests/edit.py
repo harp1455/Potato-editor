@@ -153,6 +153,11 @@ with sync_playwright() as pw:
     P(page, "(ids => { const B = __potato.picked; B.clear(); ids.forEach(i => B.add(i)); })(%s)" % mids); np = P(page, "(__potato.state.project.pages || []).length"); P(page, "__potato.run('cut.auto')")
     pg2 = P(page, "__potato.state.project.pages.at(-1)"); assert P(page, "__potato.state.project.pages.length") == np + 1 and len(pg2['els']) == len(mids) and all(e['mediaId'] and e['w'] > 50 and e['h'] > 50 for e in pg2['els']) and max(e['y'] + e['h'] for e in pg2['els']) <= pg2['h'], pg2['els']
     page.keyboard.press('Control+z'); P(page, "__potato.picked.clear()")
+    # 안 쓰는 그림 정리: 아무 데도 안 쓰는 보이지 않는 그림만 지우고, 쓰는 그림과 되돌리기에 필요한 그림은 그대로
+    P(page, "(async () => { const c = document.createElement('canvas'); c.width = c.height = 8; const b = await new Promise(r => c.toBlob(r, 'image/png')); await __potato.store.addMedia(new File([b], '버릴것.png', { type: 'image/png' }), null, { hidden: true }); })()")
+    used0 = P(page, "__potato.state.project.canvases.flatMap(c => c.layers.map(l => l.mediaId))"); r = P(page, "__potato.tidy()"); assert r['n'] >= 1, r
+    left = P(page, "__potato.state.project.media.map(m => m.id)"); assert all(u in left for u in used0) and not P(page, "__potato.state.project.media.some(m => m.name === '버릴것.png')")
+    page.keyboard.press('Control+z'); page.keyboard.press('Control+y'); assert P(page, FLAT)[3] == 255   # 되돌리기·다시 하기도 멀쩡해요
     # 가림막: 고른 곳만 보이게 하면 바깥은 투명해지고, 없애면 돌아와요
     A = "(async (x, y) => { const cv = __potato.state.project.canvases[0], c = await __potato.image.flatten(cv, cv.layers[0].id); return c.getContext('2d').getImageData(x, y, 1, 1).data[3]; })"
     lid = P(page, "__potato.state.layerId"); P(page, "(() => { __potato.state.layerId = __potato.state.project.canvases[0].layers[0].id; __potato.sel.selRect('new', 20, 20, 60, 60); __potato.emit(); })()")

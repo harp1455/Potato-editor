@@ -120,6 +120,12 @@ with sync_playwright() as pw:
     o = P(page, "__potato.state.project.sequences[0].overs[0]"); assert o['text'] and o['ain']['n'] == 'bounceIn'; assert P(page, R + "(0.25)") != P(page, R + "(0.75)")   # 나타나는 동안과 다 나타난 뒤가 달라요
     base = P(page, R + "(0.9)"); P(page, "(() => { const s = __potato.state.project.sequences[0]; s.fx = [__potato.video.fxLib().FX_DEF('snow', 0)]; __potato.emit(); })()"); assert P(page, R + "(0.9)") != base
     assert page.locator('.vid-chip.fx').count() == 1 and page.locator('select[aria-label="효과 넣기"]').count() == 1; shot(page, '77-fx')
+    # 한 글자씩: 타자기는 앞 글자부터 찍히고, 물결은 시간에 따라 모양이 달라요. 이모지 얹기
+    P(page, "(() => { const s = __potato.state.project.sequences[0]; s.fx = []; s.overs = [{ id: 'tt', text: '가나다라마바', color: '#ffffff', sc: '#000000', sw: 10, t0: 0, dur: 3, x: 50, y: 50, size: 80, opacity: 1, per: 'type', gap: 0.2 }]; __potato.emit(); })()")
+    a1, a2, a3 = P(page, R + "(0.05)"), P(page, R + "(0.5)"), P(page, R + "(2.5)"); assert len({a1, a2, a3}) == 3, (a1, a2, a3)
+    P(page, "(() => { const o = __potato.state.project.sequences[0].overs[0]; delete o.per; o.tfx = 'wave'; __potato.emit(); })()"); assert P(page, R + "(2.0)") != P(page, R + "(2.3)")
+    P(page, "__potato.run('video.addEmoji')"); page.wait_for_selector('.emoji'); assert page.locator('.emoji').count() > 20; page.click('.emoji >> nth=0'); assert P(page, "__potato.state.project.sequences[0].overs.length") == 2
+    assert page.locator('select[aria-label="글자마다"]').count() >= 1
     assert not errs, errs
     br.close()
 print('통과')

@@ -52,8 +52,14 @@ with sync_playwright() as pw:
     P(page, "window.__noSafety = false; __sent.length = 0")
     page.click('.mb-item >> text=AI'); page.click('.menu >> text=AI 영상 만들기')
     page.fill('textarea[aria-label="어떻게 움직일지"]', 'gentle wind'); shot(page, '61-video-ask')
-    page.click('.dlg-foot >> text=영상 만들기')
-    page.wait_for_selector('video.vid-out', timeout=30000)
+    page.click('.aiv-form button:has-text("영상 만들기")')
+    page.wait_for_selector('.aiv-item.run'); assert page.locator('.dlg >> text=AI 영상').count() >= 1   # 창이 꺼지지 않고, 만드는 중인 것이 바로 보여요
+    page.wait_for_selector('video.vid-out', timeout=30000); shot(page, '62-video-done')
+    vv = P(page, "__potato.state.project.videos"); assert len(vv) == 1 and vv[0]['prompt'] == 'gentle wind' and vv[0]['size'] > 0 and page.locator('.aiv-item.run').count() == 0
+    with page.expect_download() as dl: page.click('.aiv-item button:has-text("MP4로 저장")')
+    assert dl.value.suggested_filename.endswith('.mp4')
+    page.keyboard.press('Escape'); P(page, "__potato.run('ai.video')"); page.wait_for_selector('video.vid-out'); assert page.locator('.aiv-item').count() == 1   # 닫았다 열어도 만든 영상이 남아 있어요
+    page.keyboard.press('Escape')
     b = P(page, "__sent[0].b")
     assert b['model'] == 'gemini-omni-1.1-flash' and b['response_format'] == {'type': 'video', 'aspect_ratio': '16:9', 'resolution': '720p'} and b['generation_config']['video_config']['task'] == 'image_to_video'
     assert b['input'][0]['type'] == 'image' and b['input'][1]['text'].endswith('gentle wind') and 'Animate the scene as described' in b['system_instruction'] and len(b['safety_settings']) == 5

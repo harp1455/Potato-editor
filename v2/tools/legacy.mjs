@@ -168,10 +168,11 @@ export function makeFx(deps) {
 ${read('presets.js')}
 ${e2.slice(tm0, tm1)}
 ${cut(an, 'function bezier(', 'const TX_IN')}
+${cut(an, 'const EMOJIS', 'const FX_KINDS').split('\n')[0]}
 ${cut(an, 'const FX_KINDS', 'const FX_PRESETS')}
 ${cut(an, 'function fxCopy(', 'function gsRenderExtras(')}
 ${cut(an, 'const GLT_KO', 'function gltPickRandom(')}
-  return { ANIM_CSS, AN_KO, AN_ALL, AN_LOOP, AN_IN, AN_OUT, animAt, animApply, FX_KINDS, FXK, FX_DEF, fxParticles, fxScreen, GL_TRANS, GLT_KO, GLT_TOP, gltRender, glt: () => glt };
+  return { EMOJIS, ANIM_CSS, AN_KO, AN_ALL, AN_LOOP, AN_IN, AN_OUT, animAt, animApply, FX_KINDS, FXK, FX_DEF, fxParticles, fxScreen, GL_TRANS, GLT_KO, GLT_TOP, gltRender, glt: () => glt };
 }
 `);
 }

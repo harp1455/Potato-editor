@@ -1,6 +1,6 @@
 // 그리는 도구: 붓, 지우개, 도형, 글자. 그린 것은 '그리기' 레이어에 들어가서 원래 그림은 그대로예요.
 import { h } from '../ui/dom.js';
-import { state, commit, emit, layerOf, addMedia, addLayer, ensureBitmap } from '../core/store.js';
+import { state, commit, emit, layerOf, addMedia, addLayer, ensureBitmap, tidyMedia } from '../core/store.js';
 import { settings } from '../core/settings.js';
 import { dialog } from '../ui/overlay.js';
 
@@ -13,7 +13,7 @@ export const PAINT_TOOLS = [
 export const SHAPES = [['rect', '네모'], ['ellipse', '동그라미'], ['line', '선'], ['arrow', '화살표']];
 const P = () => ({ color: '#111111', size: 12, alpha: 100, shape: 'rect', fill: false, tsize: 64, tstroke: '#ffffff', tsw: 0, ...(settings.get('paint') || {}) });
 export const paintOpt = P, setPaint = (k, v) => settings.set('paint', { ...P(), [k]: v });
-let lastPt = null;
+let lastPt = null, strokes = 0;
 
 // 그릴 레이어: 고른 레이어가 그리기 레이어면 거기에, 아니면 그 위에 새로 만들어요
 async function target(c) {
@@ -31,7 +31,7 @@ async function begin(c) {
   state.bitmaps.set(l.mediaId, w);
   // 레이어가 옮겨졌거나 크기가 바뀌었어도 그림판 자리 그대로 그려지게
   const toLayer = p => ({ x: (p.x - l.x) / l.scale, y: (p.y - l.y) / l.scale });
-  const done = async label => { const oldId = l.mediaId, m = await addMedia(new File([await new Promise(r => w.toBlob(r, 'image/png'))], '그리기.png', { type: 'image/png' }), null, { hidden: true }); state.bitmaps.set(oldId, old); await ensureBitmap(m.id); l.mediaId = m.id; commit(label); };
+  const done = async label => { const oldId = l.mediaId, m = await addMedia(new File([await new Promise(r => w.toBlob(r, 'image/png'))], '그리기.png', { type: 'image/png' }), null, { hidden: true }); state.bitmaps.set(oldId, old); await ensureBitmap(m.id); l.mediaId = m.id; commit(label); if (++strokes % 20 === 0) tidyMedia(); };   // 스무 번 그을 때마다, 되돌리기로도 못 돌아가는 옛 그림을 치워요
   const cancel = () => { state.bitmaps.set(l.mediaId, old); };
   return { l, g, w, toLayer, done, cancel, k: 1 / l.scale };
 }

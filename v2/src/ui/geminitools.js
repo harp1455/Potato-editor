@@ -1,6 +1,7 @@
 // 제미나이로 하는 일: 더빙(대사 → 목소리), AI 영상(그림 → 움직이는 영상). 요청은 모두 api/gemini.js의 통로를 지나요.
-import { h } from './dom.js';
-import { canvasOf, layerOf, emit, commit } from '../core/store.js';
+import { h, icon } from './dom.js';
+import { state, idb, uid, canvasOf, layerOf, emit, commit } from '../core/store.js';
+import { logErr } from '../core/errlog.js';
 import { settings } from '../core/settings.js';
 import { addCmd, run } from '../core/cmd.js';
 import { speak, animate, generate } from '../api/gemini.js';
@@ -60,42 +61,85 @@ export const dubPanel = {
 
 const RATIOS = [['16:9', 16 / 9], ['9:16', 9 / 16], ['1:1', 1], ['4:3', 4 / 3], ['3:4', 3 / 4]];
 const IDEAS = [['카메라가 천천히 다가가요', 'Slow cinematic push-in toward the subject.'], ['머리카락과 옷이 바람에 흔들려요', 'Hair and clothes sway gently in the wind; subtle natural motion.'], ['숨 쉬고 눈을 깜빡여요', 'The character breathes softly and blinks; minimal idle motion.'], ['카메라가 옆으로 천천히 움직여요', 'Slow lateral camera pan with gentle parallax.']];
+// AI 영상 작업 창: 왼쪽에서 만들고, 오른쪽에 만드는 중인 것과 다 만든 영상이 쌓여요.
+// 창을 닫아도 만들기는 계속되고, 다 된 영상은 작업에 저장돼서 언제든 다시 열어 보고, 저장하고, 영상 작업실로 보낼 수 있어요.
+const RUN = [];   // 만드는 중이거나 실패한 것 (이 창을 켠 동안만)
+let vidPaint = null;
+const vids = () => state.project.videos || (state.project.videos = []);
+async function makeVideo(c, V, ratio) {
+  const it = { id: uid('v'), prompt: V.prompt, model: V.model, res: V.res, ratio: ratio[0], t0: Date.now(), status: 'run', text: '그림을 준비하는 중이에요.', name: c.name }; RUN.unshift(it); if (vidPaint) vidPaint();
+  const ctl = new AbortController(); it.stop = () => ctl.abort();
+  try {
+    const r = await runJob('AI 영상', async (job, say) => {
+      const flat = await flatten(c), k = ratio[1], sw = Math.min(flat.width, flat.height * k), sh = sw / k, L = 1280 / Math.max(sw, sh), f = document.createElement('canvas');
+      f.width = Math.round(sw * Math.min(1, L)); f.height = Math.round(sh * Math.min(1, L)); const g = f.getContext('2d'); g.fillStyle = '#000'; g.fillRect(0, 0, f.width, f.height); g.imageSmoothingQuality = 'high';
+      g.drawImage(flat, (flat.width - sw) / 2, (flat.height - sh) / 2, sw, sh, 0, 0, f.width, f.height);
+      it.text = '제미나이에 보냈어요. 보통 1~3분 걸려요.'; say('제미나이가 영상을 만드는 중', 0.1); if (vidPaint) vidPaint();
+      return animate(V.model, f.toDataURL('image/jpeg', 0.93).split(',')[1], V.prompt, ratio[0], V.res, { signal: ctl.signal, onWait: n => { if (job.stop) ctl.abort(); say(`제미나이가 영상을 만드는 중 (${(n + 1) * 5}초째)`, Math.min(0.95, 0.1 + n * 0.02)); } });
+    });
+    if (!r) throw new Error('만들기를 멈췄어요.');
+    await idb.put('blobs', 'vid:' + it.id, r.blob);
+    vids().unshift({ id: it.id, name: it.name, prompt: it.prompt, model: it.model, res: it.res, ratio: it.ratio, at: Date.now(), size: r.blob.size, type: r.blob.type, note: r.note || '' });
+    RUN.splice(RUN.indexOf(it), 1); commit('AI 영상 만들기');
+    if (vidPaint) vidPaint(it.id); else toast('AI 영상이 다 됐어요. AI 메뉴의 AI 영상에서 보고 저장할 수 있어요.');
+  } catch (e) {
+    it.status = 'fail'; it.text = e.message || '영상을 만들지 못했어요.'; logErr('AI 영상', it.text, (e.code || '') + (e.detail ? ' / ' + e.detail : ''));
+    if (vidPaint) vidPaint(); else toast('AI 영상을 만들지 못했어요. AI 메뉴의 AI 영상에서 이유를 볼 수 있어요.', 'err');
+  }
+}
 function videoDialog() {
-  const c = canvasOf(); if (!c) return;
-  if (!settings.get('adult') || !settings.get('apiKey').trim()) { toast('성인 확인과 제미나이 API 키가 필요해요.', 'err'); return run('app.settings'); }
+  const c = canvasOf(), okKey = settings.get('adult') && settings.get('apiKey').trim();
   const V = { model: 'gemini-omni-1.1-flash', res: '720p', prompt: '', ...(settings.get('vid') || {}) };
-  const ratio = RATIOS.reduce((a, b) => Math.abs(Math.log(b[1] / (c.w / c.h))) < Math.abs(Math.log(a[1] / (c.w / c.h))) ? b : a);
-  const ta = h('textarea.text.area', { rows: 3, 'aria-label': '어떻게 움직일지', placeholder: '영어로 적으면 더 잘 알아들어요', value: V.prompt });
-  dialog({ title: 'AI 영상 만들기', wide: true, body: h('div.vid-form', null,
-    h('p.dlg-text', null, `지금 그림판을 첫 장면으로 삼아 짧은 영상을 만들어요. 화면 비율은 그림에 가장 가까운 ${ratio[0]}로 맞추고, 넘치는 곳은 가운데를 기준으로 잘라요. 영상은 결제를 연결한 키에서만 만들 수 있고 요금이 커요.`),
-    h('label.stack', null, h('span.field-name', null, '어떻게 움직일지'), ta),
-    h('div.btn-row', null, IDEAS.map(([t, p]) => h('button.btn.small', { onclick: () => { ta.value = (ta.value.trim() + ' ' + p).trim(); } }, t))),
-    h('div.field-row', null,
-      h('label.field', null, h('span.field-name.w', null, '화질'), h('select.text', { 'aria-label': '화질', onchange: e => { V.res = e.target.value; } }, ['720p', '1080p'].map(r => h('option', { value: r, selected: V.res === r }, r)))),
-      h('label.field', null, h('span.field-name.w', null, '모델'), h('input.text', { type: 'text', value: V.model, 'aria-label': '영상 모델', onchange: e => { V.model = e.target.value.trim(); } })))),
-    buttons: [{ label: '취소' }, { label: '영상 만들기', primary: true, run: () => {
-      V.prompt = ta.value.trim(); settings.set('vid', V);
-      (async () => {
-        const ctl = new AbortController();
-        try {
-          const r = await runJob('AI 영상', async (job, say) => {
-            const flat = await flatten(c), k = ratio[1], sw = Math.min(flat.width, flat.height * k), sh = sw / k, L = 1280 / Math.max(sw, sh), f = document.createElement('canvas');
-            f.width = Math.round(sw * Math.min(1, L)); f.height = Math.round(sh * Math.min(1, L)); const g = f.getContext('2d'); g.fillStyle = '#000'; g.fillRect(0, 0, f.width, f.height); g.imageSmoothingQuality = 'high';
-            g.drawImage(flat, (flat.width - sw) / 2, (flat.height - sh) / 2, sw, sh, 0, 0, f.width, f.height);
-            say('제미나이가 영상을 만드는 중 (몇 분 걸릴 수 있어요)', 0.1);
-            return animate(V.model, f.toDataURL('image/jpeg', 0.93).split(',')[1], V.prompt, ratio[0], V.res, { signal: ctl.signal, onWait: n => { if (job.stop) ctl.abort(); say(`제미나이가 영상을 만드는 중 (${(n + 1) * 5}초째)`, Math.min(0.95, 0.1 + n * 0.02)); } });
-          });
-          if (!r) return;
-          const url = URL.createObjectURL(r.blob);
-          dialog({ title: 'AI 영상', wide: true, onClose: () => URL.revokeObjectURL(url), body: h('div', null, h('video.vid-out', { src: url, controls: true, loop: true, autoplay: true }), r.note && h('p.set-note', null, r.note)), buttons: [{ label: '닫기' }, { label: 'MP4 저장', primary: true, run: () => { download(r.blob, c.name + ' 영상.mp4'); return false; } }] });
-        } catch (e) { toast(e.message || '영상을 만들지 못했어요.', 'err'); }
-      })();
-    } }] });
+  const ratio = c ? RATIOS.reduce((a, b) => Math.abs(Math.log(b[1] / (c.w / c.h))) < Math.abs(Math.log(a[1] / (c.w / c.h))) ? b : a) : RATIOS[0];
+  const ta = h('textarea.text.area', { rows: 4, 'aria-label': '어떻게 움직일지', placeholder: '영어로 적으면 더 잘 알아들어요', value: V.prompt });
+  const list = h('div.aiv-list'), urls = new Map(); let open = (vids()[0] || {}).id || null;
+  const urlOf = async v => { if (!urls.has(v.id)) { const b = await idb.get('blobs', 'vid:' + v.id); urls.set(v.id, b ? URL.createObjectURL(b) : ''); } return urls.get(v.id); };
+  const when = t => new Date(t).toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'short' });
+  const paint = async focus => {
+    if (focus) open = focus;
+    const rows = [];
+    for (const it of RUN) rows.push(h('div.aiv-item' + (it.status === 'fail' ? '.fail' : '.run'), null,
+      h('div.aiv-head', null, h('b', null, it.status === 'fail' ? '만들지 못했어요' : `만드는 중 (${Math.round((Date.now() - it.t0) / 1000)}초째)`), h('span.grow'), it.status === 'fail' ? h('button.btn.small', { onclick: () => { ta.value = it.prompt; RUN.splice(RUN.indexOf(it), 1); paint(); } }, '같은 말로 다시 쓰기') : h('button.btn.small', { onclick: () => it.stop && it.stop() }, '멈추기'), it.status === 'fail' ? h('button.icon-btn', { title: '목록에서 지우기', 'aria-label': '실패한 것 지우기', onclick: () => { RUN.splice(RUN.indexOf(it), 1); paint(); } }, icon('close', 12)) : null),
+      it.status === 'run' ? h('div.job-bar.wait', null, h('span')) : null, h('p.aiv-text', null, it.text), h('p.aiv-prompt', null, it.prompt || '(움직임 설명 없음)')));
+    for (const v of vids()) {
+      const on = v.id === open, src = on ? await urlOf(v) : '';
+      rows.push(h('div.aiv-item' + (on ? '.on' : ''), null,
+        h('div.aiv-head', null, h('button.aiv-name', { 'aria-expanded': String(on), onclick: () => { open = on ? null : v.id; paint(); } }, v.name), h('span.aiv-meta', null, when(v.at)), h('span.grow'), h('span.aiv-meta', null, `${v.ratio}, ${v.res}, ${(v.size / 1048576).toFixed(1)}MB`)),
+        on ? (src ? h('video.vid-out', { src, controls: true, loop: true, autoplay: true, muted: true, playsinline: true }) : h('p.aiv-text', null, '영상 파일을 찾지 못했어요.')) : null,
+        on ? h('p.aiv-prompt', null, v.prompt || '(움직임 설명 없음)') : null, on && v.note ? h('p.aiv-text', null, v.note) : null,
+        on ? h('div.btn-row', null,
+          h('button.btn.small.primary', { disabled: !src, onclick: async () => download(await idb.get('blobs', 'vid:' + v.id), `${v.name} 영상 ${v.id.slice(-4)}.mp4`) }, 'MP4로 저장'),
+          h('button.btn.small', { disabled: !src, title: '영상을 장면들로 풀어 영상 작업실에 넣어요. 거기서 자막·소리·효과를 더하고 다시 내보낼 수 있어요.', onclick: async () => { const b = await idb.get('blobs', 'vid:' + v.id), { clipToScenes } = await import('../rooms/video.js'); d.close(); settings.set('room', 'video'); clipToScenes(new File([b], `${v.name} AI 영상.mp4`, { type: b.type || 'video/mp4' })); } }, '영상 작업실로 보내기'),
+          h('button.btn.small', { onclick: () => { ta.value = v.prompt; ta.focus(); } }, '이 말로 다시 쓰기'), h('span.grow'),
+          h('button.icon-btn', { title: '이 영상 지우기', 'aria-label': `${v.name} 영상 지우기`, onclick: async () => { state.project.videos = vids().filter(x => x !== v); await idb.del('blobs', 'vid:' + v.id); if (urls.get(v.id)) URL.revokeObjectURL(urls.get(v.id)); urls.delete(v.id); commit('AI 영상 지우기'); paint(); } }, icon('trash'))) : null));
+    }
+    if (!rows.length) rows.push(h('p.empty', null, '아직 만든 영상이 없어요. 왼쪽에서 움직임을 적고 영상 만들기를 누르면, 만드는 과정과 결과가 여기에 나와요.'));
+    list.replaceChildren(...rows);
+  };
+  const go = () => {
+    if (!c) { toast('먼저 이미지 작업실에서 그림을 열어 주세요.', 'err'); return; }
+    if (!okKey) { toast('성인 확인과 제미나이 API 키가 필요해요. 설정 > AI와 API에서 넣어 주세요.', 'err'); return; }
+    V.prompt = ta.value.trim(); settings.set('vid', V); makeVideo(c, { ...V }, ratio);
+  };
+  const tick = setInterval(() => { if (RUN.some(r => r.status === 'run')) paint(); }, 1000);
+  const d = dialog({ title: 'AI 영상', wide: true, onClose: () => { clearInterval(tick); vidPaint = null; urls.forEach(u => u && URL.revokeObjectURL(u)); },
+    body: h('div.aiv', null,
+      h('div.aiv-form', null,
+        h('p.dlg-text', null, c ? `지금 그림판(${c.name})을 첫 장면으로 삼아 짧은 영상을 만들어요. 화면 비율은 그림에 가장 가까운 ${ratio[0]}로 맞추고, 넘치는 곳은 가운데를 기준으로 잘라요.` : '이미지 작업실에서 그림을 열면 그 그림으로 영상을 만들 수 있어요. 전에 만든 영상은 오른쪽에서 볼 수 있어요.'),
+        h('label.stack', null, h('span.field-name', null, '어떻게 움직일지'), ta),
+        h('div.btn-row.wrap', null, IDEAS.map(([t, p]) => h('button.btn.small', { onclick: () => { ta.value = (ta.value.trim() + ' ' + p).trim(); } }, t))),
+        h('label.field', null, h('span.field-name.w', null, '화질'), h('select.text', { 'aria-label': '화질', onchange: e => { V.res = e.target.value; } }, ['720p', '1080p'].map(r => h('option', { value: r, selected: V.res === r }, r)))),
+        h('label.field', null, h('span.field-name.w', null, '모델'), h('input.text', { type: 'text', value: V.model, 'aria-label': '영상 모델', onchange: e => { V.model = e.target.value.trim(); } })),
+        h('button.btn.primary', { disabled: !c, onclick: go }, '영상 만들기'),
+        h('p.dlg-text', null, '영상은 결제를 연결한 키에서만 만들 수 있고 요금이 커요. 만드는 동안 이 창을 닫아도 계속 만들어지고, 다 되면 알려 드려요. 구글의 영상 거름막은 끌 수 없어서 수위 있는 그림은 거절될 수 있어요.')),
+      h('div.aiv-side', null, h('h3.sec', null, '만든 영상'), list)),
+    buttons: [{ label: '닫기' }] });
+  vidPaint = paint; paint();
 }
 
 export function registerGeminiCmds() {
   addCmd({ id: 'ai.editByText', title: '말로 그림 고치기… (제미나이)', menu: 'AI', group: 'gemini', words: '나노 바나나 편집 수정 edit', enabled: () => !!canvasOf(), run: editDialog });
-  addCmd({ id: 'ai.video', title: 'AI 영상 만들기… (제미나이)', menu: 'AI', group: 'gemini', words: '움직이는 영상 omni', enabled: () => !!canvasOf(), run: videoDialog });
+  addCmd({ id: 'ai.video', title: 'AI 영상 만들기… (제미나이)', menu: 'AI', group: 'gemini', words: '움직이는 영상 omni 만든 영상 보기 저장', run: videoDialog });
 }
 
 // 말로 그림 고치기: 고른 레이어(없으면 그림판 전체)를 보내고, 고친 그림을 새 레이어로 받아요

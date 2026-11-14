@@ -128,9 +128,20 @@ export async function openProject(id) {
   return true;
 }
 export const listProjects = async () => (await idb.all('projects')).sort((a, b) => b.at - a.at).map(p => ({ id: p.id, name: p.name, at: p.at, media: p.media.length, canvases: p.canvases.length }));
+// 안 쓰는 그림 정리: 붓질·AI 도구가 남긴 '보이지 않는 그림' 가운데, 지금 작업에서도 되돌리기 기록에서도 쓰지 않는 것을 지워요.
+// 돌려주는 값 = { n(지운 장 수), bytes }
+export async function tidyMedia() {
+  const p = state.project; if (!p) return { n: 0, bytes: 0 };
+  const strip = q => JSON.stringify({ ...q, media: [] }), used = strip(p) + hist.items.map(x => strip(x.snap)).join('');
+  const dead = p.media.filter(m => m.hidden && !used.includes('"' + m.id + '"')); if (!dead.length) return { n: 0, bytes: 0 };
+  const ids = new Set(dead.map(m => m.id)); let bytes = 0;
+  p.media = p.media.filter(m => !ids.has(m.id)); for (const x of hist.items) x.snap.media = x.snap.media.filter(m => !ids.has(m.id));
+  for (const m of dead) { bytes += m.size || 0; const b = state.bitmaps.get(m.id); if (b && b.close) b.close(); state.bitmaps.delete(m.id); await idb.del('blobs', m.id); await idb.del('blobs', 't:' + m.id); }
+  state.saved = false; scheduleSave(); return { n: dead.length, bytes };
+}
 export async function deleteProject(id) {
   const p = await idb.get('projects', id);
-  if (p) for (const m of p.media) { await idb.del('blobs', m.id); await idb.del('blobs', 't:' + m.id); }
+  if (p) { for (const m of p.media) { await idb.del('blobs', m.id); await idb.del('blobs', 't:' + m.id); } for (const v of p.videos || []) await idb.del('blobs', 'vid:' + v.id); }
   await idb.del('projects', id);
 }
 export async function boot() {

@@ -2,7 +2,7 @@
 import { idb, state, saveNow } from './store.js';
 import { makeZip, unzipAll } from './files.js';
 
-const blobKeys = p => [...p.media.flatMap(m => [m.id, 't:' + m.id]), ...(p.sequences || []).flatMap(s => [...(s.audio ? [s.audio] : []), ...(s.audios || [])].map(a => 'aud:' + a.id))];
+const blobKeys = p => [...p.media.flatMap(m => [m.id, 't:' + m.id]), ...(p.sequences || []).flatMap(s => [...(s.audio ? [s.audio] : []), ...(s.audios || [])].map(a => 'aud:' + a.id)), ...(p.videos || []).map(v => 'vid:' + v.id)];
 // ids가 없으면 모든 작업
 export async function backupZip(ids, onStep) {
   await saveNow();
@@ -24,7 +24,7 @@ export async function restoreZip(file) {
   for (const it of items.filter(i => i.name.startsWith('projects/'))) {
     const p = JSON.parse(dec.decode(it.data));
     if (have.has(p.id)) { skipped++; continue; }
-    for (const k of blobKeys(p)) { const d = blobs.get(k); if (!d) continue; const m = p.media.find(x => x.id === k.replace(/^t:/, '')); await idb.put('blobs', k, new Blob([d], { type: k.startsWith('aud:') ? 'audio/*' : (m && m.type) || 'image/png' })); }
+    for (const k of blobKeys(p)) { const d = blobs.get(k); if (!d) continue; const m = p.media.find(x => x.id === k.replace(/^t:/, '')); await idb.put('blobs', k, new Blob([d], { type: k.startsWith('aud:') ? 'audio/*' : k.startsWith('vid:') ? 'video/mp4' : (m && m.type) || 'image/png' })); }
     await idb.put('projects', p.id, p); added++;
   }
   return { added, skipped, now: state.project.id };
