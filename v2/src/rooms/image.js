@@ -1,7 +1,9 @@
 // 이미지 작업실: 그림판에 레이어를 올리고 옮기고 크기를 바꿔요.
 // 고르는 도구·보정·AI 도구는 다음 단계에서 이 위에 얹어요.
 import { h, icon, clamp, drag } from '../ui/dom.js';
-import { state, commit, emit, tick, canvasOf, layerOf, addMedia, newCanvas, addLayer, uid } from '../core/store.js';
+import { state, commit, emit, tick, canvasOf, layerOf, newCanvas, addLayer, uid, ensureBitmap } from '../core/store.js';
+import { importItems } from '../core/library.js';
+import { fromDrop, isImage } from '../core/files.js';
 import { addCmd, run } from '../core/cmd.js';
 import { toast, showMenu, confirmBox } from '../ui/overlay.js';
 
@@ -54,7 +56,7 @@ export function zoomAt(f, px, py) {
 export function paint(g, c, { guides = false } = {}) {
   for (const l of c.layers) {
     if (!l.visible) continue;
-    const bmp = state.bitmaps.get(l.mediaId); if (!bmp) continue;
+    const bmp = state.bitmaps.get(l.mediaId); if (!bmp) { ensureBitmap(l.mediaId); continue; }
     const s = layerSize(l);
     g.save(); g.globalAlpha = l.opacity;
     g.translate(l.x + s.w / 2, l.y + s.h / 2); g.rotate(l.rot * Math.PI / 180);
@@ -91,18 +93,16 @@ export function draw() {
 }
 
 // ---- 파일 ----
-export async function importFiles(files, { toCanvas = false } = {}) {
-  const imgs = [...files].filter(f => /^image\//.test(f.type));
-  if (!imgs.length) { toast('그림 파일(PNG, JPG, WebP 등)만 넣을 수 있어요.', 'err'); return; }
-  let made = 0, firstCanvas = !canvasOf();
-  for (const f of imgs) {
-    try {
-      const m = await addMedia(f); made++;
-      if (firstCanvas) { addLayer(newCanvas(m.name.replace(/\.[a-z0-9]+$/i, ''), m.w, m.h), m); firstCanvas = false; }
-      else if (toCanvas) addLayer(canvasOf(), m);
-    } catch (_) { toast(`'${f.name}'은 열 수 없는 그림이에요.`, 'err'); }
-  }
-  if (made) commit(made > 1 ? `그림 ${made}장 넣기` : '그림 넣기');
+// 그림판 쪽으로 넣기: 그림판이 없으면 첫 그림 크기로 만들고, toCanvas면 레이어로도 올려요
+export async function importFiles(files, opt) { return importList([...files].filter(isImage).map(file => ({ file, dir: '' })), opt); }
+export async function importList(items, { toCanvas = false } = {}) {
+  if (!items.length) { toast('그림 파일(PNG, JPG, WebP 등)만 넣을 수 있어요.', 'err'); return; }
+  const { made, failed } = await importItems(items);
+  failed.forEach(n => toast(`'${n}'은 열 수 없는 그림이에요.`, 'err'));
+  if (!made.length) return;
+  if (!canvasOf()) { const m = made[0]; addLayer(newCanvas(m.name.replace(/\.[a-z0-9]+$/i, ''), m.w, m.h), m); if (toCanvas) made.slice(1, 12).forEach(m => addLayer(canvasOf(), m)); }
+  else if (toCanvas) made.slice(0, 12).forEach(m => addLayer(canvasOf(), m));
+  commit(made.length > 1 ? `그림 ${made.length}장 넣기` : '그림 넣기');
 }
 function pickFiles() {
   const i = h('input', { type: 'file', accept: 'image/*', multiple: true });
@@ -112,6 +112,7 @@ function pickFiles() {
 export async function exportPng() {
   const c = canvasOf(); if (!c) return;
   const t = document.createElement('canvas'); t.width = c.w; t.height = c.h;
+  await Promise.all(c.layers.map(l => ensureBitmap(l.mediaId)));
   paint(t.getContext('2d'), c);
   const blob = await new Promise(r => t.toBlob(r, 'image/png'));
   const a = h('a', { href: URL.createObjectURL(blob), download: c.name + '.png' });
@@ -178,8 +179,8 @@ export const imageRoom = {
     wrap.addEventListener('drop', e => {
       e.preventDefault(); wrap.classList.remove('drop');
       const mid = e.dataTransfer.getData('application/x-potato-media');
-      if (mid) return placeMedia(mid);
-      if (e.dataTransfer.files.length) importFiles(e.dataTransfer.files, { toCanvas: true });
+      if (mid) { let ids = [mid]; try { ids = JSON.parse(e.dataTransfer.getData('application/x-potato-medias')) || ids; } catch (_) { /* 한 장만 */ } return ids.slice(0, 12).forEach(placeMedia); }
+      if (e.dataTransfer.files.length) fromDrop(e.dataTransfer).then(items => importList(items, { toCanvas: true }));
     });
 
     const update = () => {

@@ -33,7 +33,7 @@ export const uid = (p = 'x') => p + Date.now().toString(36) + Math.random().toSt
 const clone = o => JSON.parse(JSON.stringify(o));
 
 function blank(name) {
-  return { v: 2, id: uid('p'), name: name || '새 작업', at: Date.now(), media: [], canvases: [], sequences: [], characters: [], activeCanvas: null, sel: null };
+  return { v: 2, id: uid('p'), name: name || '새 작업', at: Date.now(), media: [], canvases: [], sequences: [], characters: [], folders: [], activeCanvas: null, sel: null };
 }
 
 export const state = {
@@ -90,21 +90,33 @@ export async function saveNow() {
   emit();
 }
 
-async function loadBitmaps(p) {
+// 큰 그림은 그림판에 올라갔을 때만 풀어 두고, 보관함에는 작은 미리보기만 써요 (폴더째 수백 장을 넣어도 가볍게)
+async function loadThumbs(p) {
   state.bitmaps.forEach(b => b.close && b.close());
   state.thumbs.forEach(u => URL.revokeObjectURL(u));
-  state.bitmaps.clear(); state.thumbs.clear();
-  for (const m of p.media) {
-    const blob = await idb.get('blobs', m.id);
-    if (!blob) continue;
-    try { state.bitmaps.set(m.id, await createImageBitmap(blob)); state.thumbs.set(m.id, URL.createObjectURL(blob)); } catch (_) { /* 못 읽는 파일은 건너뜀 */ }
-  }
+  state.bitmaps.clear(); state.thumbs.clear(); loading.clear();
+  await Promise.all(p.media.map(async m => {
+    const t = await idb.get('blobs', 't:' + m.id) || await idb.get('blobs', m.id);
+    if (t) state.thumbs.set(m.id, URL.createObjectURL(t));
+  }));
+  const used = new Set(p.canvases.flatMap(c => c.layers.map(l => l.mediaId)));
+  await Promise.all([...used].map(ensureBitmap));
+}
+const loadBitmaps = loadThumbs;
+const loading = new Map();
+export function ensureBitmap(id) {
+  if (state.bitmaps.has(id)) return Promise.resolve(state.bitmaps.get(id));
+  if (!loading.has(id)) loading.set(id, (async () => {
+    try { const blob = await idb.get('blobs', id); if (!blob) return null; const b = await createImageBitmap(blob); state.bitmaps.set(id, b); emit(); return b; }
+    catch (_) { return null; } finally { loading.delete(id); }
+  })());
+  return loading.get(id);
 }
 function reset(p, label) {
   state.project = p; hist.items = [{ label, snap: clone(p), t: Date.now() }]; hist.at = 0; state.saved = true; emit();
 }
 export async function newProject(name) {
-  await loadBitmaps({ media: [] });
+  await loadBitmaps({ media: [], canvases: [] });
   reset(blank(name), '새 작업');
   await saveNow();
 }
@@ -118,7 +130,7 @@ export async function openProject(id) {
 export const listProjects = async () => (await idb.all('projects')).sort((a, b) => b.at - a.at).map(p => ({ id: p.id, name: p.name, at: p.at, media: p.media.length, canvases: p.canvases.length }));
 export async function deleteProject(id) {
   const p = await idb.get('projects', id);
-  if (p) for (const m of p.media) await idb.del('blobs', m.id);
+  if (p) for (const m of p.media) { await idb.del('blobs', m.id); await idb.del('blobs', 't:' + m.id); }
   await idb.del('projects', id);
 }
 export async function boot() {
@@ -128,13 +140,42 @@ export async function boot() {
 }
 
 // ---- 보관함 ----
-export async function addMedia(file) {
+async function makeThumb(bmp) {
+  const k = Math.min(1, 192 / Math.max(bmp.width, bmp.height)), c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(bmp.width * k)); c.height = Math.max(1, Math.round(bmp.height * k));
+  c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+  return new Promise(r => c.toBlob(r, 'image/webp', 0.8));
+}
+export async function addMedia(file, folder = null, info = {}) {
   const bmp = await createImageBitmap(file);
-  const m = { id: uid('m'), name: file.name || '그림', type: 'image', w: bmp.width, h: bmp.height, size: file.size };
+  const m = { id: uid('m'), name: file.name || '그림', type: 'image', w: bmp.width, h: bmp.height, size: file.size, folder, ...info };
+  const thumb = await makeThumb(bmp); bmp.close();
   await idb.put('blobs', m.id, file);
-  state.bitmaps.set(m.id, bmp); state.thumbs.set(m.id, URL.createObjectURL(file));
+  if (thumb) await idb.put('blobs', 't:' + m.id, thumb);
+  state.thumbs.set(m.id, URL.createObjectURL(thumb || file));
   state.project.media.push(m);
   return m;
+}
+// 보관함 그림의 파일을 바꿔요 (NAI 정보 지우기 등). 크기는 그대로라 미리보기는 안 바뀌어요
+export async function replaceMediaBlob(id, blob) {
+  await idb.put('blobs', id, blob);
+  const b = state.bitmaps.get(id); if (b) { b.close && b.close(); state.bitmaps.delete(id); await ensureBitmap(id); }
+  const m = state.project.media.find(m => m.id === id); if (m) m.size = blob.size;
+}
+
+// ---- 폴더: 나무 모양 { id, name, parent } ----
+export const folders = () => state.project.folders || (state.project.folders = []);
+export const folderById = id => folders().find(f => f.id === id) || null;
+export function folderPath(id, sep = '/') { const out = []; for (let f = folderById(id), n = 0; f && n < 50; f = folderById(f.parent), n++) out.unshift(f.name); return out.join(sep); }
+export function folderDesc(id) { const out = new Set([id]); let grew = true; while (grew) { grew = false; for (const f of folders()) if (f.parent && out.has(f.parent) && !out.has(f.id)) { out.add(f.id); grew = true; } } return out; }
+export function ensureFolder(path, base = null) {
+  let parent = base;
+  for (const name of String(path || '').split('/').map(x => x.trim()).filter(Boolean)) {
+    let f = folders().find(f => f.parent === parent && f.name === name);
+    if (!f) { f = { id: uid('f'), name, parent }; folders().push(f); }
+    parent = f.id;
+  }
+  return parent;
 }
 export const mediaBlob = id => idb.get('blobs', id);
 
@@ -149,6 +190,6 @@ export function newCanvas(name, w, h) {
 export function addLayer(c, m) {
   const s = Math.min(1, c.w / m.w, c.h / m.h);
   const l = { id: uid('l'), name: m.name.replace(/\.[a-z0-9]+$/i, ''), mediaId: m.id, x: Math.round((c.w - m.w * s) / 2), y: Math.round((c.h - m.h * s) / 2), scale: s, rot: 0, opacity: 1, visible: true, locked: false };
-  c.layers.push(l); state.project.sel = l.id;
+  c.layers.push(l); state.project.sel = l.id; ensureBitmap(m.id);
   return l;
 }

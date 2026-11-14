@@ -2,9 +2,10 @@
 import { h, icon } from './dom.js';
 import { state, commit, emit, canvasOf, layerOf, history, jump } from '../core/store.js';
 import { run } from '../core/cmd.js';
-import { placeMedia, draw } from '../rooms/image.js';
+import { draw } from '../rooms/image.js';
 import { showMenu, cmdItem } from './overlay.js';
 import { cmd } from '../core/cmd.js';
+import { binPanel } from './bin.js';
 
 const num = (label, value, step, on, unit) => {
   const i = h('input.num', { type: 'number', value, step, 'aria-label': label, onchange: () => { const v = parseFloat(i.value); if (!isNaN(v)) on(v); } });
@@ -14,20 +15,7 @@ const num = (label, value, step, on, unit) => {
 let lastClick = { id: null, t: 0 };
 
 export const PANELS = {
-  media: {
-    title: '보관함',
-    render(el) {
-      const p = state.project;
-      if (!p.media.length) return el.append(h('p.empty', null, '이 작업에 넣은 그림이 여기 모여요.'), h('button.btn', { onclick: () => run('file.open') }, '그림 열기'));
-      el.append(h('div.media-grid', null, p.media.map(m => h('button.media', {
-        draggable: 'true', title: `${m.name}\n${m.w} × ${m.h}`,
-        ondblclick: () => placeMedia(m.id),
-        ondragstart: e => { e.dataTransfer.setData('application/x-potato-media', m.id); e.dataTransfer.effectAllowed = 'copy'; },
-        onkeydown: e => { if (e.key === 'Enter') placeMedia(m.id); },
-      }, h('img', { src: state.thumbs.get(m.id) || '', alt: '', loading: 'lazy' }), h('span.media-name', null, m.name)))));
-      el.append(h('p.panel-note', null, '두 번 누르거나 그림판으로 끌면 레이어로 올라가요.'));
-    },
-  },
+  media: binPanel,
   layers: {
     title: '레이어',
     render(el) {

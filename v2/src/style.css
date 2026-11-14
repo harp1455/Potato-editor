@@ -208,3 +208,28 @@ body[data-mode="single"] .rail { display: none; }
 .plan .now .plan-when { color: var(--potato); }
 
 @media (max-width: 900px) { .top-btn span, .top-btn kbd { display: none; } .proj-name { width: 110px; } .zone.left { display: none; } .split.v:first-of-type { display: none; } }
+
+/* 보관함 */
+.zone-body.flush { padding: 0; gap: 0; align-items: stretch; }
+.bin-bar { display: flex; padding: 2px 4px; border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 1; }
+.bin-tree { flex: 1; padding: 6px 6px 12px; display: flex; flex-direction: column; gap: 2px; min-height: 80px; }
+.bin-tree.over { box-shadow: inset 0 0 0 1px var(--potato); }
+.bin-tree > .empty { padding: 6px; }
+.bin-tree > .media-grid { margin-top: 4px; }
+.bin-foot { padding: 6px 8px; border-top: 1px solid var(--line); background: var(--strip); color: var(--faint); line-height: 1.5; position: sticky; bottom: 0; }
+.fold { display: flex; align-items: center; gap: 5px; height: 24px; padding: 0 6px 0 calc(2px + var(--d) * 12px); border-radius: var(--r); cursor: pointer; color: var(--text); }
+.fold:hover { background: var(--raise); }
+.fold.over { background: #4a4233; box-shadow: inset 0 0 0 1px var(--potato); }
+.fold .ic { color: var(--dim); }
+.fold-arrow { display: grid; transform: rotate(90deg); } .fold.closed .fold-arrow { transform: none; }
+.fold-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fold-count { color: var(--faint); font-size: 11px; }
+.fold-body { padding-left: calc(var(--d) * 12px); display: flex; flex-direction: column; gap: 2px; }
+.fold-body > .fold-wrap { margin-left: calc(var(--d) * -12px); }
+.fold-body > .media-grid { padding: 2px 0 4px 2px; }
+.fold-empty { color: var(--faint); padding: 2px 8px 4px; font-size: 11px; }
+.media { position: relative; }
+.media.on { background: #4a4233; box-shadow: inset 0 0 0 1px var(--potato); }
+.media-meta { position: absolute; right: 6px; top: 6px; width: 7px; height: 7px; border-radius: 50%; background: var(--potato); box-shadow: 0 0 0 2px var(--well); }
+.dlg-sub { font-size: 12px; font-weight: 600; color: var(--dim); margin: 14px 0 8px; }
+.toast.busy { background: var(--raise); color: var(--text); border: 1px solid var(--edge); }

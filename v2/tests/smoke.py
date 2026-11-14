@@ -48,6 +48,7 @@ with sync_playwright() as pw:
     page.wait_for_function("__potato.state.project.canvases.length === 1")
     c = P(page, "__potato.state.project.canvases[0]")
     assert (c['w'], c['h'], len(c['layers'])) == (640, 400, 1), c
+    page.wait_for_timeout(300)
     with page.expect_file_chooser() as fc: page.keyboard.press('Control+o')
     fc.value.set_files(b)
     page.wait_for_function("__potato.state.project.media.length === 2")

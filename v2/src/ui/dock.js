@@ -84,6 +84,6 @@ export function updatePanels(force) {
     // 글자를 적고 있는 중에는 다시 그리지 않아요 (적던 칸이 사라지지 않게)
     const a = document.activeElement;
     if (!force && a && b.el.contains(a) && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) continue;
-    const top = b.el.scrollTop; b.el.replaceChildren(); PANELS[b.id].render(b.el); b.el.scrollTop = top;
+    const top = b.el.scrollTop; b.el.replaceChildren(); b.el.className = 'zone-body'; PANELS[b.id].render(b.el); b.el.scrollTop = top;
   }
 }

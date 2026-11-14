@@ -7,6 +7,8 @@ import { renderDock, updatePanels, togglePanel, hasPanel, resetLayout } from './
 import { PANELS } from './ui/panels.js';
 import { imageRoom, registerImageCmds, setMenuItem } from './rooms/image.js';
 import { stubRooms } from './rooms/stub.js';
+import { registerBinCmds } from './ui/bin.js';
+import { naiAccount } from './api/nai.js';
 import { preamble, check, generate, buildBody, SAFETY_CATEGORIES } from './api/gemini.js';
 
 const VERSION = typeof __VERSION__ === 'string' ? __VERSION__ : 'dev';
@@ -22,6 +24,7 @@ function registerCmds() {
   addCmd({ id: 'file.new', title: '새 작업', menu: '파일', keys: 'Ctrl+Alt+N', run: async () => { await saveNow(); await newProject(); toast('새 작업을 만들었어요.'); } });
   addCmd({ id: 'file.projects', title: '작업 목록…', menu: '파일', keys: 'Ctrl+Shift+O', words: '열기 최근', run: projectsDialog });
   registerImageCmds();
+  registerBinCmds();
   addCmd({ id: 'file.save', title: '지금 저장', menu: '파일', keys: 'Ctrl+S', run: async () => { await saveNow(); toast('저장했어요. 평소에는 고칠 때마다 알아서 저장돼요.'); } });
   addCmd({ id: 'edit.undo', title: '되돌리기', menu: '편집', keys: 'Ctrl+Z', enabled: canUndo, run: undo });
   addCmd({ id: 'edit.redo', title: '다시 하기', menu: '편집', keys: 'Ctrl+Shift+Z', enabled: canRedo, run: redo });
@@ -167,16 +170,21 @@ function settingsDialog(tab = 'screen') {
     api: () => {
       const out = h('p.set-note', { role: 'status' });
       const pre = h('pre.preamble', null, preamble('write'));
+      const naiOut = h('p.set-note', { role: 'status' });
       return [
         h('h3', null, '성인 확인'),
         settings.get('adult')
           ? h('p.set-note', null, `확인을 마쳤어요 (${new Date(settings.get('adultAt')).toLocaleDateString('ko-KR')}). `, h('button.link', { onclick: () => { settings.set('adult', false); show('api'); } }, '확인 취소'))
           : h('div', null, h('p.set-note', null, 'AI 기능을 쓰려면 성인 확인이 필요해요.'), h('button.btn.primary', { onclick: () => adultDialog(() => show('api')) }, '성인 확인하기')),
-        h('h3', null, '제미나이 API 키'),
+        h('h3', null, '구글 제미나이 API 키'),
         h('input.text.wide', { type: 'password', value: settings.get('apiKey'), placeholder: 'AIza…', autocomplete: 'off', 'aria-label': 'API 키', onchange: e => settings.set('apiKey', e.target.value.trim()) }),
         h('p.set-note', null, '키는 이 컴퓨터에만 저장되고, 구글 제미나이 서버로만 보내요.'),
         h('label.field', null, h('span.field-name', null, '글 모델'), h('input.text', { type: 'text', value: settings.get('textModel'), 'aria-label': '글 모델', onchange: e => settings.set('textModel', e.target.value.trim()) })),
         h('div.btn-row', null, h('button.btn', { onclick: async e => { e.target.disabled = true; out.textContent = '확인하는 중이에요.'; try { await check(); out.textContent = '연결됐어요. 안전 설정을 끈 요청을 서버가 받았어요.'; } catch (err) { out.textContent = err.message; } e.target.disabled = false; } }, '연결 확인')), out,
+        h('h3', null, 'NovelAI 토큰'),
+        h('input.text.wide', { type: 'password', value: settings.get('naiToken'), placeholder: 'pst-…', autocomplete: 'off', 'aria-label': 'NovelAI 토큰', onchange: e => settings.set('naiToken', e.target.value.trim()) }),
+        h('p.set-note', null, 'NovelAI 누리집의 계정 설정에서 받는 "Persistent API Token"이에요. 이 컴퓨터에만 저장되고 NovelAI 서버로만 보내요. 그림 만들기와 인페인트는 다음 단계에서 들어와요.'),
+        h('div.btn-row', null, h('button.btn', { onclick: async e => { e.target.disabled = true; naiOut.textContent = '확인하는 중이에요.'; try { const a = await naiAccount(); naiOut.textContent = `연결됐어요. ${a.tier}, 남은 Anlas ${a.anlas.toLocaleString('ko-KR')}`; } catch (err) { naiOut.textContent = err.message; } e.target.disabled = false; } }, 'NovelAI 연결 확인')), naiOut,
         h('h3', null, '모든 요청에 먼저 붙는 것'),
         h('p.set-note', null, `안전 설정 ${SAFETY_CATEGORIES.length}가지(괴롭힘, 혐오, 성적 내용, 위험한 내용, 선거·시민)를 모두 "끔"으로 보내고, 아래 안내문을 다른 지시보다 앞에 둬요. 번역, 더빙, 영상은 둘째 줄과 넷째 줄만 그 일에 맞게 바뀌어요.`),
         h('div.btn-row', null, [['write', '글쓰기'], ['translate', '번역'], ['dub', '더빙'], ['video', '영상'], ['edit', '그림 고치기']].map(([k, t]) => h('button.btn.small', { onclick: () => { pre.textContent = preamble(k); } }, t))),
@@ -225,5 +233,6 @@ async function start() {
   document.addEventListener('contextmenu', e => { if (!e.target.closest('input, textarea, .viewport, .layer')) e.preventDefault(); });
   if (!settings.get('askedAdult')) adultDialog();
   window.__potato = { state, settings, run, emit, api: { generate, buildBody, preamble } };
+  import('./core/files.js').then(f => { window.__potato.files = f; });
 }
 start();

@@ -88,3 +88,18 @@ export function palette() {
   });
   draw(); input.focus();
 }
+
+export const askText = (title, value = '', okLabel = '확인') => new Promise(res => {
+  const i = h('input.text.wide', { type: 'text', value, 'aria-label': title, autofocus: true });
+  let out = null;
+  const d = dialog({ title, body: i, onClose: () => res(out), buttons: [{ label: '취소' }, { label: okLabel, primary: true, run: () => { out = i.value.trim() || null; } }] });
+  i.addEventListener('keydown', e => { if (e.key === 'Enter') { out = i.value.trim() || null; d.close(); } });
+  i.focus(); i.select();
+});
+
+// 오래 걸리는 일의 진행 알림. set(글)으로 바꾸고 done(글)으로 끝내요.
+export function busy(text) {
+  if (!toastBox) { toastBox = h('div.toasts', { role: 'status', 'aria-live': 'polite' }); document.body.append(toastBox); }
+  const t = h('div.toast.busy', null, text); toastBox.append(t);
+  return { set: s => { t.textContent = s; }, done: (s, kind) => { t.remove(); if (s) toast(s, kind); } };
+}

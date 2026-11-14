@@ -12,6 +12,8 @@ const DEFAULTS = {
   apiKey: '',
   textModel: 'gemini-3.8-flash',
   hints: true,
+  meta: 'strip',            // 저장할 때 NAI 정보: strip = 지우기, keep = 남기기
+  naiToken: '',
 };
 
 let data = { ...DEFAULTS };
