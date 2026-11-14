@@ -47,6 +47,39 @@ with sync_playwright() as pw:
     b = P(page, "__sent[0].b"); sysT = b['systemInstruction']['parts']
     assert sysT[0]['text'].startswith('# CRITICAL') and 'Translate every line faithfully' in sysT[0]['text'] and 'Korean' in sysT[1]['text'] and len(b['safetySettings']) == 5 and all(x['threshold'] == 'OFF' for x in b['safetySettings'])
     page.keyboard.press('Control+z'); assert P(page, ELS + "[3].text") == 'BANG'
+    # 말풍선 모양(구름·외침)과 세로쓰기도 그려져요
+    for shp in ['cloud', 'shout']:
+        P(page, "(() => { const e = %s[2]; e.shape = '%s'; e.vert = true; __potato.emit(); })()" % (ELS, shp)); page.wait_for_timeout(150)
+    shot(page, '83-shapes'); P(page, "(() => { const e = %s[2]; e.shape = 'ellipse'; e.vert = false; __potato.emit(); })()" % ELS)
+    # 그림 속 글자 번역 (흉내 응답): 그림을 보내고, 받은 자리에 덮는 네모와 번역을 올려요
+    P(page, """(() => { window.__sent = []; window.fetch = async (u, o) => { const b = JSON.parse(o.body); __sent.push(b); const img = b.contents[0].parts.some(p => p.inlineData);
+        const text = img ? JSON.stringify([{ box: [100, 100, 200, 400], text: 'こんにちは', translation: '안녕하세요' }, { box: [0, 0, 0, 0], text: 'x', translation: '' }]) : JSON.stringify(JSON.parse(b.contents[0].parts[0].text).map(t => 'T:' + t));
+        return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text }] }, finishReason: 'STOP' }] }), { status: 200 }); }; })()""")
+    n0 = len(P(page, ELS)); page.mouse.click(X(40), Y(1270)); page.click('.vid-side >> text=대사 번역'); page.check('.dlg label:has-text("그림 속에 그려진 글자도") input'); page.click('.dlg-foot >> text=번역하기')
+    page.wait_for_function(ELS + ".length === %d" % (n0 + 1))
+    e = P(page, ELS + ".at(-1)"); assert e['text'] == '안녕하세요' and e['shape'] == 'rect' and (e['x'], e['y'], e['w'], e['h']) == (80, 128, 240, 128) and e['from'] == 'こんにちは' and e['fill'].startswith('#'), e
+    assert P(page, "__sent[0].contents[0].parts[0].inlineData.mimeType") == 'image/jpeg' and P(page, "__sent[0].systemInstruction.parts[0].text").startswith('# CRITICAL')
+    shot(page, '84-image-text'); page.keyboard.press('Control+z'); assert len(P(page, ELS)) == n0
+
+    # 8.x 작업 파일 가져오기: 그림은 보관함 폴더로, 페이지는 컷 작업실로, 없는 요소는 건너뜀
+    import base64, json
+    old = {'app': 'potato-editor', 'v': 3, 'imageOrder': ['i1'], 'images': [{'id': 'i1', 'name': '옛그림.png', 'src': 'data:image/png;base64,' + base64.b64encode(open(src, 'rb').read()).decode(), 'w': 400, 'h': 300, 'folder': 'f1'}], 'fonts': [],
+           'doc': {'name': '옛 작품', 'mode': 'cut', 'cur': 0, 'folders': [{'id': 'f1', 'name': '1화', 'parent': None}], 'pages': [{'id': 'p1', 'name': '페이지 1', 'w': 800, 'h': 4000, 'bg': '#ffffff', 'els': [
+               {'id': 'a', 'type': 'panel', 'x': 40, 'y': 40, 'w': 720, 'h': 500, 'img': 'i1', 'iz': 1.2, 'ox': 5, 'oy': -3, 'bw': 6, 'bc': '#222222'},
+               {'id': 'b', 'type': 'bubble', 'x': 400, 'y': 80, 'w': 240, 'h': 150, 'shape': 'round', 'text': '옛 대사', 'fs': 30, 'color': '#111111', 'fill': '#ffffff', 'stroke': '#111111', 'sw': 3, 'tail': True, 'tx': 470, 'ty': 300},
+               {'id': 'c', 'type': 'text', 'x': 100, 'y': 700, 'w': 200, 'h': 100, 'text': '쾅!', 'fs': 96, 'color': '#ffffff', 'sc': '#111111', 'sw': 8, 'bold': True},
+               {'id': 'd', 'type': 'stamp', 'x': 0, 'y': 0, 'w': 50, 'h': 50}]}]}}
+    oldf = os.path.join(os.path.dirname(src), '옛 작품.json'); open(oldf, 'w', encoding='utf-8').write(json.dumps(old, ensure_ascii=False))
+    np = P(page, "__potato.state.project.pages.length")
+    with page.expect_file_chooser() as fc: P(page, "__potato.run('file.import8')")
+    fc.value.set_files(oldf); page.wait_for_function("__potato.state.project.pages.length === %d" % (np + 1))
+    pr = P(page, "__potato.state.project"); pg8 = pr['pages'][-1]
+    assert [e['type'] for e in pg8['els']] == ['panel', 'bubble', 'text'] and pg8['h'] == 4000 and pg8['els'][0]['mediaId'] and pg8['els'][0]['is'] == 1.2 and pg8['els'][1]['size'] == 30 and pg8['els'][2]['sw'] == 8
+    names = {f['id']: f for f in pr['folders']}; m8 = next(m for m in pr['media'] if m['name'] == '옛그림.png')
+    assert names[m8['folder']]['name'] == '1화' and names[names[m8['folder']]['parent']]['name'] == '옛 작품'
+    page.wait_for_selector('.toast >> text=건너뛰었어요'); shot(page, '85-import8')
+    P(page, "(() => { const p = __potato.state.project; p.pages.pop(); p.activePage = p.pages[0].id; __potato.emit(); })()"); page.wait_for_timeout(300)
+
     # 새 페이지, 모든 페이지 저장(ZIP)
     P(page, "window.showDirectoryPicker = undefined"); page.click('.cut-add'); page.click('.menu >> text=4컷')
     assert P(page, "__potato.state.project.pages.length") == 2 and len(P(page, "__potato.state.project.pages[1].els")) == 4

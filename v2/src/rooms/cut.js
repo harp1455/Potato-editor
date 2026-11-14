@@ -43,6 +43,12 @@ function linesOf(g, e, maxW) {
   return out;
 }
 function drawText(g, e, cx, cy, maxW) {
+  if (e.vert) {   // 세로쓰기: 줄은 오른쪽에서 왼쪽으로, 글자는 위에서 아래로
+    const size = e.size || 32, cols = String(e.text || '').split('\n').map(t => [...t]), cw = size * 1.25, ch = size * 1.08, rows = Math.max(1, ...cols.map(c => c.length)), x0 = cx + (cols.length - 1) * cw / 2, y0 = cy - (rows - 1) * ch / 2;
+    g.font = fontOf(e); g.textAlign = 'center'; g.textBaseline = 'middle'; g.lineJoin = 'round';
+    cols.forEach((col, ci) => col.forEach((chr, ri) => { const x = x0 - ci * cw, y = y0 + ri * ch, rot = /[ー―—~〜…\-（）()「」『』]/.test(chr); g.save(); g.translate(x, y); if (rot) g.rotate(Math.PI / 2); if (e.sw) { g.strokeStyle = e.sc || '#ffffff'; g.lineWidth = e.sw * 2; g.strokeText(chr, 0, 0); } g.fillStyle = e.color || '#111111'; g.fillText(chr, 0, 0); g.restore(); }));
+    return { w: cols.length * cw, h: rows * ch };
+  }
   const ls = linesOf(g, e, maxW), lh = (e.size || 32) * 1.3, y0 = cy - (ls.length - 1) * lh / 2;
   g.font = fontOf(e); g.textAlign = 'center'; g.textBaseline = 'middle'; g.lineJoin = 'round';
   ls.forEach((t, i) => { if (e.sw) { g.strokeStyle = e.sc || '#ffffff'; g.lineWidth = e.sw * 2; g.strokeText(t, cx, y0 + i * lh); } g.fillStyle = e.color || '#111111'; g.fillText(t, cx, y0 + i * lh); });
@@ -58,12 +64,18 @@ function drawEl(g, e) {
     g.restore();
     if (e.bw) { g.lineWidth = e.bw; g.strokeStyle = e.bc || '#111'; g.strokeRect(e.x, e.y, e.w, e.h); }
   } else if (e.type === 'bubble') {
-    const cx = e.x + e.w / 2, cy = e.y + e.h / 2, shape = () => { g.beginPath(); if (e.shape === 'rect') g.roundRect(e.x, e.y, e.w, e.h, Math.min(e.w, e.h) * 0.18); else g.ellipse(cx, cy, e.w / 2, e.h / 2, 0, 0, Math.PI * 2); };
+    const cx = e.x + e.w / 2, cy = e.y + e.h / 2, shape = () => {
+      g.beginPath();
+      if (e.shape === 'rect') g.roundRect(e.x, e.y, e.w, e.h, Math.min(e.w, e.h) * 0.18);
+      else if (e.shape === 'cloud') { const n = Math.max(8, Math.round((e.w + e.h) / 70)), rx = e.w / 2 * 0.86, ry = e.h / 2 * 0.86; for (let i = 0; i < n; i++) { const a = i / n * Math.PI * 2, r = Math.PI * Math.max(rx, ry) / n * 1.25; g.moveTo(cx + Math.cos(a) * rx + r, cy + Math.sin(a) * ry); g.arc(cx + Math.cos(a) * rx, cy + Math.sin(a) * ry, r, 0, Math.PI * 2); } g.moveTo(cx + rx, cy); g.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2); }
+      else if (e.shape === 'shout') { const n = Math.max(12, Math.round((e.w + e.h) / 40)) * 2; for (let i = 0; i < n; i++) { const a = i / n * Math.PI * 2, k = i % 2 ? 0.74 : 1 - ((i * 7) % 5) * 0.03; g[i ? 'lineTo' : 'moveTo'](cx + Math.cos(a) * e.w / 2 * k, cy + Math.sin(a) * e.h / 2 * k); } g.closePath(); }
+      else g.ellipse(cx, cy, e.w / 2, e.h / 2, 0, 0, Math.PI * 2);
+    };
     g.lineJoin = 'round'; g.lineWidth = (e.bw ?? 3) * 2; g.strokeStyle = e.bc || '#111'; g.fillStyle = e.fill || '#ffffff';
     const tail = () => { if (!e.tail) return; const a = Math.atan2(e.ty - cy, e.tx - cx), s = Math.min(e.w, e.h) * 0.16; g.beginPath(); g.moveTo(cx + Math.cos(a + Math.PI / 2) * s, cy + Math.sin(a + Math.PI / 2) * s); g.lineTo(e.tx, e.ty); g.lineTo(cx + Math.cos(a - Math.PI / 2) * s, cy + Math.sin(a - Math.PI / 2) * s); g.closePath(); };
     if (e.bw !== 0) { tail(); if (e.tail) g.stroke(); shape(); g.stroke(); }
     tail(); if (e.tail) g.fill(); shape(); g.fill();
-    drawText(g, e, cx, cy, e.w * (e.shape === 'rect' ? 0.88 : 0.72));
+    drawText(g, e, cx, cy, e.w * (e.shape === 'rect' ? 0.88 : e.shape === 'ellipse' || !e.shape ? 0.72 : 0.6));
   } else if (e.type === 'text') {
     const m = drawText(g, e, e.x + e.w / 2, e.y + e.h / 2, 0); e.w = Math.ceil(m.w) + 8; e.h = Math.ceil(m.h);
   }
@@ -106,15 +118,44 @@ function translateDialog() {
     h('label.field', null, h('span.field-name.w', null, '어느 말로'), h('select.text', { 'aria-label': '번역할 말', onchange: e => { T.lang = e.target.value; } }, LANGS.map(([v, t]) => h('option', { value: v, selected: T.lang === v }, t)))),
     h('label.field', null, h('span.field-name.w', null, '말투'), h('input.text', { type: 'text', value: T.tone, placeholder: '비워 두면 원문 그대로. 예: 반말, 거친 말투', 'aria-label': '말투', onchange: e => { T.tone = e.target.value.trim(); } })),
     h('label.check', null, h('input', { type: 'checkbox', checked: T.all, onchange: e => { T.all = e.target.checked; drawBox(); } }), `모든 페이지 (${pages().length}쪽)`),
+    h('label.check', null, h('input', { type: 'checkbox', checked: !!T.img, onchange: e => { T.img = e.target.checked; drawBox(); } }), '그림 속에 그려진 글자도 찾아서 번역 (그 자리를 덮고 번역을 올려요)'),
     h('p.set-note', null, `번역할 대사는 ${count(T.all)}줄이에요.`));
   drawBox();
   dialog({ title: '대사 번역', body: box, buttons: [{ label: '취소' }, { label: '번역하기', primary: true, run: () => { settings.set('tr', T); (async () => {
     const els = (T.all ? pages() : [pg]).flatMap(p => p.els.filter(e => e.type !== 'panel' && String(e.text || '').trim()));
-    if (!els.length) { toast('번역할 대사가 없어요.', 'err'); return; }
-    const b = busy(`대사 ${els.length}줄을 번역하는 중이에요.`);
-    try { const out = await translateTexts(els.map(e => e.text), T.lang, T.tone); els.forEach((e, i) => { e.text = out[i]; }); commit(`대사 번역 (${els.length}줄)`); b.done(`대사 ${els.length}줄을 번역했어요.`); }
-    catch (e) { b.done(e.message || '번역하지 못했어요.', 'err'); }
+    if (!els.length && !T.img) { toast('번역할 대사가 없어요.', 'err'); return; }
+    const b = busy('번역하는 중이에요.'), langName = (LANGS.find(l => l[0] === T.lang) || [])[1] || T.lang;
+    try {
+      let found = 0;
+      if (T.img) { const list = T.all ? pages() : [pg]; for (let i = 0; i < list.length; i++) { b.set(`그림 속 글자를 찾는 중이에요. ${i + 1} / ${list.length}쪽`); found += (await translateImage(list[i], T.lang)).length; } }   // 먼저 그림(원래 대사가 보이는 상태)을 읽어요
+      if (els.length) { b.set(`대사 ${els.length}줄을 번역하는 중이에요.`); const out = await translateTexts(els.map(e => e.text), T.lang, T.tone); els.forEach((e, i) => { e.text = out[i]; }); }
+      commit(`${langName}로 번역`); b.done(`대사 ${els.length}줄을 번역했어요.` + (T.img ? ` 그림 속 글자는 ${found}곳을 찾아 덮었어요.` : ''));
+    } catch (e) { b.done(e.message || '번역하지 못했어요.', 'err'); }
   })(); } }] });
+}
+
+// 그림 속 글자 번역: 페이지 그림을 제미나이에 보여 주고, 글자가 있는 자리와 번역을 받아 그 위에 덮어요
+export async function translateImage(pg, lang) {
+  const c = await pageCanvas(pg), k = Math.min(1, 1600 / Math.max(c.width, c.height)), t = document.createElement('canvas'); t.width = Math.round(c.width * k); t.height = Math.round(c.height * k); t.getContext('2d').drawImage(c, 0, 0, t.width, t.height);
+  const r = await generate('translate', settings.get('textModel'), {
+    systemInstruction: { parts: [{ text: `Find every piece of text drawn inside this comic page image (speech bubbles, captions, sound effects, signs) and translate it into ${lang}. Return ONLY a JSON array. Each item: {"box":[ymin,xmin,ymax,xmax] with values 0-1000 relative to the image, "text": original text, "translation": the ${lang} translation, "vertical": true if the original is written vertically}. Group one bubble or caption as one item. Skip text that is already in ${lang}. If there is no text, return [].` }] },
+    contents: [{ role: 'user', parts: [{ inlineData: { mimeType: 'image/jpeg', data: t.toDataURL('image/jpeg', 0.9).split(',')[1] } }, { text: 'Translate the text in this page.' }] }], generationConfig: { responseMimeType: 'application/json', temperature: 0.2 } });
+  let out; try { out = JSON.parse(r.text.replace(/^```(?:json)?|```$/g, '').trim()); } catch (_) { throw new Error('제미나이의 답을 읽지 못했어요. 다시 해 주세요.'); }
+  if (!Array.isArray(out)) throw new Error('제미나이의 답이 목록이 아니에요. 다시 해 주세요.');
+  const g = c.getContext('2d', { willReadFrequently: true }), hex = v => v.toString(16).padStart(2, '0'), made = [];
+  for (const it of out) {
+    const b = it && it.box; if (!Array.isArray(b) || b.length !== 4 || !String(it.translation || '').trim()) continue;
+    const x = Math.round(b[1] / 1000 * pg.w), y = Math.round(b[0] / 1000 * pg.h), w = Math.max(24, Math.round((b[3] - b[1]) / 1000 * pg.w)), hh = Math.max(24, Math.round((b[2] - b[0]) / 1000 * pg.h));
+    // 덮을 색: 상자 테두리 바로 안쪽의 가운데 색 (말풍선 안이면 흰색, 색 있는 칸이면 그 색)
+    const px = [], at = (ax, ay) => { const d = g.getImageData(Math.min(pg.w - 1, Math.max(0, ax)), Math.min(pg.h - 1, Math.max(0, ay)), 1, 1).data; px.push([d[0], d[1], d[2]]); };
+    for (let i = 0; i <= 8; i++) { at(x + w * i / 8, y + 2); at(x + w * i / 8, y + hh - 2); at(x + 2, y + hh * i / 8); at(x + w - 2, y + hh * i / 8); }
+    const med = [0, 1, 2].map(ch => px.map(p => p[ch]).sort((a, b2) => a - b2)[px.length >> 1]), lum = med[0] * 0.3 + med[1] * 0.59 + med[2] * 0.11;
+    const text = String(it.translation).trim(), lines = text.split('\n'), longest = Math.max(1, ...lines.map(l => [...l].length));
+    const size = Math.max(10, Math.round(Math.min(hh / (lines.length * 1.35), w * 0.86 / (longest * 0.95), pg.w / 14)));
+    const e = { id: uid('e'), type: 'bubble', x, y, w, h: hh, shape: 'rect', text, size, color: lum > 140 ? '#111111' : '#ffffff', fill: '#' + med.map(hex).join(''), bc: '#111111', bw: 0, tail: false, tx: x, ty: y + hh, bold: false, from: String(it.text || '') };
+    pg.els.push(e); made.push(e);
+  }
+  return made;
 }
 
 // ---- 화면 ----
@@ -177,7 +218,8 @@ export const cutRoom = {
       const col = (label, k, def) => h('label.field', null, h('span.field-name.w', null, label), h('input', { type: 'color', value: e[k] || def, 'aria-label': label, onchange: ev => { e[k] = ev.target.value; commit(label); } }));
       const textBox = () => [h('label.stack', null, h('span.field-name', null, '대사'), h('textarea.text.area', { rows: 4, 'aria-label': '대사', value: e.text || '', oninput: ev => { e.text = ev.target.value; draw(); }, onchange: () => commit('대사 고치기') })),
         h('div.field-row', null, num('크기', 'size'), h('label.field', null, h('span.field-name.w', null, '글꼴'), h('select.text', { 'aria-label': '글꼴', onchange: ev => { e.font = ev.target.value; commit('글꼴'); } }, FONTS.map(([v, t]) => h('option', { value: v, selected: (e.font || '') === v }, t))))),
-        h('div.field-row', null, col('글자색', 'color', '#111111'), h('label.check', null, h('input', { type: 'checkbox', checked: !!e.bold, onchange: ev => { e.bold = ev.target.checked; commit('굵게'); } }), '굵게'))];
+        h('div.field-row', null, col('글자색', 'color', '#111111'), h('label.check', null, h('input', { type: 'checkbox', checked: !!e.bold, onchange: ev => { e.bold = ev.target.checked; commit('굵게'); } }), '굵게')),
+        h('label.check', null, h('input', { type: 'checkbox', checked: !!e.vert, onchange: ev => { e.vert = ev.target.checked; commit('세로쓰기'); } }), '세로쓰기')];
       side.replaceChildren(...(!pg ? [h('p.empty', null, '페이지를 만들면 설정이 여기 보여요.')] : !e ? [
         h('h3.sec', null, '페이지'),
         h('label.field', null, h('span.field-name.w', null, '이름'), h('input.text', { type: 'text', value: pg.name, 'aria-label': '페이지 이름', onchange: ev => { pg.name = ev.target.value.trim() || pg.name; commit('페이지 이름'); } })),
@@ -190,7 +232,7 @@ export const cutRoom = {
       ] : [
         h('h3.sec', null, { panel: '컷', bubble: '말풍선', text: '글자' }[e.type]),
         ...(e.type === 'panel' ? [h('div.field-row', null, num('테두리', 'bw'), col('테두리색', 'bc', '#111111')), h('div.btn-row', null, h('button.btn.small', { disabled: !e.mediaId, onclick: () => { e.ix = 0; e.iy = 0; e.is = 1; commit('그림 가운데로'); } }, '그림 가운데로'), h('button.btn.small', { disabled: !e.mediaId, onclick: () => { e.mediaId = null; commit('그림 빼기'); } }, '그림 빼기')), h('p.panel-note', null, 'Alt를 누르고 끌면 컷 안의 그림이 움직이고, Alt를 누르고 휠을 돌리면 커져요.')] : []),
-        ...(e.type === 'bubble' ? [...textBox(), h('div.field-row', null, h('label.field', null, h('span.field-name.w', null, '모양'), h('select.text', { 'aria-label': '모양', onchange: ev => { e.shape = ev.target.value; commit('말풍선 모양'); } }, [['ellipse', '둥글게'], ['rect', '네모나게']].map(([v, t]) => h('option', { value: v, selected: e.shape === v }, t)))), h('label.check', null, h('input', { type: 'checkbox', checked: !!e.tail, onchange: ev => { e.tail = ev.target.checked; commit('말풍선 꼬리'); } }), '꼬리')),
+        ...(e.type === 'bubble' ? [...textBox(), h('div.field-row', null, h('label.field', null, h('span.field-name.w', null, '모양'), h('select.text', { 'aria-label': '모양', onchange: ev => { e.shape = ev.target.value; commit('말풍선 모양'); } }, [['ellipse', '둥글게'], ['rect', '네모나게'], ['cloud', '구름 (생각)'], ['shout', '뾰족하게 (외침)']].map(([v, t]) => h('option', { value: v, selected: e.shape === v }, t)))), h('label.check', null, h('input', { type: 'checkbox', checked: !!e.tail, onchange: ev => { e.tail = ev.target.checked; commit('말풍선 꼬리'); } }), '꼬리')),
           h('div.field-row', null, col('바탕색', 'fill', '#ffffff'), col('테두리색', 'bc', '#111111')), num('테두리', 'bw')] : []),
         ...(e.type === 'text' ? [...textBox(), h('div.field-row', null, num('테두리', 'sw'), col('테두리색', 'sc', '#ffffff'))] : []),
         h('h3.sec', null, '자리'),

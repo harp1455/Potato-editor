@@ -2,7 +2,7 @@ import { h, icon, fmtKeys } from './ui/dom.js';
 import { settings } from './core/settings.js';
 import { addCmd, cmds, cmd, run, handleKey, keysOf, keyName, setErrHandler } from './core/cmd.js';
 import { state, boot, onChange, onTick, emit, commit, undo, redo, canUndo, canRedo, saveNow, newProject, openProject, listProjects, deleteProject } from './core/store.js';
-import { showMenu, closeMenu, cmdItem, toast, dialog, confirmBox, palette } from './ui/overlay.js';
+import { showMenu, closeMenu, cmdItem, toast, dialog, confirmBox, palette, busy } from './ui/overlay.js';
 import { renderDock, updatePanels, togglePanel, hasPanel, resetLayout } from './ui/dock.js';
 import { PANELS } from './ui/panels.js';
 import { imageRoom, registerImageCmds, setMenuItem } from './rooms/image.js';
@@ -35,6 +35,14 @@ function registerCmds() {
   registerGeminiCmds();
   registerVideoCmds();
   registerCutCmds();
+  addCmd({ id: 'file.import8', title: '8.x 작업 파일 가져오기…', menu: '파일', group: 'import', words: '예전 작업 옮기기 json', run: () => {
+    const i = h('input', { type: 'file', accept: '.json,application/json' });
+    i.onchange = async () => { const f = i.files[0]; if (!f) return; const b = busy('8.x 작업을 가져오는 중이에요.');
+      try { const { import8 } = await import('./core/import8.js'); const r = await import8(f, (n, t) => b.set(`그림을 옮기는 중이에요. ${n} / ${t}`));
+        b.done(`'${r.name}'에서 그림 ${r.images}장${r.pages ? `, 페이지 ${r.pages}쪽` : ''}을 가져왔어요.` + (r.skipped ? ` 2.0에 아직 없는 요소 ${r.skipped}개(스티커, 손그림, 효과 등)는 건너뛰었어요.` : '') + (r.failed ? ` 그림 ${r.failed}장은 읽지 못했어요.` : ''));
+        if (r.pages) settings.set('room', 'cut'); }
+      catch (e) { b.done(e.message || '가져오지 못했어요.', 'err'); } };
+    i.click(); } });
   addCmd({ id: 'file.save', title: '지금 저장', menu: '파일', keys: 'Ctrl+S', run: async () => { await saveNow(); toast('저장했어요. 평소에는 고칠 때마다 알아서 저장돼요.'); } });
   addCmd({ id: 'edit.undo', title: '되돌리기', menu: '편집', keys: 'Ctrl+Z', enabled: canUndo, run: undo });
   addCmd({ id: 'edit.redo', title: '다시 하기', menu: '편집', keys: 'Ctrl+Shift+Z', enabled: canRedo, run: redo });
@@ -146,7 +154,7 @@ function planDialog() {
     ['영상 작업실', '장면 잇기와 MP4·WebP·GIF 내보내기는 들어왔고, 글자·넘김 효과·소리·AI 중간 장면이 남았어요', '지금'],
     ['컷 작업실', '페이지, 컷, 말풍선, 글자, 대사 번역은 들어왔고, 그림 속 글자 번역·효과음·말풍선 모양 묶음·API 금액이 남았어요', '지금'],
     ['일괄 처리 작업실', '배경 지우기, 화질 키우기, 크기·형식 바꾸기, NAI 정보 지우기를 여러 장에 한 번에', '지금'],
-    ['마무리', '8.x 작업 가져오기, 자동 흰칠, 번역, 전체 점검', '6단계'],
+    ['8.x 작업 가져오기', '8.x에서 "작업 파일 저장"으로 만든 파일을 파일 메뉴에서 가져와요. 그림은 보관함으로, 페이지는 컷 작업실로', '지금'],
   ];
   dialog({ title: '2.0에서 달라지는 것', wide: true, buttons: [{ label: '닫기', primary: true }],
     body: h('div', null, h('p.dlg-text', null, '감자 편집기 2.0은 새 틀 위에 8.x의 기능을 하나씩 옮겨 담는 중이에요. 아직 옮기지 않은 기능은 8.x에서 그대로 쓸 수 있어요.'),
