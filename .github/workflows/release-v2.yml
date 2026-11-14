@@ -40,7 +40,7 @@ jobs:
           node-version: 22
       - run: npm --prefix v2 ci && node v2/build.mjs
       - run: pip install playwright && python -m playwright install --with-deps chrome
-      - run: cd v2 && python tests/smoke.py && python tests/bin.py && python tests/edit.py && python tests/gemini.py && python tests/encode.py && python tests/video.py
+      - run: cd v2 && python tests/smoke.py && python tests/bin.py && python tests/edit.py && python tests/gemini.py && python tests/encode.py && python tests/video.py && python tests/cut.py
   windows:
     needs: [check, test]
     runs-on: windows-latest

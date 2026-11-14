@@ -66,6 +66,18 @@ async function go(kind) {
   job.on = false; job.ctl = null; job.text = ''; emit();
 }
 
+// 그림과 가림막(흰 곳 = 다시 그릴 곳)을 받아 NovelAI 인페인트 결과(비트맵)를 돌려줘요. 캐릭터 작업실이 써요
+export async function infillCanvas(pic, maskCanvas, prompt, signal) {
+  const fit = fitSize(pic.width, pic.height), o = { ...opts(), prompt, width: fit.w, height: fit.h };
+  const s = scaled(maskCanvas, fit.w / 8, fit.h / 8), g = s.getContext('2d'), id = g.getImageData(0, 0, s.width, s.height), d = id.data;
+  for (let i = 0; i < d.length; i += 4) { const on = d[i] > 24 && d[i + 3] > 24 ? 255 : 0; d[i] = d[i + 1] = d[i + 2] = on; d[i + 3] = 255; }
+  g.putImageData(id, 0, 0);
+  const m = document.createElement('canvas'); m.width = fit.w; m.height = fit.h; const mg = m.getContext('2d'); mg.imageSmoothingEnabled = false; mg.drawImage(s, 0, 0, fit.w, fit.h);
+  const { blob } = await naiGenerate(o, { image: await b64(await pngOf(scaled(pic, fit.w, fit.h))), mask: await b64(await pngOf(m)), strength: 1 }, signal);
+  return createImageBitmap(blob);
+}
+export const naiPrompt = () => F.prompt;
+
 export const naiPanel = {
   title: 'NovelAI',
   render(el) {

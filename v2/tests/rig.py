@@ -51,6 +51,7 @@ with sync_playwright() as pw:
     shot(page, '51b-erase'); page.keyboard.press('Control+z')
     page.keyboard.press('Control+d')
 
+    P(page, "__potato.sel.selRect('new', %d, %d, %d, %d)" % (W * 0.35, H * 0.55, W * 0.2, H * 0.2))
     # 캐릭터 작업실 → 이 레이어 움직이기 → 팩 받기 → 준비 → 움직임 창
     page.keyboard.press('Alt+4'); page.wait_for_selector('.char-room'); shot(page, '52-room')
     page.click('.char-item >> text=이 레이어 움직이기 >> nth=0')
@@ -58,6 +59,19 @@ with sync_playwright() as pw:
     page.wait_for_selector('#modalRoot .rg-modal', timeout=TIME)
     page.wait_for_timeout(1500); shot(page, '53-rig')
     assert page.locator('#modalRoot .rg-modal canvas').count() >= 1 and page.locator('#rgGo').count() == 1
+    # 2.0에서 더한 것 ①: 이미지 작업실에서 고른 곳을 '칠한 곳'으로 가져오기
+    page.click('#modalRoot [data-rgm="part"]'); page.click('#modalRoot [data-rga="fromsel"]')
+    page.wait_for_selector('.toast >> text=고른 곳을 가져왔어요'); shot(page, '53b-fromsel')
+    # 2.0에서 더한 것 ②: 메운 자리를 NovelAI로 바로 다시 그리기 (흉내 응답)
+    import io, json, zipfile
+    zb = io.BytesIO(); zipfile.ZipFile(zb, 'w').writestr('image_0.png', open(src, 'rb').read())
+    P(page, """(z => { __potato.settings.set('adult', true); __potato.settings.set('naiToken', 'pst-test'); window.__nai = []; const real = window.fetch;
+        window.fetch = (u, o = {}) => String(u).includes('novelai.net') ? (__nai.push(JSON.parse(o.body)), Promise.resolve(new Response(new Uint8Array(z), { status: 200 }))) : real(u, o); })(%s)""" % json.dumps(list(zb.getvalue())))
+    page.click('#modalRoot [data-rgfn="bg"]'); page.wait_for_selector('.dlg >> text=메운 자리 다시 그리기'); shot(page, '53c-naifill')
+    page.fill('.dlg textarea', 'shrine, outdoors, cherry blossoms'); page.click('.dlg-foot >> text=다시 그리기')
+    page.wait_for_selector('.toast >> text=NovelAI로 다시 그렸어요', timeout=60000)
+    b = P(page, "__nai[0]"); assert b['action'] == 'infill' and b['model'].endswith('-inpainting') and b['parameters']['width'] % 64 == 0 and b['input'].startswith('shrine'), b['action']
+
     # 닫으면 보관되고, 작업실에 '하던 작업이 있어요'
     page.click('#rgClose'); page.wait_for_selector('#modalRoot .rg-modal', state='detached', timeout=60000)
     P(page, "__potato.emit()"); page.wait_for_selector('.char-item >> text=이어서 움직이기', timeout=20000)

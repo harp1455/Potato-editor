@@ -6,7 +6,7 @@ import { showMenu, closeMenu, cmdItem, toast, dialog, confirmBox, palette } from
 import { renderDock, updatePanels, togglePanel, hasPanel, resetLayout } from './ui/dock.js';
 import { PANELS } from './ui/panels.js';
 import { imageRoom, registerImageCmds, setMenuItem } from './rooms/image.js';
-import { stubRooms } from './rooms/stub.js';
+import { cutRoom, registerCutCmds } from './rooms/cut.js';
 import { registerBinCmds } from './ui/bin.js';
 import { batchRoom } from './rooms/batch.js';
 import { videoRoom, registerVideoCmds } from './rooms/video.js';
@@ -17,9 +17,9 @@ import { registerAiCmds, packsPane } from './ui/aitools.js';
 import { preamble, check, generate, buildBody, buildInteraction, speak, animate, SAFETY_CATEGORIES } from './api/gemini.js';
 
 const VERSION = typeof __VERSION__ === 'string' ? __VERSION__ : 'dev';
-const ROOMS = [imageRoom, stubRooms[0], videoRoom, characterRoom, batchRoom];
+const ROOMS = [imageRoom, cutRoom, videoRoom, characterRoom, batchRoom];
 const roomOf = () => ROOMS.find(r => r.id === settings.get('room')) || imageRoom;
-const MENUS = ['파일', '편집', '보기', '레이어', '고르기', '영상', 'AI', '도구', '작업실', '도움말'];
+const MENUS = ['파일', '편집', '보기', '레이어', '고르기', '컷', '영상', 'AI', '도구', '작업실', '도움말'];
 
 let live = null;      // 지금 가운데에 떠 있는 작업실
 const els = {};
@@ -34,6 +34,7 @@ function registerCmds() {
   registerCharCmds();
   registerGeminiCmds();
   registerVideoCmds();
+  registerCutCmds();
   addCmd({ id: 'file.save', title: '지금 저장', menu: '파일', keys: 'Ctrl+S', run: async () => { await saveNow(); toast('저장했어요. 평소에는 고칠 때마다 알아서 저장돼요.'); } });
   addCmd({ id: 'edit.undo', title: '되돌리기', menu: '편집', keys: 'Ctrl+Z', enabled: canUndo, run: undo });
   addCmd({ id: 'edit.redo', title: '다시 하기', menu: '편집', keys: 'Ctrl+Shift+Z', enabled: canRedo, run: redo });
@@ -139,9 +140,9 @@ function planDialog() {
   const rows = [
     ['새 틀', '화면 뼈대, 붙였다 떼는 패널, 두 가지 화면 방식, 하나로 합친 되돌리기, 명령 찾기, API 통로', '지금'],
     ['이미지 작업실', '고르는 도구, 보정, AI 도구, NovelAI는 들어왔고, 가림막·고급 보정·AI 지우개·자동 흰칠이 남았어요', '지금'],
-    ['캐릭터 작업실', '배경과 인물 나누기, AI로 외곽선 따기, 마법 붓으로 마무리, 뼈대와 움직임 (움직임 창은 8.x 것을 그대로 가져옴)', '지금'],
+    ['캐릭터 작업실', '배경과 인물 나누기, AI로 외곽선 따기, 고른 곳 가져오기, 뼈대와 움직임, 메운 자리를 NovelAI로 바로 다시 그리기', '지금'],
     ['영상 작업실', '장면 잇기와 MP4·WebP·GIF 내보내기는 들어왔고, 글자·넘김 효과·소리·AI 중간 장면이 남았어요', '지금'],
-    ['컷 작업실', '페이지·컷·말풍선, 번역, API 금액 (더빙은 먼저 들어왔어요)', '5단계'],
+    ['컷 작업실', '페이지, 컷, 말풍선, 글자, 대사 번역은 들어왔고, 그림 속 글자 번역·효과음·말풍선 모양 묶음·API 금액이 남았어요', '지금'],
     ['일괄 처리 작업실', '배경 지우기, 화질 키우기, 크기·형식 바꾸기, NAI 정보 지우기를 여러 장에 한 번에', '지금'],
     ['마무리', '8.x 작업 가져오기, 자동 흰칠, 번역, 전체 점검', '6단계'],
   ];

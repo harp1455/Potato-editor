@@ -5,7 +5,10 @@ import { aiLoad, aiCall, samState, aiDevice } from '../core/ai.js';
 import { missingFiles, idsOfPack } from '../core/packs.js';
 import { saveFiles } from '../core/files.js';
 import { ensureModels } from '../ui/aitools.js';
-import { toast as say } from '../ui/overlay.js';
+import { toast as say, dialog, busy } from '../ui/overlay.js';
+import { settings } from '../core/settings.js';
+import { infillCanvas, naiPrompt } from '../ui/naipanel.js';
+import { h } from '../ui/dom.js';
 
 const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -38,6 +41,22 @@ function czErrText(e) {
 const PACKS = ['bg', 'erase', 'rig'];
 const NEED = () => ['czWasm', 'czM_samE', 'czM_samD', ...PACKS.flatMap(idsOfPack)];
 
+// 떼어 낸 자리를 NovelAI로 다시 그리기: 무엇을 그릴지 묻고, 결과 그림을 돌려줘요 (그만두면 null)
+function naiFill(pic, mask, label) {
+  return new Promise(res => {
+    if (!settings.get('adult') || !settings.get('naiToken').trim()) { say('성인 확인과 NovelAI 토큰이 필요해요. 창을 닫고 설정 > AI와 API에서 넣어 주세요.', 'err'); return res(null); }
+    const ta = h('textarea.text.area', { rows: 4, 'aria-label': '무엇을 그릴지', value: naiPrompt(), placeholder: '가려져 있던 곳에 무엇이 있어야 하는지 적어 주세요. 예: 1boy, bare shoulder, white shirt' });
+    let go = false;
+    dialog({ title: `'${label}'의 메운 자리 다시 그리기`, body: h('div', null, h('p.dlg-text', null, '가려져 있다가 드러난 자리만 NovelAI가 다시 그려요. 그 자리에 있어야 할 것을 프롬프트로 적어 주세요. 모델과 자세한 설정은 NovelAI 패널의 값을 써요.'), h('label.stack', { style: 'margin-top:10px' }, h('span.field-name', null, '프롬프트'), ta)),
+      buttons: [{ label: '취소' }, { label: '다시 그리기', primary: true, run: () => { go = true; } }],
+      onClose: async () => {
+        if (!go || !ta.value.trim()) return res(null);
+        const b = busy('NovelAI가 그리는 중이에요.');
+        try { const img = await infillCanvas(pic, mask, ta.value.trim()); b.done(''); res(img); } catch (e) { b.done(e.message || 'NovelAI 요청이 실패했어요.', 'err'); res(null); }
+      } });
+  });
+}
+
 let rig = null;
 function load() {
   if (!rig) rig = makeRig({
@@ -50,7 +69,7 @@ function load() {
     czProgress, czErrText,
     idb: { get: k => store.get('blobs', 'kv:' + k), set: async (k, v) => { await store.put('blobs', 'kv:' + k, v); return true; } },
     safeName: s => String(s).replace(/[\\/:*?"<>|]/g, '_').trim() || '그림',
-    saveFiles,
+    saveFiles, naiFill,
   });
   return rig;
 }

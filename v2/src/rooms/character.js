@@ -9,6 +9,7 @@ import { flatten, layerFromBlob, view } from './image.js';
 import { openRig, rigSaved } from '../legacy/shim.js';
 import { dialog, toast, busy } from '../ui/overlay.js';
 import { download } from '../core/files.js';
+import { sel } from '../core/select.js';
 import { encodeFrames, canMp4 } from '../core/encode.js';
 import { addFrames } from './video.js';
 
@@ -59,15 +60,22 @@ function framesDialog(frames, fps, name) {
 }
 
 // src = 그림(캔버스·비트맵), key = 이어서 하기용 이름
-export async function rigOpen(src, name, key) {
+export async function rigOpen(src, name, key, selMask) {
   const c0 = canvasOf();
-  await openRig({ src, W: src.width, H: src.height, name, key, goLabel: '내보내기',
+  await openRig({ src, W: src.width, H: src.height, name, key, goLabel: '내보내기', selMask,
     onFrames: async (frames, fps) => { if (frames && frames.length) framesDialog(frames, fps, name); },
     onStill: async cv => { const c = canvasOf() || c0; if (!c) return; await layerFromBlob(c, await png(cv), name + ' 자세', { scale: Math.min(c.w / cv.width, c.h / cv.height), hidden: true }); commit('자세를 레이어로'); toast('이 자세를 새 레이어로 올렸어요.'); },
   });
 }
-async function rigLayer(l) { const m = mediaOf(l), bmp = await ensureBitmap(l.mediaId); if (bmp) rigOpen(bmp, l.name, state.project.id + ':m' + m.id); }
-async function rigCanvas() { const c = canvasOf(); if (c) rigOpen(await flatten(c), c.name, state.project.id + ':c' + c.id); }
+// 이미지 작업실에서 고른 곳을 그 레이어 그림의 자리로 옮겨서 내줘요 (레이어를 옮기거나 키웠어도 맞게)
+function selOnLayer(l, m) {
+  if (!sel.any || sel.id !== (canvasOf() || {}).id) return null;
+  const t = document.createElement('canvas'); t.width = m.w; t.height = m.h; const g = t.getContext('2d'), w = m.w * l.scale, hh = m.h * l.scale;
+  g.translate(m.w / 2, m.h / 2); g.scale(1 / l.scale, 1 / l.scale); g.rotate(-l.rot * Math.PI / 180); g.translate(-(l.x + w / 2), -(l.y + hh / 2)); g.drawImage(sel.cv, 0, 0);
+  return t;
+}
+async function rigLayer(l) { const m = mediaOf(l), bmp = await ensureBitmap(l.mediaId); if (bmp) rigOpen(bmp, l.name, state.project.id + ':m' + m.id, () => selOnLayer(l, m)); }
+async function rigCanvas() { const c = canvasOf(); if (c) rigOpen(await flatten(c), c.name, state.project.id + ':c' + c.id, () => (sel.any && sel.id === c.id ? sel.cv : null)); }
 
 export const characterRoom = {
   id: 'character', title: '캐릭터', icon: 'character',
@@ -85,7 +93,7 @@ export const characterRoom = {
         h('p.lead', null, '그림 한 장에서 캐릭터를 떼어 내 뼈대를 넣고 움직여요. 한 사람만 있는 그림은 3번부터 바로 해도 돼요. 여러 사람이 붙어 있으면 1, 2번으로 먼저 나눠 주세요.'),
         h('div.char-steps', null,
           step(1, '배경과 인물 나누기', '고른 레이어를 인물 레이어와 배경 레이어로 나눠요.', h('button.btn', { disabled: !c, onclick: () => { settings.set('room', 'image'); run('ai.bgSplit'); } }, '나누기')),
-          step(2, '인물과 인물 나누기', "이미지 작업실의 'AI로 고르기'로 한 사람을 눌러 외곽선을 따요. 모자란 곳은 마법 붓으로 더하고 빼요. 그다음 '새 레이어로'를 누르면 그 사람만 레이어가 돼요.", h('button.btn', { disabled: !c, onclick: toImage('sam') }, 'AI로 고르기')),
+          step(2, '인물과 인물 나누기', "이미지 작업실의 'AI로 고르기'로 한 사람을 눌러 외곽선을 따요. 모자란 곳은 마법 붓으로 더하고 빼요. 그다음 '새 레이어로'를 누르면 그 사람만 레이어가 돼요. 고른 채로 움직임 창을 열면 ② 부위 나누기의 '고른 곳 가져오기'로 그 자리를 바로 부위로 뗄 수도 있어요.", h('button.btn', { disabled: !c, onclick: toImage('sam') }, 'AI로 고르기')),
           step(3, '뼈대를 넣고 움직이기', '아래에서 움직일 레이어를 골라요. 뼈대 맞추기, 부위 나누기, 움직임 편집 창이 열려요.')),
         !c ? h('p.lead', null, '먼저 이미지 작업실에서 그림을 열어 주세요.') : h('div.char-list', null,
           [...c.layers].reverse().map((l, i) => h('div.char-item', null, h('img', { src: state.thumbs.get(l.mediaId) || '', alt: '' }),
