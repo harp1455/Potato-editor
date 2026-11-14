@@ -5,11 +5,11 @@ const set = { loop: true, dither: true, q: 90 };
 let enc = null;
 const load = () => enc || (enc = makeEnc({
   newCanvas: (w, h) => { const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(w)); c.height = Math.max(1, Math.round(h)); return c; },
-  gs: { set }, uiSet: { hw: 'no-preference' }, auEncoderCfg: async () => null, auEncode: async () => {}, Mp4Muxer: window.Mp4Muxer,
+  gs: { set }, uiSet: { hw: 'no-preference' }, Mp4Muxer: window.Mp4Muxer,
 }));
 export const canMp4 = () => typeof VideoEncoder !== 'undefined' && !!window.Mp4Muxer;
 
-// 그려 주는 함수로 만들기: src = { W, H, fps, total(초), render(g, t, w, h) }. fmt = 'mp4' | 'gif' | 'webp'. o = { loop, size(긴 쪽, 줄일 때만), quality }
+// 그려 주는 함수로 만들기: src = { W, H, fps, total(초), render(g, t, w, h) }. fmt = 'mp4' | 'gif' | 'webp'. o = { loop, size(긴 쪽, 줄일 때만), quality, audio(AudioBuffer, MP4에만) }
 export async function encodeRender(src, fmt, o, onProg) {
   const E = load(), k = Math.min(1, (o.size || 1e9) / Math.max(src.W, src.H));
   const W = Math.max(2, Math.round(src.W * k)), H = Math.max(2, Math.round(src.H * k)), fps = fmt === 'gif' ? Math.min(50, src.fps) : src.fps, n = Math.max(1, Math.round(src.total * fps));
@@ -17,7 +17,7 @@ export async function encodeRender(src, fmt, o, onProg) {
   const prog = (a, b) => onProg && onProg(a / b);
   if (fmt === 'mp4') {
     const bitrate = Math.min(150e6, W * H * Math.pow(fps, 0.75) * 2.2 * (0.04 + (set.q / 100) * 0.22));
-    return E.encodeMp4(W, H, fps, src.total, (g, t, w, h) => { g.fillStyle = '#000'; g.fillRect(0, 0, w, h); src.render(g, t, w, h); }, prog, bitrate, null);
+    return E.encodeMp4(W, H, fps, src.total, (g, t, w, h) => { g.fillStyle = '#000'; g.fillRect(0, 0, w, h); src.render(g, t, w, h); }, prog, bitrate, o.audio || null);
   }
   const list = Array.from({ length: n }, (_, i) => ({ t: i * 1000 / fps, s: i * 1000 / fps, dur: 1000 / fps }));
   const draw = (g, t, w, h) => { g.clearRect(0, 0, w, h); src.render(g, t, w, h); };

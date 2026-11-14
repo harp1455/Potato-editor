@@ -51,6 +51,15 @@ export function preamble(kind = 'write') {
   ].join('\n');
 }
 
+// 사용 기록: 요청마다 언제·무엇을·얼마나(토큰) 썼는지 이 컴퓨터에 남겨요 (가장 새것 500개)
+const USE = 'potato2.usage';
+export function usageLog() { try { return JSON.parse(localStorage.getItem(USE) || '[]'); } catch (_) { return []; } }
+export function logUse(kind, model, usage, extra) {
+  const u = usage || {}, row = { t: Date.now(), kind, model, in: u.promptTokenCount ?? u.total_input_tokens ?? u.input_tokens ?? 0, out: u.candidatesTokenCount ?? u.total_output_tokens ?? u.output_tokens ?? 0, ...(extra || {}) };
+  try { localStorage.setItem(USE, JSON.stringify([row, ...usageLog()].slice(0, 500))); } catch (_) { /* 저장 공간이 막혀 있으면 건너뜀 */ }
+}
+export const usageClear = () => { try { localStorage.removeItem(USE); } catch (_) { /* 없음 */ } };
+
 export class ApiError extends Error {
   constructor(code, message, detail) { super(message); this.code = code; this.detail = detail || ''; }
 }
@@ -120,6 +129,7 @@ export async function generate(kind, model, body, opt = {}) {
   if (!c) throw new ApiError('empty', '제미나이가 아무것도 돌려주지 않았어요.');
   const text = ((c.content && c.content.parts) || []).map(p => p.text || '').join('');
   if (!text && c.finishReason && c.finishReason !== 'STOP') throw new ApiError('blocked', '답을 만들다가 막혔어요. ' + (WHY[c.finishReason] || WHY.OTHER), c.finishReason);
+  logUse(kind, model, j.usageMetadata);
   return { text, finish: c.finishReason || '', usage: j.usageMetadata || null, raw: j };
 }
 
@@ -180,6 +190,7 @@ export async function interact(kind, type, bodies, { signal, onWait, pollMs = 30
     const res = await fetch(url, { headers: { 'x-goog-api-key': settings.get('apiKey').trim() }, signal }); if (!res.ok) throw new ApiError('http', `결과 파일을 받지 못했어요 (${res.status})`);
     u8 = new Uint8Array(await res.arrayBuffer());
   }
+  logUse(kind, (j && j.model) || [].concat(bodies)[0].model, j && j.usage);
   return { u8, mime, note, usage: (j && j.usage) || null };
 }
 function pcmWav(u8, sr) {

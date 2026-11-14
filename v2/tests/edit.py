@@ -106,18 +106,18 @@ with sync_playwright() as pw:
     assert page.locator('.fold >> text=NovelAI').count() == 1
     # 고른 곳만 다시 그리기: 인페인트 모델, 64의 배수 크기, 그림과 같은 크기의 흑백 가림막
     P(page, "__potato.sel.selRect('new', 100, 80, 120, 100)")
-    page.click('text=고른 곳만 다시 그리기'); page.wait_for_function("__sent.length === 2 && !document.querySelector('.nai-busy')")
+    page.click('button:has-text("고른 곳만 다시 그리기")'); page.wait_for_function("__sent.length === 2 && !document.querySelector('.nai-busy')")
     b = P(page, "__sent[1].b"); pr = b['parameters']
     assert b['action'] == 'infill' and b['model'] == 'nai-diffusion-4-5-full-inpainting' and pr['request_type'] == 'NativeInfillingRequest'
-    assert pr['width'] % 64 == 0 and pr['height'] % 64 == 0 and (pr['width'], pr['height']) == (384, 320), (pr['width'], pr['height'])
-    info = P(page, """(async b => { const bmp = await createImageBitmap(new Blob([Uint8Array.from(atob(b), ch => ch.charCodeAt(0))])); const c = new OffscreenCanvas(bmp.width, bmp.height), g = c.getContext('2d'); g.drawImage(bmp, 0, 0); const d = g.getImageData(0, 0, bmp.width, bmp.height).data; const vals = new Set(); for (let i = 0; i < d.length; i += 4) vals.add(d[i]); const at = (x, y) => d[(y * bmp.width + x) * 4]; return [bmp.width, bmp.height, [...vals].sort(), at(150, 140), at(20, 20)]; })(__sent[1].b.parameters.mask)""")
-    assert info[:2] == [384, 320] and info[2] == [0, 255] and info[3] == 255 and info[4] == 0, info
+    assert pr['width'] % 64 == 0 and pr['height'] % 64 == 0 and (pr['width'], pr['height']) == (832, 576), (pr['width'], pr['height'])   # 작은 그림은 2배로 키워 보내요
+    info = P(page, """(async b => { const bmp = await createImageBitmap(new Blob([Uint8Array.from(atob(b), ch => ch.charCodeAt(0))])); const c = new OffscreenCanvas(bmp.width, bmp.height), g = c.getContext('2d'); g.drawImage(bmp, 0, 0); const d = g.getImageData(0, 0, bmp.width, bmp.height).data; const vals = new Set(); for (let i = 0; i < d.length; i += 4) vals.add(d[i]); const at = (x, y) => d[(y * bmp.width + x) * 4]; return [bmp.width, bmp.height, [...vals].sort(), at(333, 250), at(20, 20)]; })(__sent[1].b.parameters.mask)""")
+    assert info[:2] == [832, 576] and info[2] == [0, 255] and info[3] == 255 and info[4] == 0, info
     top = P(page, "__potato.state.project.canvases[0].layers.at(-1)")
     assert top['name'] == '다시 그린 곳' and P(page, PIX + "(160, 130)")[:3] == [40, 120, 220]
     shot(page, '33-nai')
     # 오류는 쉬운 말로
     P(page, "window.fetch = async () => new Response(JSON.stringify({ message: 'x' }), { status: 402 })")
-    page.click('text=전체 다시 그리기'); page.wait_for_selector('.toast.err >> text=Anlas')
+    page.click('button:has-text("전체 다시 그리기")'); page.wait_for_selector('.toast.err >> text=Anlas')
     assert not errs, errs
     br.close()
 print('통과')

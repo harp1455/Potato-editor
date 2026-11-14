@@ -3,7 +3,7 @@
 import functools, http.server, os, shutil, sys, tempfile, threading
 from playwright.sync_api import sync_playwright
 HERE = os.path.dirname(os.path.abspath(__file__))
-PACKS = sys.argv[1]; SHOTS = sys.argv[2] if len(sys.argv) > 2 else None; TIME = 900000
+PACKS = sys.argv[1]; SHOTS = sys.argv[2] if len(sys.argv) > 2 else None; TIME = 420000
 root = tempfile.mkdtemp(); shutil.copy(os.path.join(HERE, '..', '..', 'dist', 'v2', 'index.html'), root); os.symlink(os.path.abspath(PACKS), os.path.join(root, 'packs'))
 src = os.path.join(root, '캐릭터.png'); shutil.copy(os.path.join(PACKS, 'test.png'), src)
 class Quiet(http.server.SimpleHTTPRequestHandler):
@@ -28,6 +28,7 @@ with sync_playwright() as pw:
     assert len(P(page, L)) == 1
     # 선화 추출 → 같은 자리에 새 레이어
     go(page, 'ai.line', L + ".length === 2")
+    page.wait_for_function("__potato.state.bitmaps.has(%s[1].mediaId)" % L)
     a, b = P(page, L); assert b['name'].endswith('선화') and (b['x'], b['y']) == (a['x'], a['y'])
     ink = P(page, "(async () => { const l = %s[1], bm = await __potato.ai.aiLoad && __potato.state.bitmaps.get(l.mediaId), c = new OffscreenCanvas(bm.width, bm.height), g = c.getContext('2d'); g.drawImage(bm, 0, 0); const d = g.getImageData(0, 0, bm.width, bm.height).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 128) n++; return n / (bm.width * bm.height); })()" % L)
     print('선이 차지한 넓이: %.1f%%' % (ink * 100)); assert 0.005 < ink < 0.6, ink
@@ -35,6 +36,14 @@ with sync_playwright() as pw:
     # 배경 흐리게 → 그 레이어의 그림이 바뀜
     P(page, "(() => { const p = __potato.state.project; p.canvases[0].layers[0].visible = true; p.canvases[0].layers[1].visible = false; p.sel = p.canvases[0].layers[0].id; __potato.emit(); })()")
     m0 = P(page, L + "[0].mediaId"); go(page, 'ai.dof95', L + "[0].mediaId !== '%s'" % m0); page.wait_for_timeout(300); shot(page, '91-dof')
+    # AI 중간 장면: 원래 그림과 흐린 그림 사이에 한 장
+    ids = P(page, "(() => { const p = __potato.state.project; return [p.media[0].id, p.canvases[0].layers[0].mediaId]; })()")
+    P(page, "__potato.run('room.video')"); page.wait_for_selector('.vid-room'); P(page, "__potato.video.addScenes(%s)" % ids)
+    page.click('.vid-scene >> nth=0'); P(page, "__potato.run('video.interp')")
+    page.wait_for_selector('.dlg >> text=AI 팩 받기'); page.click('.dlg-foot >> text=받기')
+    page.wait_for_function("__potato.state.project.sequences[0].scenes.length === 3", timeout=TIME)
+    sc = P(page, "__potato.state.project.sequences[0].scenes"); assert sc[0]['dur'] == 1 and sc[1]['dur'] == 1 and sc[1]['mediaId'] not in ids
+    page.click('.vid-scene >> nth=1'); page.wait_for_timeout(400); shot(page, '92-interp')
     assert not errs, errs
     br.close()
 srv.shutdown(); print('통과')

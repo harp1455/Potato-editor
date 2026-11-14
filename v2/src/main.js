@@ -14,7 +14,7 @@ import { registerGeminiCmds } from './ui/geminitools.js';
 import { characterRoom, registerCharCmds } from './rooms/character.js';
 import { naiAccount } from './api/nai.js';
 import { registerAiCmds, packsPane } from './ui/aitools.js';
-import { preamble, check, generate, buildBody, buildInteraction, speak, animate, SAFETY_CATEGORIES } from './api/gemini.js';
+import { preamble, check, generate, buildBody, buildInteraction, speak, animate, SAFETY_CATEGORIES, usageLog, usageClear } from './api/gemini.js';
 
 const VERSION = typeof __VERSION__ === 'string' ? __VERSION__ : 'dev';
 const ROOMS = [imageRoom, cutRoom, videoRoom, characterRoom, batchRoom];
@@ -46,6 +46,8 @@ function registerCmds() {
   addCmd({ id: 'view.resetLayout', title: '패널 배치 처음으로', menu: '보기', group: 'panel', run: () => { resetLayout(); toast('이 화면의 패널 배치를 처음 모양으로 돌렸어요.'); } });
   ROOMS.forEach((r, i) => addCmd({ id: 'room.' + r.id, title: r.title + ' 작업실', menu: '작업실', keys: 'Alt+' + (i + 1), checked: () => settings.get('room') === r.id, run: () => settings.set('room', r.id) }));
   addCmd({ id: 'help.plan', title: '2.0에서 달라지는 것', menu: '도움말', run: planDialog });
+  addCmd({ id: 'help.update', title: '새 판 확인', menu: '도움말', run: () => checkUpdate(false) });
+  addCmd({ id: 'help.usage', title: 'API 사용 기록', menu: '도움말', run: usageDialog });
   addCmd({ id: 'help.keys', title: '단축키 보기·바꾸기', menu: '도움말', run: () => settingsDialog('keys') });
   setMenuItem(id => cmdItem(cmd(id)));
 }
@@ -151,6 +153,27 @@ function planDialog() {
       h('table.plan', null, h('tbody', null, rows.map(r => h('tr' + (r[2] === '지금' ? '.now' : ''), null, h('th', { scope: 'row' }, r[0]), h('td', null, r[1]), h('td.plan-when', null, r[2])))))) });
 }
 
+const KIND = { write: '글쓰기', translate: '번역', dub: '더빙', video: 'AI 영상', edit: '그림 고치기', 'nai generate': 'NovelAI 그림', 'nai img2img': 'NovelAI 다시 그리기', 'nai infill': 'NovelAI 고른 곳' };
+function usageDialog() {
+  const L = usageLog();
+  dialog({ title: 'API 사용 기록', wide: true, buttons: [{ label: '기록 지우기', run: () => { usageClear(); } }, { label: '닫기', primary: true }],
+    body: L.length ? h('table.plan', null, h('tbody', null, L.slice(0, 200).map(r => h('tr', null, h('td.plan-when', null, new Date(r.t).toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'short' })), h('th', { scope: 'row' }, KIND[r.kind] || r.kind), h('td', null, r.model || ''), h('td.plan-when', null, r.size ? `${r.size}, ${r.steps}스텝` : `보냄 ${(r.in || 0).toLocaleString('ko-KR')} / 받음 ${(r.out || 0).toLocaleString('ko-KR')} 토큰`)))))
+      : h('p.dlg-text', null, '아직 기록이 없어요. 제미나이나 NovelAI를 쓰면 여기에 남아요. 금액은 구글과 NovelAI의 요금표에 따라 달라서 토큰과 횟수만 적어요.') });
+}
+// 새 판 확인: 깃허브에 올라온 2.0 판 중 가장 새것과 견줘요
+const verNum = v => { const m = /(\d+)\.(\d+)\.(\d+)(?:-([a-z]+)\.(\d+))?/.exec(v) || []; return [+m[1] || 0, +m[2] || 0, +m[3] || 0, m[4] ? ({ alpha: 0, beta: 1, rc: 2 }[m[4]] ?? 0) : 9, +m[5] || 0]; };
+const newer = (a, b) => { const x = verNum(a), y = verNum(b); for (let i = 0; i < 5; i++) if (x[i] !== y[i]) return x[i] > y[i]; return false; };
+async function checkUpdate(quiet) {
+  try {
+    const res = await fetch('https://api.github.com/repos/harp1455/Potato-editor/releases?per_page=30', { headers: { Accept: 'application/vnd.github+json' } }); if (!res.ok) throw new Error(String(res.status));
+    const top = (await res.json()).filter(r => /^v2\./.test(r.tag_name) && !r.draft).sort((a, b) => newer(a.tag_name, b.tag_name) ? -1 : 1)[0];
+    settings.set('updSeen', Date.now());
+    if (top && newer(top.tag_name, VERSION)) { dialog({ title: '새 판이 나왔어요', body: h('div', null, h('p.dlg-text', null, `지금 쓰는 판은 ${VERSION}, 새 판은 ${top.tag_name.slice(1)}이에요. 받는 곳에서 설치 파일이나 HTML 파일을 받아 주세요. 작업은 그대로 남아요.`)), buttons: [{ label: '나중에' }, { label: '받는 곳 열기', primary: true, run: () => { window.open(top.html_url, '_blank', 'noopener'); } }] }); return true; }
+    if (!quiet) toast('지금 쓰는 판이 가장 새 판이에요.');
+  } catch (_) { if (!quiet) toast('새 판이 있는지 확인하지 못했어요. 인터넷 연결을 확인해 주세요.', 'err'); }
+  return false;
+}
+
 function adultDialog(then) {
   dialog({ title: '성인 확인', dismiss: false,
     body: h('div', null,
@@ -196,6 +219,9 @@ function settingsDialog(tab = 'screen') {
         h('input.text.wide', { type: 'password', value: settings.get('naiToken'), placeholder: 'pst-…', autocomplete: 'off', 'aria-label': 'NovelAI 토큰', onchange: e => settings.set('naiToken', e.target.value.trim()) }),
         h('p.set-note', null, 'NovelAI 누리집의 계정 설정에서 받는 "Persistent API Token"이에요. 이 컴퓨터에만 저장되고 NovelAI 서버로만 보내요. 오른쪽 NovelAI 패널에서 그림 만들기, 다시 그리기, 고른 곳만 다시 그리기를 써요.'),
         h('div.btn-row', null, h('button.btn', { onclick: async e => { e.target.disabled = true; naiOut.textContent = '확인하는 중이에요.'; try { const a = await naiAccount(); naiOut.textContent = `연결됐어요. ${a.tier}, 남은 Anlas ${a.anlas.toLocaleString('ko-KR')}`; } catch (err) { naiOut.textContent = err.message; } e.target.disabled = false; } }, 'NovelAI 연결 확인')), naiOut,
+        h('h3', null, '사용 기록'),
+        (() => { const L = usageLog(), m0 = new Date(); m0.setDate(1); m0.setHours(0, 0, 0, 0); const M = L.filter(r => r.t >= +m0), tin = M.reduce((a, r) => a + (r.in || 0), 0), tout = M.reduce((a, r) => a + (r.out || 0), 0);
+          return h('p.set-note', null, `이번 달 요청 ${M.length}번, 보낸 토큰 ${tin.toLocaleString('ko-KR')}, 받은 토큰 ${tout.toLocaleString('ko-KR')}. NovelAI ${M.filter(r => String(r.kind).startsWith('nai')).length}번. `, h('button.link', { onclick: usageDialog }, '기록 보기')); })(),
         h('h3', null, '모든 요청에 먼저 붙는 것'),
         h('p.set-note', null, `안전 설정 ${SAFETY_CATEGORIES.length}가지를 모두 "끔"으로 보내고, 아래 안내문을 다른 지시보다 앞에 둬요. 글 요청은 괴롭힘·혐오·성적 내용·위험한 내용·선거와 시민, 목소리와 영상 요청은 혐오·위험한 내용·괴롭힘·성적 내용·탈옥 판정이에요. 번역, 더빙, 영상은 안내문의 둘째 줄과 넷째 줄만 그 일에 맞게 바뀌어요.`),
         h('div.btn-row', null, [['write', '글쓰기'], ['translate', '번역'], ['dub', '더빙'], ['video', '영상'], ['edit', '그림 고치기']].map(([k, t]) => h('button.btn.small', { onclick: () => { pre.textContent = preamble(k); } }, t))),
@@ -214,7 +240,8 @@ function settingsDialog(tab = 'screen') {
     about: () => [
       h('h3', null, '감자 편집기 ' + VERSION),
       h('p.set-note', null, '2.0은 새 틀 위에 8.x의 기능을 옮겨 담는 중인 미리보기판이에요. 작업은 이 컴퓨터의 브라우저 저장 공간에 저장되고, 8.x의 작업과는 따로 보관돼요.'),
-      h('button.btn', { onclick: () => { d.close(); run('help.plan'); } }, '2.0에서 달라지는 것 보기'),
+      h('div.btn-row', null, h('button.btn', { onclick: () => checkUpdate(false) }, '새 판 확인'), h('button.btn', { onclick: () => { d.close(); run('help.plan'); } }, '2.0에서 달라지는 것 보기')),
+      h('label.check', null, h('input', { type: 'checkbox', checked: settings.get('autoUpd') !== false, onchange: e => settings.set('autoUpd', e.target.checked) }), '켤 때 하루에 한 번 새 판이 있는지 확인하기'),
     ],
   };
   const show = t => {
@@ -244,11 +271,13 @@ async function start() {
   addEventListener('beforeunload', () => { if (!state.saved) saveNow(); });
   document.addEventListener('contextmenu', e => { if (!e.target.closest('input, textarea, .viewport, .layer')) e.preventDefault(); });
   if (!settings.get('askedAdult')) adultDialog();
+  else if (settings.get('autoUpd') !== false && Date.now() - (settings.get('updSeen') || 0) > 864e5 && VERSION !== 'dev') setTimeout(() => checkUpdate(true), 4000);
   window.__potato = { state, settings, run, emit, api: { generate, buildBody, buildInteraction, speak, animate, preamble } };
   import('./core/files.js').then(f => { window.__potato.files = f; });
   import('./core/select.js').then(f => { window.__potato.sel = f; });
   import('./api/nai.js').then(f => { window.__potato.nai = f; });
   import('./core/ai.js').then(f => { window.__potato.ai = f; });
   import('./core/encode.js').then(f => { window.__potato.enc = f; });
+  import('./rooms/video.js').then(f => { window.__potato.video = f; });
 }
 start();

@@ -1,7 +1,10 @@
 // 영상 작업실 (첫 판): 장면을 이어 붙여 영상·움짤로 내보내요.
 // 장면 = 보관함 그림 + 보여 줄 시간. 글자·넘김 효과·소리·AI 중간 장면은 다음에 옮겨 와요.
 import { h, icon, drag, clamp } from '../ui/dom.js';
-import { state, commit, emit, uid, ensureBitmap, addMedia, ensureFolder } from '../core/store.js';
+import { state, commit, emit, uid, ensureBitmap, addMedia, ensureFolder, idb } from '../core/store.js';
+import { runJob, aiLoad } from '../core/ai.js';
+import { ensurePacks } from '../ui/aitools.js';
+import { legacyAi } from '../legacy/shim.js';
 import { addCmd, run } from '../core/cmd.js';
 import { encodeRender, canMp4 } from '../core/encode.js';
 import { download } from '../core/files.js';
@@ -22,12 +25,31 @@ export function ensureSeq(w, h, fps) {
 const total = s => s.scenes.reduce((a, x) => a + x.dur, 0);
 function sceneAt(s, t) { let a = 0; for (const x of s.scenes) { if (t < a + x.dur) return x; a += x.dur; } return s.scenes[s.scenes.length - 1] || null; }
 const startOf = (s, id) => { let a = 0; for (const x of s.scenes) { if (x.id === id) return a; a += x.dur; } return 0; };
-export function renderSeq(g, s, t, w, h) {
-  g.fillStyle = s.bg || '#000'; g.fillRect(0, 0, w, h);
-  const x = sceneAt(s, t); if (!x) return;
+let fadeCv = null;
+function drawScene(g, x, w, h) {
   const b = state.bitmaps.get(x.mediaId); if (!b) { ensureBitmap(x.mediaId); return; }
   const k = (x.fit === 'cover' ? Math.max : Math.min)(w / b.width, h / b.height), dw = b.width * k, dh = b.height * k;
   g.imageSmoothingQuality = 'high'; g.drawImage(b, (w - dw) / 2, (h - dh) / 2, dw, dh);
+}
+export function renderSeq(g, s, t, w, h) {
+  g.fillStyle = s.bg || '#000'; g.fillRect(0, 0, w, h);
+  let a = 0, i = 0; for (; i < s.scenes.length - 1 && t >= a + s.scenes[i].dur; i++) a += s.scenes[i].dur;
+  const x = s.scenes[i]; if (!x) return;
+  const f = Math.min(x.fade || 0, x.dur), prev = s.scenes[i - 1];
+  if (f > 0 && prev && t - a < f) {   // 앞 장면 위에 이 장면을 (바탕까지 그린 뒤) 점점 진하게
+    drawScene(g, prev, w, h);
+    if (!fadeCv || fadeCv.width !== w || fadeCv.height !== h) { fadeCv = document.createElement('canvas'); fadeCv.width = w; fadeCv.height = h; }
+    const fg = fadeCv.getContext('2d'); fg.fillStyle = s.bg || '#000'; fg.fillRect(0, 0, w, h); drawScene(fg, x, w, h);
+    g.save(); g.globalAlpha = (t - a) / f; g.drawImage(fadeCv, 0, 0); g.restore();
+  }
+  else drawScene(g, x, w, h);
+  // 자막: 영상 높이에 맞춰 크기를 정해요
+  for (const c of s.caps || []) {
+    if (t < c.t0 || t >= c.t0 + c.dur || !String(c.text || '').trim()) continue;
+    const size = h * (c.size || 5) / 100, lines = String(c.text).split('\n'), lh = size * 1.3, y0 = c.pos === 'top' ? size * 1.2 : c.pos === 'middle' ? h / 2 - (lines.length - 1) * lh / 2 : h - size * 1.2 - (lines.length - 1) * lh;
+    g.font = `700 ${size}px "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.lineJoin = 'round';
+    lines.forEach((ln, k) => { g.strokeStyle = c.sc || '#000000'; g.lineWidth = size * 0.16; g.strokeText(ln, w / 2, y0 + k * lh); g.fillStyle = c.color || '#ffffff'; g.fillText(ln, w / 2, y0 + k * lh); });
+  }
 }
 // 보관함 그림들을 장면으로. 영상이 비어 있으면 첫 그림 크기에 맞춰요
 export function addScenes(mediaIds, dur, label) {
@@ -38,12 +60,28 @@ export function addScenes(mediaIds, dur, label) {
   commit(label || (ms.length > 1 ? `장면 ${ms.length}개 넣기` : '장면 넣기')); return ms.length;
 }
 // 캐릭터 움직임처럼 이미 그려진 장면들을 받아요
-export async function addFrames(frames, fps, name, onStep) {
-  const folder = ensureFolder('캐릭터 움직임/' + name), ids = [];
+export const addFrames = (frames, fps, name, onStep) => addFramesTo('캐릭터 움직임/' + name, frames, fps, name, onStep);
+async function addFramesTo(path, frames, fps, name, onStep) {
+  const folder = ensureFolder(path), ids = [];
   for (let i = 0; i < frames.length; i++) { const blob = await new Promise(r => frames[i].toBlob(r, 'image/png')); ids.push((await addMedia(new File([blob], `${name} ${String(i + 1).padStart(3, '0')}.png`, { type: 'image/png' }), folder)).id); if (onStep) onStep(i + 1, frames.length); }
-  const fresh = !seqOf() || !seqOf().scenes.length; const n = addScenes(ids, 1 / fps, '움직임을 영상에 넣기');
+  const fresh = !seqOf() || !seqOf().scenes.length; const n = addScenes(ids, 1 / fps, '장면 넣기');
   if (fresh) seqOf().fps = fps;
   return n;
+}
+
+// 소리(배경 음악·더빙): 파일은 보관 공간에 두고, 미리 볼 때 같이 틀고, MP4로 내보낼 때 같이 넣어요
+const AUD = { el: null, id: null };
+async function audioEl(s) {
+  if (!s.audio) { if (AUD.el) AUD.el.pause(); AUD.el = null; AUD.id = null; return null; }
+  if (AUD.id !== s.audio.id) { const b = await idb.get('blobs', 'aud:' + s.audio.id); if (AUD.el) AUD.el.pause(); AUD.el = b ? new Audio(URL.createObjectURL(b)) : null; AUD.id = s.audio.id; }
+  if (AUD.el) AUD.el.volume = s.audio.vol ?? 1;
+  return AUD.el;
+}
+async function audioBuffer(s, secs) {
+  if (!s.audio) return null; const b = await idb.get('blobs', 'aud:' + s.audio.id); if (!b) return null;
+  const ac = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 }), src = await ac.decodeAudioData(await b.arrayBuffer()), n = Math.max(1, Math.round(secs * src.sampleRate)), out = ac.createBuffer(Math.min(2, src.numberOfChannels), n, src.sampleRate), vol = s.audio.vol ?? 1;
+  for (let c = 0; c < out.numberOfChannels; c++) { const d = out.getChannelData(c), f = src.getChannelData(c), m = Math.min(n, f.length); for (let i = 0; i < m; i++) d[i] = f[i] * vol; }
+  ac.close(); return out;
 }
 
 function draw() {
@@ -58,7 +96,7 @@ function draw() {
 function tickPlay(now) {
   const s = seqOf(); if (!V.playing || !s) return;
   V.t += (now - V.last) / 1000; V.last = now;
-  if (V.t >= total(s)) V.t = 0;
+  if (V.t >= total(s)) { V.t = 0; if (AUD.el) AUD.el.currentTime = 0; }
   draw(); const clock = document.querySelector('.vid-clock'); if (clock) clock.textContent = fmt(V.t) + ' / ' + fmt(total(s));
   const head = document.querySelector('.vid-head'); if (head) head.style.left = headX(s) + 'px';
   V.raf = requestAnimationFrame(tickPlay);
@@ -67,7 +105,12 @@ const PX = 80;   // 1초 = 80px (짧은 장면도 최소 폭은 보이게)
 const widthOf = x => Math.max(14, x.dur * PX);
 const headX = s => { let a = 0, px = 0; for (const x of s.scenes) { if (V.t < a + x.dur) return px + (V.t - a) / x.dur * widthOf(x); a += x.dur; px += widthOf(x); } return px; };
 const fmt = t => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, '0')}`;
-function play(on) { V.playing = on; cancelAnimationFrame(V.raf); if (on) { V.last = performance.now(); V.raf = requestAnimationFrame(tickPlay); } emit(); }
+function play(on) {
+  V.playing = on; cancelAnimationFrame(V.raf); const s = seqOf();
+  if (on) { V.last = performance.now(); V.raf = requestAnimationFrame(tickPlay); }
+  if (s) audioEl(s).then(a => { if (!a) return; if (V.playing) { a.currentTime = Math.min(V.t, a.duration || V.t); a.play().catch(() => {}); } else a.pause(); });
+  emit();
+}
 
 function exportDialog() {
   const s = seqOf(); if (!s || !s.scenes.length) return;
@@ -84,7 +127,8 @@ function exportDialog() {
     play(false); const b = busy('파일을 만드는 중이에요.');
     try {
       await Promise.all(s.scenes.map(x => ensureBitmap(x.mediaId)));
-      const blob = await encodeRender({ W: s.w, H: s.h, fps: s.fps, total: total(s), render: (g, t, w, hh) => renderSeq(g, s, t, w, hh) }, F.fmt, { size: F.size, loop: F.loop, quality: 90 }, p => b.set(`파일을 만드는 중이에요. ${Math.round(p * 100)}%`));
+      const audio = F.fmt === 'mp4' ? await audioBuffer(s, total(s)).catch(() => null) : null;
+      const blob = await encodeRender({ W: s.w, H: s.h, fps: s.fps, total: total(s), render: (g, t, w, hh) => renderSeq(g, s, t, w, hh) }, F.fmt, { size: F.size, loop: F.loop, quality: 90, audio }, p => b.set(`파일을 만드는 중이에요. ${Math.round(p * 100)}%`));
       download(blob, `${s.name}.${F.fmt}`); b.done(`'${s.name}.${F.fmt}'로 저장했어요.`);
     } catch (e) { b.done(String(e && e.message) === 'nomp4' ? '이 컴퓨터에서는 MP4를 만들 수 없어요. WebP나 GIF로 저장해 주세요.' : '파일을 만들지 못했어요. ' + ((e && e.message) || ''), 'err'); }
   })(); } }] });
@@ -110,6 +154,7 @@ export const videoRoom = {
         h('button.btn.small', { disabled: !T, onclick: () => play(!V.playing), title: 'Space' }, V.playing ? '멈춤' : '재생'),
         h('span.vid-clock', null, fmt(V.t) + ' / ' + fmt(T)),
         h('span.grow'),
+        h('button.btn.small', { onclick: () => run('video.import'), title: '영상이나 움짤 파일을 장면으로 풀어 넣어요' }, '영상 불러오기'),
         h('button.btn.small', { onclick: () => run('video.addPicked'), title: '보관함에서 고른 그림을 장면으로 넣어요. 보관함 그림을 아래 줄로 끌어도 돼요.' }, '고른 그림 넣기'),
         h('button.btn.small.primary', { disabled: !T, onclick: () => run('video.export') }, '내보내기'));
       strip.replaceChildren(...(s && s.scenes.length ? [
@@ -128,7 +173,21 @@ export const videoRoom = {
         h('h3.sec', null, many.length > 1 ? `장면 ${many.length}개` : '장면'),
         !many.length ? h('p.panel-note', null, '아래 줄에서 장면을 누르면 길이와 맞춤을 바꿀 수 있어요. Shift나 Ctrl로 여러 개를 골라요.') : num('길이', +(one ? one.dur : many[0].dur).toFixed(3), 0.1, 0.02, v => { many.forEach(x => { x.dur = clamp(v, 0.02, 600); }); commit('장면 길이'); }, '초'),
         many.length ? h('label.field', null, h('span.field-name.w', null, '맞춤'), h('select.text', { 'aria-label': '맞춤', onchange: e => { many.forEach(x => { x.fit = e.target.value; }); commit('장면 맞춤'); } }, [['contain', '다 보이게'], ['cover', '꽉 채우게']].map(([v, t]) => h('option', { value: v, selected: many[0].fit === v }, t)))) : null,
+        many.length ? num('겹쳐 바뀜', +(many[0].fade || 0).toFixed(2), 0.1, 0, v => { many.forEach(x => { x.fade = clamp(v, 0, 10); }); commit('겹쳐 바뀜'); }, '초') : null,
+        many.length ? h('div.btn-row', null, h('button.btn.small', { title: '고른 장면과 다음 장면 사이에 AI가 중간 장면을 그려 넣어 부드럽게 이어요', onclick: () => run('video.interp') }, 'AI 중간 장면 넣기')) : null,
         many.length ? h('div.btn-row', null, h('button.icon-btn', { title: '앞으로 옮기기', 'aria-label': '앞으로 옮기기', onclick: () => run('video.left') }, icon('up')), h('button.icon-btn', { title: '뒤로 옮기기', 'aria-label': '뒤로 옮기기', onclick: () => run('video.right') }, icon('down')), h('span.grow'), h('button.icon-btn', { title: '장면 지우기', 'aria-label': '장면 지우기', onclick: () => run('video.delete') }, icon('trash'))) : null,
+        h('h3.sec', null, '자막'),
+        ...(s.caps || []).map(c => h('div.cap', null,
+          h('textarea.text.area', { rows: 2, 'aria-label': '자막', value: c.text, oninput: e => { c.text = e.target.value; draw(); }, onchange: () => commit('자막 고치기') }),
+          h('div.field-row', null, num('시작', +c.t0.toFixed(2), 0.1, 0, v => { c.t0 = Math.max(0, v); commit('자막 시작'); }, '초'), num('길이', +c.dur.toFixed(2), 0.1, 0.1, v => { c.dur = Math.max(0.1, v); commit('자막 길이'); }, '초')),
+          h('div.btn-row', null, h('select.text', { 'aria-label': '자막 자리', style: 'width:auto', onchange: e => { c.pos = e.target.value; commit('자막 자리'); } }, [['bottom', '아래'], ['middle', '가운데'], ['top', '위']].map(([v, t]) => h('option', { value: v, selected: (c.pos || 'bottom') === v }, t))), h('span.grow'), h('button.icon-btn', { title: '자막 지우기', 'aria-label': '자막 지우기', onclick: () => { s.caps = s.caps.filter(x => x !== c); commit('자막 지우기'); } }, icon('trash'))))),
+        h('button.btn.small', { onclick: () => { (s.caps || (s.caps = [])).push({ id: uid('k'), text: '자막', t0: +V.t.toFixed(2), dur: 2, pos: 'bottom', size: 5 }); commit('자막 넣기'); } }, '지금 시각에 자막 넣기'),
+        h('h3.sec', null, '소리'),
+        s.audio ? h('div.cap', null, h('p.clip-text', { title: s.audio.name }, s.audio.name),
+          h('label.field', null, h('span.field-name.w', null, '크기'), h('input.range', { type: 'range', min: 0, max: 100, value: Math.round((s.audio.vol ?? 1) * 100), 'aria-label': '소리 크기', onchange: e => { s.audio.vol = e.target.value / 100; commit('소리 크기'); } })),
+          h('div.btn-row', null, h('button.btn.small', { onclick: () => { delete s.audio; commit('소리 빼기'); } }, '소리 빼기')),
+          h('p.panel-note', null, '소리는 MP4로 내보낼 때만 들어가요. 영상보다 길면 영상 길이에서 잘려요.'))
+          : h('button.btn.small', { onclick: () => run('video.audio') }, '소리 파일 넣기'),
       ].filter(Boolean)));
       draw();
     };
@@ -144,6 +203,50 @@ export const videoRoom = {
   hint: () => '보관함 그림을 아래 줄로 끌어 장면을 만들어요. 장면을 눌러 길이를 바꾸고, 내보내기로 MP4, WebP, GIF를 저장해요.',
 };
 
+// 영상·GIF·WebP 파일 → 장면들 (긴 쪽 1280까지, 최대 600장)
+async function importClip() {
+  const inp = h('input', { type: 'file', accept: 'video/*,image/gif,image/webp' });
+  inp.onchange = async () => {
+    const f = inp.files[0]; if (!f) return; const b = busy('파일에서 장면을 꺼내는 중이에요.'), frames = []; let fps = 12;
+    const grab = (src, w, hh) => { const k = Math.min(1, 1280 / Math.max(w, hh)), c = document.createElement('canvas'); c.width = Math.round(w * k); c.height = Math.round(hh * k); c.getContext('2d').drawImage(src, 0, 0, c.width, c.height); return c; };
+    try {
+      if (/^image\//.test(f.type)) {
+        if (!window.ImageDecoder) throw new Error('이 브라우저는 움짤 파일을 장면으로 풀 수 없어요');
+        const dec = new ImageDecoder({ data: await f.arrayBuffer(), type: f.type }); await dec.tracks.ready; const n = Math.min(600, dec.tracks.selectedTrack.frameCount); let dur = 0;
+        for (let i = 0; i < n; i++) { const r = await dec.decode({ frameIndex: i }); frames.push(grab(r.image, r.image.displayWidth, r.image.displayHeight)); dur += (r.image.duration || 100000) / 1e6; r.image.close(); b.set(`파일에서 장면을 꺼내는 중이에요. ${i + 1} / ${n}`); }
+        fps = Math.max(1, Math.min(60, Math.round(n / Math.max(0.05, dur))));
+      } else {
+        const v = document.createElement('video'); v.muted = true; v.src = URL.createObjectURL(f); await new Promise((res, rej) => { v.onloadeddata = res; v.onerror = () => rej(new Error('이 영상은 열 수 없어요')); });
+        fps = Math.min(30, (seqOf() && seqOf().scenes.length ? seqOf().fps : 24)); const n = Math.min(600, Math.max(1, Math.floor(v.duration * fps)));
+        for (let i = 0; i < n; i++) { v.currentTime = (i + 0.5) / fps; await new Promise(res => { v.onseeked = res; }); frames.push(grab(v, v.videoWidth, v.videoHeight)); b.set(`파일에서 장면을 꺼내는 중이에요. ${i + 1} / ${n}`); }
+        URL.revokeObjectURL(v.src);
+      }
+      const name = f.name.replace(/\.[a-z0-9]+$/i, ''), n = await addFramesTo('영상 장면/' + name, frames, fps, name, (i, t) => b.set(`장면을 보관함에 넣는 중이에요. ${i} / ${t}`));
+      b.done(`장면 ${n}개를 넣었어요.`);
+    } catch (e) { b.done(e.message || '파일을 읽지 못했어요.', 'err'); }
+  };
+  inp.click();
+}
+// 고른 장면마다 다음 장면과의 사이에 중간 장면 하나를 그려 넣어요 (길이는 반씩 나눠 전체 길이는 그대로)
+async function interp() {
+  const s = seqOf(), pairs = s.scenes.map((x, i) => [x, s.scenes[i + 1]]).filter(([x, y]) => V.sel.has(x.id) && y && y.mediaId !== x.mediaId);
+  if (!pairs.length) { toast('다음 장면이 있는 장면을 골라 주세요.', 'err'); return; }
+  if (!await ensurePacks(['rife'])) return;
+  try {
+    await runJob(`AI 중간 장면 (${pairs.length}곳)`, async (job, say) => {
+      say('모델을 불러오는 중'); await aiLoad('rife');
+      const folder = ensureFolder('영상 장면/중간 장면');
+      for (let i = 0; i < pairs.length; i++) {
+        if (job.stop) throw new Error('stop'); say(`${i + 1} / ${pairs.length}번째 사이를 그리는 중`, i / pairs.length);
+        const [x, y] = pairs[i], A = await ensureBitmap(x.mediaId), B = await ensureBitmap(y.mediaId), c = await legacyAi().riRun(A, B, 0.5, A.width, A.height);
+        const m = await addMedia(new File([await new Promise(r => c.toBlob(r, 'image/png'))], `중간 ${Date.now().toString(36)}.png`, { type: 'image/png' }), folder);
+        x.dur /= 2; s.scenes.splice(s.scenes.indexOf(x) + 1, 0, { id: uid('s'), mediaId: m.id, dur: x.dur, fit: x.fit }); await ensureBitmap(m.id);
+      }
+    });
+    commit('AI 중간 장면'); toast(`중간 장면 ${pairs.length}개를 넣었어요.`);
+  } catch (e) { toast('중간 장면을 만들지 못했어요. ' + (e.message || ''), 'err'); }
+}
+
 export function registerVideoCmds() {
   const inRoom = () => !!cv, has = () => inRoom() && !!seqOf() && V.sel.size > 0;
   const shift = d => { const s = seqOf(), ids = s.scenes.filter(x => V.sel.has(x.id)); (d < 0 ? ids : ids.reverse()).forEach(x => { const i = s.scenes.indexOf(x), j = i + d; if (j >= 0 && j < s.scenes.length && !V.sel.has(s.scenes[j].id)) { s.scenes.splice(i, 1); s.scenes.splice(j, 0, x); } }); commit('장면 옮기기'); };
@@ -154,5 +257,8 @@ export function registerVideoCmds() {
   addCmd({ id: 'video.right', title: '장면을 뒤로', menu: '영상', group: 'scene', enabled: has, run: () => shift(1) });
   addCmd({ id: 'video.dup', title: '장면 복제', menu: '영상', group: 'scene', enabled: has, run: () => { const s = seqOf(); [...s.scenes].forEach(x => { if (V.sel.has(x.id)) s.scenes.splice(s.scenes.indexOf(x) + 1, 0, { ...x, id: uid('s') }); }); commit('장면 복제'); } });
   addCmd({ id: 'video.delete', title: '장면 지우기', menu: '영상', group: 'scene', enabled: has, run: () => { const s = seqOf(); s.scenes = s.scenes.filter(x => !V.sel.has(x.id)); V.sel.clear(); commit('장면 지우기'); } });
+  addCmd({ id: 'video.import', title: '영상·움짤 파일을 장면으로 불러오기…', menu: '영상', group: 'in', words: 'mp4 gif webp 불러오기', run: importClip });
+  addCmd({ id: 'video.audio', title: '소리 파일 넣기…', menu: '영상', group: 'in', words: '음악 배경음 더빙 mp3 wav', run: () => { const i = h('input', { type: 'file', accept: 'audio/*' }); i.onchange = async () => { const f = i.files[0]; if (!f) return; const s = ensureSeq(), id = uid('a'); await idb.put('blobs', 'aud:' + id, f); s.audio = { id, name: f.name, vol: 1 }; commit('소리 넣기'); toast(`'${f.name}'을 넣었어요. 재생하면 같이 들려요.`); }; i.click(); } });
+  addCmd({ id: 'video.interp', title: 'AI 중간 장면 넣기', menu: '영상', group: 'scene', words: '보간 부드럽게 rife', enabled: has, run: interp });
   addEventListener('keydown', e => { if (!cv || document.querySelector('.dlg-back, #modalRoot .modal-bg') || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return; if (e.code === 'Space') { e.preventDefault(); e.stopImmediatePropagation(); if (seqOf()) play(!V.playing); } else if (e.key === 'Delete' && V.sel.size) { e.preventDefault(); e.stopImmediatePropagation(); run('video.delete'); } }, true);
 }

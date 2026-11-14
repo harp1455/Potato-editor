@@ -3,7 +3,7 @@
 // 요청 모양은 공개된 구현들(DNT-LAB/NAIA_novel_ai_entrypoint, sunho/SDStudio — MIT)과 NAIS3·NAIA2.0의 설명을 참고해 새로 썼어요.
 import { settings } from '../core/settings.js';
 import { unzipFirst } from '../core/files.js';
-import { ApiError } from './gemini.js';
+import { ApiError, logUse } from './gemini.js';
 
 const HOST = 'https://image.novelai.net';
 const TIERS = ['구독 없음', 'Tablet', 'Scroll', 'Opus'];
@@ -84,5 +84,6 @@ export async function naiGenerate(o, src, signal) {
   const body = buildNai(o, src);
   const res = await naiFetch('/ai/generate-image', { method: 'POST', body: JSON.stringify(body), signal });
   const png = await unzipFirst(await res.arrayBuffer());
+  logUse('nai ' + body.action, body.model, null, { size: body.parameters.width + ' × ' + body.parameters.height, steps: body.parameters.steps });
   return { blob: new Blob([png], { type: 'image/png' }), seed: body.parameters.seed };
 }

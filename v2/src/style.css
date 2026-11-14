@@ -302,3 +302,4 @@ label.batch-row { cursor: pointer; } .batch-row input[type=checkbox] { accent-co
 .cut-add { width: 54px; height: 54px; display: grid; place-items: center; border: 1px dashed var(--edge); border-radius: var(--r); color: var(--dim); flex: none; margin-bottom: 18px; }
 .cut-add:hover { color: var(--text); border-color: var(--dim); }
 [data-room="cut"] .vid-side input[type=color] { width: 44px; height: 24px; }
+.cap { align-self: stretch; display: grid; gap: 6px; padding-bottom: 8px; border-bottom: 1px solid var(--raise); }

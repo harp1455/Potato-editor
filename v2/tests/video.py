@@ -45,6 +45,34 @@ with sync_playwright() as pw:
         page.click('.vid-bar >> text=내보내기')
         with page.expect_download() as dl: page.click('.dlg-foot >> text=내보내기')
         d = open(dl.value.path(), 'rb').read(); assert d[4:8] == b'ftyp' and len(d) > 2000, len(d)
+    # 겹쳐 바뀜: 둘째 장면 0.5초 → 바뀌는 중간 시각의 색이 두 장면 사이
+    P(page, "(() => { const s = __potato.state.project.sequences[0]; s.scenes[1].fade = 0.5; __potato.emit(); })()")
+    mid = P(page, "(() => { const s = __potato.state.project.sequences[0], c = document.createElement('canvas'); c.width = 30; c.height = 20; const g = c.getContext('2d'); __potato.video.renderSeq(g, s, s.scenes[0].dur + 0.25, 30, 20); return [...g.getImageData(15, 10, 1, 1).data]; })()")
+    a0 = P(page, "(() => { const s = __potato.state.project.sequences[0], c = document.createElement('canvas'); c.width = 30; c.height = 20; const g = c.getContext('2d'); __potato.video.renderSeq(g, s, s.scenes[0].dur - 0.01, 30, 20); const a = [...g.getImageData(15, 10, 1, 1).data]; __potato.video.renderSeq(g, s, s.scenes[0].dur + 0.499, 30, 20); return [a, [...g.getImageData(15, 10, 1, 1).data]]; })()")
+    assert all(min(a0[0][k], a0[1][k]) - 3 <= mid[k] <= max(a0[0][k], a0[1][k]) + 3 for k in range(3)) and mid[:3] != a0[0][:3] and mid[:3] != a0[1][:3], (mid, a0)
+    # 자막 넣기
+    page.click('.vid-side >> text=지금 시각에 자막 넣기'); page.fill('.vid-side textarea[aria-label="자막"]', '안녕'); page.keyboard.press('Tab')
+    assert P(page, "__potato.state.project.sequences[0].caps[0].text") == '안녕'
+    # 소리 넣고 MP4로 내보내면 소리 줄이 같이 들어가요
+    import math
+    wav = os.path.join(tmp, '소리.wav'); n = 24000; pcm = b''.join(struct.pack('<h', int(8000 * math.sin(i * 0.05))) for i in range(n))
+    open(wav, 'wb').write(b'RIFF' + struct.pack('<I', 36 + len(pcm)) + b'WAVEfmt ' + struct.pack('<IHHIIHH', 16, 1, 1, 24000, 48000, 2, 16) + b'data' + struct.pack('<I', len(pcm)) + pcm)
+    with page.expect_file_chooser() as fc: page.click('.vid-side >> text=소리 파일 넣기')
+    fc.value.set_files(wav); page.wait_for_function("__potato.state.project.sequences[0].audio")
+    if P(page, "__potato.enc.canMp4() && typeof AudioEncoder !== 'undefined'"):
+        page.click('.vid-bar >> text=내보내기')
+        with page.expect_download() as dl: page.click('.dlg-foot >> text=내보내기')
+        d = open(dl.value.path(), 'rb').read(); assert b'mp4a' in d or b'Opus' in d or b'opus' in d, '소리 줄이 없어요'
+    # 움짤 파일을 장면으로 불러오기 (방금 만든 것과 같은 WebP 움짤)
+    if P(page, "!!window.ImageDecoder"):
+        anim = os.path.join(tmp, '움짤.webp'); open(anim, 'wb').write(P_webp) if False else None
+        page.click('.vid-bar >> text=내보내기'); page.click('.choice-item >> text=움짤 (WebP)')
+        with page.expect_download() as dl: page.click('.dlg-foot >> text=내보내기')
+        dl.value.save_as(anim); n0 = len(P(page, "__potato.state.project.sequences[0].scenes"))
+        with page.expect_file_chooser() as fc: page.click('.vid-bar >> text=영상 불러오기')
+        fc.value.set_files(anim); page.wait_for_function("__potato.state.project.sequences[0].scenes.length > %d" % n0, timeout=120000)
+    P(page, "(() => { const s = __potato.state.project.sequences[0]; s.scenes.length = 4; __potato.emit(); })()"); page.wait_for_timeout(900)
+
     # 다시 켜도 장면이 그대로
     page.wait_for_function("__potato.state.saved"); page.reload(); page.wait_for_function("window.__potato && __potato.state.project.sequences && __potato.state.project.sequences[0].scenes.length === 4")
     assert not errs, errs

@@ -2,7 +2,7 @@
 import { h } from './dom.js';
 import { state, commit, emit, canvasOf, newCanvas, addLayer, addMedia, ensureFolder } from '../core/store.js';
 import { settings } from '../core/settings.js';
-import { sel } from '../core/select.js';
+import { sel, selBounds } from '../core/select.js';
 import { flatten, layerFromBlob } from '../rooms/image.js';
 import { NAI_MODELS, NAI_SAMPLERS, NAI_SIZES, NAI_UC, fitSize, naiGenerate, naiAccount } from '../api/nai.js';
 import { run } from '../core/cmd.js';
@@ -18,13 +18,22 @@ const b64 = async blob => { const u = new Uint8Array(await blob.arrayBuffer()); 
 const pngOf = c => new Promise(r => c.toBlob(r, 'image/png'));
 function scaled(src, w, h) { const t = document.createElement('canvas'); t.width = w; t.height = h; const g = t.getContext('2d'); g.imageSmoothingQuality = 'high'; g.drawImage(src, 0, 0, w, h); return t; }
 // NovelAI 인페인트 가림막: 그림과 같은 크기, 8칸 단위로 흰색(다시 그릴 곳)·검정
-function naiMask(w, h) {
-  const s = scaled(sel.cv, w / 8, h / 8), g = s.getContext('2d'), id = g.getImageData(0, 0, s.width, s.height), d = id.data;
+function naiMask(w, h, r) {   // r = 그림판에서 잘라 볼 자리 { x, y, w, h } (없으면 전체)
+  r = r || { x: 0, y: 0, w: sel.w, h: sel.h };
+  const s = document.createElement('canvas'); s.width = Math.round(w / 8); s.height = Math.round(h / 8); const g = s.getContext('2d', { willReadFrequently: true }); g.drawImage(sel.cv, r.x, r.y, r.w, r.h, 0, 0, s.width, s.height);
+  const id = g.getImageData(0, 0, s.width, s.height), d = id.data;
   for (let i = 0; i < d.length; i += 4) { const on = d[i + 3] > 20 ? 255 : 0; d[i] = d[i + 1] = d[i + 2] = on; d[i + 3] = 255; }
   g.putImageData(id, 0, 0);
   const t = document.createElement('canvas'); t.width = w; t.height = h; const tg = t.getContext('2d'); tg.imageSmoothingEnabled = false; tg.drawImage(s, 0, 0, w, h);
   return t;
 }
+// 고른 곳 둘레만 잘라 보낼 자리: 고른 곳보다 넉넉하게(주변을 보고 어울리게 그리도록), 그림판 안에서
+function cropFor(c) {
+  const b = selBounds(); if (!b) return { x: 0, y: 0, w: c.w, h: c.h };
+  const pad = Math.max(96, Math.round(Math.max(b.w, b.h) * 0.6)), x = Math.max(0, b.x - pad), y = Math.max(0, b.y - pad), x1 = Math.min(c.w, b.x + b.w + pad), y1 = Math.min(c.h, b.y + b.h + pad);
+  return (x1 - x) * (y1 - y) > c.w * c.h * 0.7 ? { x: 0, y: 0, w: c.w, h: c.h } : { x, y, w: x1 - x, h: y1 - y };
+}
+function cropOf(src, r) { const t = document.createElement('canvas'); t.width = r.w; t.height = r.h; t.getContext('2d').drawImage(src, -r.x, -r.y); return t; }
 const opts = () => { const [w, h] = NAI_SIZES[F.size] || NAI_SIZES[0]; return { model: F.model, prompt: F.prompt, negative: F.negative, width: w, height: h, steps: +F.steps, scale: +F.scale, sampler: F.sampler, seed: +F.seed || 0, quality: F.quality, uc: F.uc, cfgRescale: +F.cfgRescale, variety: F.variety }; };
 
 async function go(kind) {
@@ -35,11 +44,13 @@ async function go(kind) {
   const c = canvasOf(), o = opts();
   job.on = true; job.ctl = new AbortController(); job.text = 'NovelAI가 그리는 중이에요.'; emit();
   try {
-    let src = null, fit = null, flat = null;
+    let src = null, fit = null, flat = null, R = null;
     if (kind !== 'new') {
-      flat = await flatten(c); fit = fitSize(c.w, c.h); o.width = fit.w; o.height = fit.h;
-      src = { image: await b64(await pngOf(scaled(flat, fit.w, fit.h))), strength: kind === 'fill' ? +F.inStrength : +F.strength, noise: +F.noise };
-      if (kind === 'fill') src.mask = await b64(await pngOf(naiMask(fit.w, fit.h)));
+      flat = await flatten(c); R = kind === 'fill' ? cropFor(c) : { x: 0, y: 0, w: c.w, h: c.h };
+      // 작은 자리는 키워서 보내요(최대 2배). 그래야 NovelAI가 세밀하게 그려요
+      const up = Math.min(2, Math.sqrt(1024 * 1024 / (R.w * R.h))); fit = up > 1 ? fitSize(R.w * up, R.h * up) : fitSize(R.w, R.h); o.width = fit.w; o.height = fit.h;
+      src = { image: await b64(await pngOf(scaled(cropOf(flat, R), fit.w, fit.h))), strength: kind === 'fill' ? +F.inStrength : +F.strength, noise: +F.noise };
+      if (kind === 'fill') src.mask = await b64(await pngOf(naiMask(fit.w, fit.h, R)));
     }
     const { blob, seed } = await naiGenerate(o, src, job.ctl.signal);
     const folder = ensureFolder('NovelAI'), stamp = new Date().toTimeString().slice(0, 8).replace(/:/g, '');
@@ -50,15 +61,15 @@ async function go(kind) {
       await layerFromBlob(c, blob, '다시 그림', { scale: c.w / fit.w, folder }); commit('NovelAI로 다시 그리기');
     } else {
       // 결과에서 고른 곳(가장자리는 부드럽게)만 남겨 레이어로 올려요. 나머지는 원래 그림 그대로예요
-      const blur = Math.max(2, Math.round(Math.max(c.w, c.h) / 400));
-      const m = document.createElement('canvas'); m.width = c.w; m.height = c.h; const mg = m.getContext('2d');
-      mg.filter = `blur(${blur}px)`; mg.drawImage(naiMask(c.w, c.h), 0, 0); mg.filter = 'none';
-      const md = mg.getImageData(0, 0, c.w, c.h), d = md.data; for (let i = 0; i < d.length; i += 4) d[i + 3] = d[i];   // 밝기를 투명도로
+      const blur = Math.max(2, Math.round(Math.max(R.w, R.h) / 300));
+      const m = document.createElement('canvas'); m.width = R.w; m.height = R.h; const mg = m.getContext('2d', { willReadFrequently: true });
+      mg.filter = `blur(${blur}px)`; mg.drawImage(naiMask(R.w, R.h, R), 0, 0); mg.filter = 'none';
+      const md = mg.getImageData(0, 0, R.w, R.h), d = md.data; for (let i = 0; i < d.length; i += 4) d[i + 3] = d[i];   // 밝기를 투명도로
       mg.putImageData(md, 0, 0);
-      const bmp = await createImageBitmap(blob), t = document.createElement('canvas'); t.width = c.w; t.height = c.h; const g = t.getContext('2d');
-      g.imageSmoothingQuality = 'high'; g.drawImage(bmp, 0, 0, c.w, c.h); bmp.close();
+      const bmp = await createImageBitmap(blob), t = document.createElement('canvas'); t.width = R.w; t.height = R.h; const g = t.getContext('2d');
+      g.imageSmoothingQuality = 'high'; g.drawImage(bmp, 0, 0, R.w, R.h); bmp.close();
       g.globalCompositeOperation = 'destination-in'; g.drawImage(m, 0, 0);
-      await layerFromBlob(c, await pngOf(t), '다시 그린 곳', { hidden: true }); commit('NovelAI로 고른 곳 다시 그리기');
+      await layerFromBlob(c, await pngOf(t), '다시 그린 곳', { x: R.x, y: R.y, hidden: true }); commit('NovelAI로 고른 곳 다시 그리기');
     }
     job.last = `씨앗 ${seed}`;
     naiAccount().then(a => { job.anlas = a.anlas; emit(); }).catch(() => {});
@@ -97,7 +108,7 @@ export const naiPanel = {
         job.on && h('button.btn', { onclick: () => job.ctl && job.ctl.abort() }, '멈추기')),
       job.on && h('p.nai-busy', { role: 'status' }, job.text),
       h('h3.sec', null, '지금 그림판으로'),
-      !c ? h('p.panel-note', null, '그림판을 열면 그 그림을 바탕으로 다시 그리거나, 고른 곳만 다시 그릴 수 있어요.') : h('p.panel-note', null, `그림판(${c.w} × ${c.h})을 ${fit.w} × ${fit.h}로 맞춰 보내고, 결과는 그림판 크기에 맞춰 새 레이어로 올려요.`),
+      !c ? h('p.panel-note', null, '그림판을 열면 그 그림을 바탕으로 다시 그리거나, 고른 곳만 다시 그릴 수 있어요.') : h('p.panel-note', null, `전체 다시 그리기는 그림판(${c.w} × ${c.h})을 ${fit.w} × ${fit.h}로 맞춰 보내요. 고른 곳만 다시 그리기는 그 둘레만 잘라 크게 보내서 더 세밀하게 그려요.`),
       h('label.field', null, h('span.field-name', null, '바꾸는 정도'), h('input.range', { type: 'range', min: 0.05, max: 0.99, step: 0.01, 'aria-label': '바꾸는 정도', value: F.strength, oninput: e => { F.strength = +e.target.value; keep(); e.target.nextSibling.textContent = Math.round(F.strength * 100) + '%'; } }), h('span.field-unit', null, Math.round(F.strength * 100) + '%')),
       h('div.btn-row.wide', null,
         h('button.btn', { disabled: job.on || !c, onclick: () => go('redo') }, '전체 다시 그리기'),

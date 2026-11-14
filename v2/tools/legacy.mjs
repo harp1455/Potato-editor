@@ -79,9 +79,10 @@ if (!codecs) throw new Error('gif2.js에 GS_CODECS가 없어요');
 writeFileSync(join(out, 'enc.gen.js'), `// 자동으로 만든 파일이에요. 고치지 마세요 (tools/legacy.mjs가 8.x의 main.js·gif2.js에서 만들어요)
 /* eslint-disable */
 export function makeEnc(deps) {
-  const { newCanvas, gs, uiSet, auEncoderCfg, auEncode, Mp4Muxer } = deps;
+  const { newCanvas, gs, uiSet, Mp4Muxer } = deps;
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 ${codecs[0]}
+${pick('audio.js', ['auEncoderCfg', 'auEncode'])}
 ${pick('gif2.js', ['gsMp4Codec', 'encodeMp4'])}
 ${encMain}
   return { encodeMp4, encodeGif, encodeWebp };
