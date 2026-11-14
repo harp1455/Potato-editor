@@ -9,6 +9,8 @@ import { flatten, layerFromBlob, view } from './image.js';
 import { openRig, rigSaved } from '../legacy/shim.js';
 import { dialog, toast, busy } from '../ui/overlay.js';
 import { download } from '../core/files.js';
+import { encodeFrames, canMp4 } from '../core/encode.js';
+import { addFrames } from './video.js';
 
 const png = c => new Promise(r => c.toBlob(r, 'image/png'));
 const mediaOf = l => state.project.media.find(m => m.id === l.mediaId);
@@ -27,20 +29,33 @@ async function toWebm(frames, fps) {
   return new Blob(parts, { type: 'video/webm' });
 }
 function framesDialog(frames, fps, name) {
-  dialog({ title: '움직임을 어떻게 내보낼까요?', body: h('div', null,
-    h('p.dlg-text', null, `장면 ${frames.length}장, 초당 ${fps}장(${(frames.length / fps).toFixed(1)}초)이에요. 영상 작업실이 들어오면 시간 막대로 바로 보낼 수 있게 할 거예요.`)),
-    buttons: [
-      { label: '닫기' },
-      { label: '장면을 보관함에 넣기', run: () => { (async () => {
-        const b = busy(`장면을 보관함에 넣는 중이에요. 0 / ${frames.length}`), folder = ensureFolder('캐릭터 움직임/' + name);
-        for (let i = 0; i < frames.length; i++) { await addMedia(new File([await png(frames[i])], `${name} ${String(i + 1).padStart(3, '0')}.png`, { type: 'image/png' }), folder); b.set(`장면을 보관함에 넣는 중이에요. ${i + 1} / ${frames.length}`); }
-        commit('움직임 장면 넣기'); b.done(`장면 ${frames.length}장을 보관함의 '캐릭터 움직임' 폴더에 넣었어요.`);
-      })(); } },
-      { label: '영상 파일로 저장 (WebM)', primary: true, run: () => { (async () => {
-        const b = busy(`영상을 만드는 중이에요. 움직임 길이(${(frames.length / fps).toFixed(1)}초)만큼 걸려요.`);
-        try { download(await toWebm(frames, fps), name + ' 움직임.webm'); b.done(`'${name} 움직임.webm'으로 저장했어요.`); } catch (e) { b.done('영상을 만들지 못했어요. ' + (e.message || ''), 'err'); }
-      })(); } },
-    ] });
+  const secs = (frames.length / fps).toFixed(1), W = frames[0].width, H = frames[0].height;
+  const F = { fmt: canMp4() ? 'mp4' : 'webp', size: 0, loop: true };
+  const box = h('div');
+  const fmts = [['mp4', '영상 (MP4)', '어디서나 열리고 용량이 작아요. 투명한 배경은 검게 돼요.', canMp4()], ['webp', '움짤 (WebP)', '화질이 좋고 투명한 배경도 돼요.', true], ['gif', '움짤 (GIF)', '어디에나 올릴 수 있지만 256색이고 용량이 커요.', true], ['webm', '영상 (WebM)', 'MP4를 못 만드는 곳에서 쓰는 영상이에요. 실제 길이만큼 걸려요.', !canMp4()]].filter(f => f[3]);
+  const draw = () => box.replaceChildren(
+    h('p.dlg-text', null, `장면 ${frames.length}장, 초당 ${fps}장(${secs}초), ${W} × ${H}이에요.`),
+    h('div.choice', { role: 'radiogroup' }, fmts.map(([v, t, d]) => h('label.choice-item' + (F.fmt === v ? '.on' : ''), null, h('input', { type: 'radio', name: 'fmt', checked: F.fmt === v, onchange: () => { F.fmt = v; draw(); } }), h('span', null, h('b', null, t), h('small', null, d))))),
+    h('div.field-row', { style: 'margin-top:12px' },
+      h('label.field', null, h('span.field-name.w', null, '크기'), h('select.text', { 'aria-label': '크기', onchange: e => { F.size = +e.target.value; } }, [[0, '그대로'], [1080, '긴 쪽 1080'], [800, '긴 쪽 800'], [640, '긴 쪽 640'], [480, '긴 쪽 480']].filter(([v]) => !v || v < Math.max(W, H)).map(([v, t]) => h('option', { value: v, selected: F.size === v }, t)))),
+      F.fmt !== 'mp4' && F.fmt !== 'webm' ? h('label.check', null, h('input', { type: 'checkbox', checked: F.loop, onchange: e => { F.loop = e.target.checked; } }), '계속 되풀이') : h('span')));
+  draw();
+  const save = () => { (async () => {
+    const b = busy('파일을 만드는 중이에요.');
+    try {
+      const blob = F.fmt === 'webm' ? await toWebm(frames, fps) : await encodeFrames(frames, F.fmt, { fps, size: F.size || 0, loop: F.loop, quality: 90 }, p => b.set(`파일을 만드는 중이에요. ${Math.round(p * 100)}%`));
+      download(blob, `${name} 움직임.${F.fmt}`); b.done(`'${name} 움직임.${F.fmt}'로 저장했어요.`);
+    } catch (e) { b.done(String(e && e.message) === 'nomp4' ? '이 컴퓨터에서는 MP4를 만들 수 없어요. WebP나 GIF로 저장해 주세요.' : '파일을 만들지 못했어요. ' + ((e && e.message) || ''), 'err'); }
+  })(); return false; };
+  dialog({ title: '움직임 내보내기', body: box, buttons: [
+    { label: '닫기' },
+    { label: '영상 작업실로 보내기', run: () => { (async () => {
+      const b = busy(`장면을 영상 작업실로 보내는 중이에요. 0 / ${frames.length}`);
+      const n = await addFrames(frames, fps, name, (i, t) => b.set(`장면을 영상 작업실로 보내는 중이에요. ${i} / ${t}`));
+      b.done(`장면 ${n}개를 영상 작업실에 넣었어요.`); settings.set('room', 'video');
+    })(); } },
+    { label: '파일로 저장', primary: true, run: save },
+  ] });
 }
 
 // src = 그림(캔버스·비트맵), key = 이어서 하기용 이름
@@ -77,7 +92,7 @@ export const characterRoom = {
             h('div', null, h('b', null, l.name), saved[c.layers.length - 1 - i] ? h('small.saved', null, '하던 작업이 있어요') : h('small', null, (m => m ? `${m.w} × ${m.h}` : '')(mediaOf(l)))),
             h('button.btn' + (i === 0 ? '.primary' : ''), { onclick: () => rigLayer(l) }, saved[c.layers.length - 1 - i] ? '이어서 움직이기' : '이 레이어 움직이기'))),
           c.layers.length > 1 && h('div.char-item', null, h('span'), h('div', null, h('b', null, '그림판 전체'), h('small', null, '보이는 레이어를 한 장으로 합쳐서 움직여요. 캐릭터 찾기와 나누기를 AI가 알아서 해요.')), h('button.btn', { onclick: rigCanvas }, '전체로 움직이기'))),
-        h('p.lead', null, '처음 열 때 AI 팩(배경 지우기, AI 지우개, 캐릭터 움직이기 등)을 받아야 해요. 만든 움직임은 영상 파일(WebM)로 저장하거나 장면 그림으로 보관함에 넣을 수 있어요.'));
+        h('p.lead', null, '처음 열 때 AI 팩(배경 지우기, AI 지우개, 캐릭터 움직이기 등)을 받아야 해요. 만든 움직임은 영상(MP4)이나 움짤(WebP, GIF)로 저장하거나, 영상 작업실로 보내 다른 장면과 이어 붙일 수 있어요.'));
     };
     update();
     return { update };

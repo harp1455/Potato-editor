@@ -271,3 +271,21 @@ a.btn { display: inline-flex; align-items: center; text-decoration: none; color:
 .clip-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .clip audio { width: 100%; height: 30px; }
 .vid-form { display: grid; gap: 12px; } .vid-out { width: 100%; max-height: 60vh; background: #000; display: block; }
+
+/* 영상 작업실 */
+.vid-room { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.vid-top { flex: 1; display: flex; min-height: 0; }
+.vid-stage { flex: 1; display: grid; place-items: center; min-width: 0; overflow: hidden; }
+.vid-view { box-shadow: 2px 3px 0 rgba(0,0,0,.35); background: #000; }
+.vid-side { width: 248px; flex: none; padding: 8px; background: var(--panel); border-left: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; align-items: flex-start; overflow: auto; }
+.vid-side input[type=color] { width: 44px; height: 24px; padding: 0; border: 1px solid var(--line); border-radius: var(--r); background: none; }
+.vid-bar { display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 8px; background: var(--panel); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); flex: none; }
+.vid-clock { color: var(--dim); min-width: 110px; }
+.vid-strip { height: 96px; flex: none; display: flex; align-items: stretch; gap: 0; padding: 8px; background: var(--strip); overflow-x: auto; overflow-y: hidden; position: relative; }
+.vid-strip.over { box-shadow: inset 0 0 0 1px var(--potato); }
+.vid-strip .empty { margin: auto; }
+.vid-scene { flex: none; height: 100%; padding: 0; background: var(--well); border-right: 1px solid var(--strip); overflow: hidden; position: relative; }
+.vid-scene img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; opacity: .85; }
+.vid-scene:hover img { opacity: 1; }
+.vid-scene.on { box-shadow: inset 0 0 0 2px var(--potato); z-index: 1; } .vid-scene.on img { opacity: 1; }
+.vid-head { position: absolute; top: 2px; bottom: 2px; width: 1px; margin-left: 8px; background: #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.5); pointer-events: none; z-index: 2; }

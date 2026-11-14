@@ -19,6 +19,8 @@ const ortOut = join(here, '..', 'dist', '.ort_classic.js');
 execFileSync(process.env.PYTHON || (process.platform === 'win32' ? 'python' : 'python3'), ['-I', join(here, '..', 'tools', 'ort_classic.py'), join(here, '..', 'vendor', 'ort', 'ort.webgpu.bundle.min.mjs'), ortOut], { stdio: 'ignore' });
 const ort = readFileSync(ortOut, 'utf8');
 for (const bad of ['</script', '<!--', '<script']) if (ort.toLowerCase().includes(bad)) throw new Error('실행 도구 안에 ' + bad + ' 가 있어요');
+const mux = readFileSync(join(here, '..', 'vendor', 'mp4-muxer', 'mp4-muxer.js'), 'utf8');   // MP4 저장 (MIT)
+if (/<\/script/i.test(mux)) throw new Error('mp4-muxer 안에 </script 가 있어요');
 const notice = readFileSync(join(here, '..', 'tools', 'notice.txt'), 'utf8').trim();
 const css = readFileSync(join(here, 'src/style.css'), 'utf8') + '\n' + readFileSync(join(here, 'src/legacy/rig.gen.css'), 'utf8') + '\n' + readFileSync(join(here, 'src/legacy/legacy.css'), 'utf8');
 const html = `<!doctype html>
@@ -32,6 +34,8 @@ ${css}</style>
 </head>
 <body>
 <script type="text/plain" id="ortJs">${ort}</script>
+<script>
+${mux}</script>
 <script>
 ${js}</script>
 ${notice}

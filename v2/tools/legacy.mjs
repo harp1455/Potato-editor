@@ -57,4 +57,23 @@ const rules = [];
   }
 })(css, '');
 writeFileSync(join(out, 'rig.gen.css'), '/* 자동으로 만든 파일이에요 (tools/legacy.mjs) */\n' + rules.join('\n') + '\n');
+
+// 4) 영상·움짤 저장 도구(MP4·GIF·WebP)도 8.x 것을 그대로 가져와요
+const main = read('main.js'), a0 = main.indexOf('class ByteOut {'), w0 = main.indexOf('async function encodeWebp(');
+if (a0 < 0 || w0 < a0) throw new Error('main.js에서 저장 도구를 찾지 못했어요');
+let d = 0, e0 = main.indexOf('{', w0); for (let i = e0; i < main.length; i++) { if (main[i] === '{') d++; else if (main[i] === '}' && --d === 0) { e0 = i + 1; break; } }
+const encMain = main.slice(a0, e0); parse(encMain, { ecmaVersion: 2023, sourceType: 'script' });
+const gif2 = read('gif2.js'), codecs = /const GS_CODECS = .*;/.exec(gif2);
+if (!codecs) throw new Error('gif2.js에 GS_CODECS가 없어요');
+writeFileSync(join(out, 'enc.gen.js'), `// 자동으로 만든 파일이에요. 고치지 마세요 (tools/legacy.mjs가 8.x의 main.js·gif2.js에서 만들어요)
+/* eslint-disable */
+export function makeEnc(deps) {
+  const { newCanvas, gs, uiSet, auEncoderCfg, auEncode, Mp4Muxer } = deps;
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+${codecs[0]}
+${pick('gif2.js', ['gsMp4Codec', 'encodeMp4'])}
+${encMain}
+  return { encodeMp4, encodeGif, encodeWebp };
+}
+`);
 console.log(`캐릭터 움직이기 묶음: 코드 ${(rig.length / 1024).toFixed(0)} KB, 꾸밈 규칙 ${rules.length}개`);

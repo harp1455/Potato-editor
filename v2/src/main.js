@@ -8,6 +8,7 @@ import { PANELS } from './ui/panels.js';
 import { imageRoom, registerImageCmds, setMenuItem } from './rooms/image.js';
 import { stubRooms } from './rooms/stub.js';
 import { registerBinCmds } from './ui/bin.js';
+import { videoRoom, registerVideoCmds } from './rooms/video.js';
 import { registerGeminiCmds } from './ui/geminitools.js';
 import { characterRoom, registerCharCmds } from './rooms/character.js';
 import { naiAccount } from './api/nai.js';
@@ -15,9 +16,9 @@ import { registerAiCmds, packsPane } from './ui/aitools.js';
 import { preamble, check, generate, buildBody, buildInteraction, speak, animate, SAFETY_CATEGORIES } from './api/gemini.js';
 
 const VERSION = typeof __VERSION__ === 'string' ? __VERSION__ : 'dev';
-const ROOMS = [imageRoom, stubRooms[0], stubRooms[1], characterRoom, ...stubRooms.slice(2)];
+const ROOMS = [imageRoom, stubRooms[0], videoRoom, characterRoom, ...stubRooms.slice(1)];
 const roomOf = () => ROOMS.find(r => r.id === settings.get('room')) || imageRoom;
-const MENUS = ['파일', '편집', '보기', '레이어', '고르기', 'AI', '도구', '작업실', '도움말'];
+const MENUS = ['파일', '편집', '보기', '레이어', '고르기', '영상', 'AI', '도구', '작업실', '도움말'];
 
 let live = null;      // 지금 가운데에 떠 있는 작업실
 const els = {};
@@ -31,6 +32,7 @@ function registerCmds() {
   registerAiCmds(() => settingsDialog('packs'));
   registerCharCmds();
   registerGeminiCmds();
+  registerVideoCmds();
   addCmd({ id: 'file.save', title: '지금 저장', menu: '파일', keys: 'Ctrl+S', run: async () => { await saveNow(); toast('저장했어요. 평소에는 고칠 때마다 알아서 저장돼요.'); } });
   addCmd({ id: 'edit.undo', title: '되돌리기', menu: '편집', keys: 'Ctrl+Z', enabled: canUndo, run: undo });
   addCmd({ id: 'edit.redo', title: '다시 하기', menu: '편집', keys: 'Ctrl+Shift+Z', enabled: canRedo, run: redo });
@@ -137,7 +139,7 @@ function planDialog() {
     ['새 틀', '화면 뼈대, 붙였다 떼는 패널, 두 가지 화면 방식, 하나로 합친 되돌리기, 명령 찾기, API 통로', '지금'],
     ['이미지 작업실', '고르는 도구, 보정, AI 도구, NovelAI는 들어왔고, 가림막·고급 보정·AI 지우개·자동 흰칠이 남았어요', '지금'],
     ['캐릭터 작업실', '배경과 인물 나누기, AI로 외곽선 따기, 마법 붓으로 마무리, 뼈대와 움직임 (움직임 창은 8.x 것을 그대로 가져옴)', '지금'],
-    ['영상 작업실', '여러 줄 시간 막대, MP4·GIF·WebP 내보내기, AI 중간 장면, AI 영상', '4단계'],
+    ['영상 작업실', '장면 잇기와 MP4·WebP·GIF 내보내기는 들어왔고, 글자·넘김 효과·소리·AI 중간 장면이 남았어요', '지금'],
     ['컷 작업실', '페이지·컷·말풍선, 번역, 더빙, API 금액', '5단계'],
     ['마무리', '8.x 작업 가져오기, 새 기능, 전체 점검', '6단계'],
   ];
@@ -244,5 +246,6 @@ async function start() {
   import('./core/select.js').then(f => { window.__potato.sel = f; });
   import('./api/nai.js').then(f => { window.__potato.nai = f; });
   import('./core/ai.js').then(f => { window.__potato.ai = f; });
+  import('./core/encode.js').then(f => { window.__potato.enc = f; });
 }
 start();
