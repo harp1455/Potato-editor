@@ -1,14 +1,14 @@
 // NovelAI 패널: 글로 그림 만들기, 지금 그림 바탕으로 다시 그리기, 고른 곳만 다시 그리기
 import { h } from './dom.js';
-import { state, commit, emit, canvasOf, newCanvas, addLayer, addMedia, ensureFolder } from '../core/store.js';
+import { state, commit, emit, canvasOf, layerOf, newCanvas, addLayer, addMedia, ensureFolder, ensureBitmap } from '../core/store.js';
 import { settings } from '../core/settings.js';
 import { sel, selBounds } from '../core/select.js';
 import { flatten, layerFromBlob } from '../rooms/image.js';
-import { NAI_MODELS, NAI_SAMPLERS, NAI_SIZES, NAI_UC, fitSize, naiGenerate, naiAccount } from '../api/nai.js';
+import { NAI_MODELS, NAI_SAMPLERS, NAI_SIZES, NAI_UC, NAI_SPOTS, fitSize, naiGenerate, naiAccount, naiVibe } from '../api/nai.js';
 import { run } from '../core/cmd.js';
 import { toast } from './overlay.js';
 
-const DEF = { model: 'nai-diffusion-4-5-full', prompt: '', negative: '', chars: '', size: 0, steps: 28, scale: 5, sampler: 'k_euler_ancestral', seed: 0, quality: true, uc: 'heavy', cfgRescale: 0, variety: false, strength: 0.5, noise: 0, inStrength: 1, more: false };
+const DEF = { model: 'nai-diffusion-4-5-full', prompt: '', negative: '', chars: '', charPos: [], vibe: null, size: 0, steps: 28, scale: 5, sampler: 'k_euler_ancestral', seed: 0, quality: true, uc: 'heavy', cfgRescale: 0, variety: false, strength: 0.5, noise: 0, inStrength: 1, more: false };
 const F = { ...DEF, ...(settings.get('nai') || {}) };
 let saveT = 0;
 const keep = () => { clearTimeout(saveT); saveT = setTimeout(() => settings.set('nai', { ...F }), 400); };
@@ -34,7 +34,7 @@ function cropFor(c) {
   return (x1 - x) * (y1 - y) > c.w * c.h * 0.7 ? { x: 0, y: 0, w: c.w, h: c.h } : { x, y, w: x1 - x, h: y1 - y };
 }
 function cropOf(src, r) { const t = document.createElement('canvas'); t.width = r.w; t.height = r.h; t.getContext('2d').drawImage(src, -r.x, -r.y); return t; }
-const opts = () => { const [w, h] = NAI_SIZES[F.size] || NAI_SIZES[0]; return { model: F.model, prompt: F.prompt, negative: F.negative, chars: F.chars, width: w, height: h, steps: +F.steps, scale: +F.scale, sampler: F.sampler, seed: +F.seed || 0, quality: F.quality, uc: F.uc, cfgRescale: +F.cfgRescale, variety: F.variety }; };
+const opts = () => { const [w, h] = NAI_SIZES[F.size] || NAI_SIZES[0]; return { model: F.model, prompt: F.prompt, negative: F.negative, chars: F.chars, charPos: F.charPos || [], width: w, height: h, steps: +F.steps, scale: +F.scale, sampler: F.sampler, seed: +F.seed || 0, quality: F.quality, uc: F.uc, cfgRescale: +F.cfgRescale, variety: F.variety }; };
 
 async function go(kind) {
   if (job.on) return;
@@ -51,6 +51,12 @@ async function go(kind) {
       const up = Math.min(2, Math.sqrt(1024 * 1024 / (R.w * R.h))); fit = up > 1 ? fitSize(R.w * up, R.h * up) : fitSize(R.w, R.h); o.width = fit.w; o.height = fit.h;
       src = { image: await b64(await pngOf(scaled(cropOf(flat, R), fit.w, fit.h))), strength: kind === 'fill' ? +F.inStrength : +F.strength, noise: +F.noise };
       if (kind === 'fill') src.mask = await b64(await pngOf(naiMask(fit.w, fit.h, R)));
+    }
+    if (F.vibe && state.project.media.some(m => m.id === F.vibe.id) && !o.model.startsWith('nai-diffusion-5-')) {
+      job.text = '분위기 참고 그림을 읽는 중이에요.'; emit();
+      const vb = await ensureBitmap(F.vibe.id), k = Math.min(1, 1024 / Math.max(vb.width, vb.height));
+      o.vibes = [{ data: await naiVibe(F.vibe.id, await b64(await pngOf(scaled(vb, Math.round(vb.width * k), Math.round(vb.height * k)))), o.model, +F.vibe.info, job.ctl.signal), strength: +F.vibe.strength }];
+      job.text = 'NovelAI가 그리는 중이에요.'; emit();
     }
     const { blob, seed } = await naiGenerate(o, src, job.ctl.signal);
     const folder = ensureFolder('NovelAI'), stamp = new Date().toTimeString().slice(0, 8).replace(/:/g, '');
@@ -100,7 +106,8 @@ export const naiPanel = {
     if (!ready) el.append(h('p.empty', null, settings.get('adult') ? 'NovelAI 토큰을 넣으면 편집기 안에서 바로 그림을 만들고 고칠 수 있어요.' : '성인 확인을 마치고 NovelAI 토큰을 넣으면 쓸 수 있어요.'), h('button.btn', { onclick: () => run('app.settings') }, '설정 열기'));
     el.append(...[
       h('label.stack', null, h('span.field-name', null, '프롬프트'), h('textarea.text.area', { rows: 5, placeholder: '1boy, solo, looking at viewer, …', 'aria-label': '프롬프트', ...bind('prompt') })),
-      h('label.stack', null, h('span.field-name', null, '인물별 설명 (한 줄에 한 명)'), h('textarea.text.area', { rows: 2, 'aria-label': '인물별 설명', placeholder: '여러 명을 그릴 때만 적어요. 예: girl, long hair, red dress', ...bind('chars') })),
+      h('label.stack', null, h('span.field-name', null, '인물별 설명 (한 줄에 한 명)'), h('textarea.text.area', { rows: 2, 'aria-label': '인물별 설명', placeholder: '여러 명을 그릴 때만 적어요. 예: girl, long hair, red dress', ...bind('chars'), onchange: () => emit() })),
+      ...F.chars.split('\n').map((t, i) => [t.trim(), i]).filter(x => x[0]).slice(0, 6).map(([t, i], n) => h('label.field', null, h('span.field-name', { title: t }, `${n + 1}번째 인물 자리`), h('select.text', { 'aria-label': `${n + 1}번째 인물 자리`, onchange: e => { F.charPos = F.charPos || []; F.charPos[i] = e.target.value; keep(); } }, [['', '알아서'], ...Object.entries(NAI_SPOTS).map(([k, v]) => [k, v[0]])].map(([v, tt]) => h('option', { value: v, selected: ((F.charPos || [])[i] || '') === v }, tt))))),
       h('label.stack', null, h('span.field-name', null, '빼고 싶은 것'), h('textarea.text.area', { rows: 2, 'aria-label': '빼고 싶은 것', ...bind('negative') })),
       pick('모델', 'model', NAI_MODELS),
       pick('크기', 'size', NAI_SIZES.map(([w, hh, t], i) => [i, `${t} ${w} × ${hh}`])),
@@ -123,6 +130,14 @@ export const naiPanel = {
         h('div.field-row', null, numf('씨앗', 'seed', 0, 4294967295, 1), numf('리스케일', 'cfgRescale', 0, 1, 0.01)),
         h('label.check', null, h('input', { type: 'checkbox', checked: F.quality, onchange: e => { F.quality = e.target.checked; keep(); } }), '품질 태그 붙이기'),
         h('label.check', null, h('input', { type: 'checkbox', checked: F.variety, onchange: e => { F.variety = e.target.checked; keep(); } }), '다양하게 (Variety+)'),
+        h('h3.sec', null, '분위기 참고'),
+        ...(() => { const vm = F.vibe && state.project.media.find(m => m.id === F.vibe.id), l = layerOf(); return [
+          h('p.panel-note', null, vm ? `'${vm.name}'의 그림체와 분위기를 따라 그려요.` : '고른 레이어의 그림체와 분위기를 따라 그리게 할 수 있어요. 참고 그림을 처음 읽을 때 Anlas가 조금 들어요.'),
+          h('div.btn-row', null, h('button.btn.small', { disabled: !l, onclick: () => { F.vibe = { id: l.mediaId, strength: 0.6, info: 1, ...(F.vibe ? { strength: F.vibe.strength, info: F.vibe.info } : {}) }; keep(); emit(); } }, vm ? '고른 레이어로 바꾸기' : '고른 레이어를 참고 그림으로'), vm && h('button.btn.small', { onclick: () => { F.vibe = null; keep(); emit(); } }, '참고 끄기')),
+          vm && h('label.field', null, h('span.field-name', null, '따르는 세기'), h('input.range', { type: 'range', min: 0, max: 1, step: 0.05, value: F.vibe.strength, 'aria-label': '따르는 세기', oninput: e => { F.vibe.strength = +e.target.value; keep(); } })),
+          vm && h('label.field', null, h('span.field-name', null, '가져올 정보'), h('input.range', { type: 'range', min: 0.1, max: 1, step: 0.05, value: F.vibe.info, 'aria-label': '가져올 정보', oninput: e => { F.vibe.info = +e.target.value; keep(); } })),
+          vm && F.model.startsWith('nai-diffusion-5-') && h('p.panel-note', null, 'V5 모델은 분위기 참고를 받지 않아요. V4.5나 V4를 골라 주세요.'),
+        ]; })(),
         h('p.panel-note', null, '씨앗이 0이면 매번 새로 뽑아요. 고른 곳만 다시 그릴 때는 모델의 인페인트판을 알아서 써요.'),
       ] : []),
       (job.last || job.anlas != null) && h('p.panel-note', null, [job.last, job.anlas != null ? `남은 Anlas ${job.anlas.toLocaleString('ko-KR')}` : ''].filter(Boolean).join(', ')),

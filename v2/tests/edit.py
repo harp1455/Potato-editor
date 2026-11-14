@@ -91,6 +91,20 @@ with sync_playwright() as pw:
     P(page, "(() => { const l = __potato.state.project.canvases[0].layers[0]; l.adj = { ...(l.adj || {}), black: 80, temp: 60 }; __potato.emit(); })()"); page.wait_for_timeout(200)
     px1 = P(page, FLAT); print('톤 보정 전후:', px0[:3], px1[:3]); assert px1[:3] != px0[:3] and px1[2] < px0[2], (px0, px1)
     assert page.locator('input[aria-label="색온도"]').count() == 1
+    # 곡선: 가운데 점을 위로 끌면 중간 밝기가 밝아져요. 두 번 누르면 처음으로
+    cb = page.locator('canvas.curve').bounding_box(); pxa = P(page, FLAT)
+    page.mouse.move(cb['x'] + cb['width'] / 2, cb['y'] + cb['height'] / 2); page.mouse.down(); page.mouse.move(cb['x'] + cb['width'] / 2, cb['y'] + cb['height'] * 0.2, steps=3); page.mouse.up()
+    cu = P(page, "__potato.state.project.canvases[0].layers[0].adj.curve"); pxb = P(page, FLAT); assert len(cu) == 5 and cu[2] > 0.7 and cu[0] == 0 and pxb[:3] != pxa[:3], (cu, pxa, pxb)
+    shot(page, '32b-curve'); page.dblclick('canvas.curve'); assert P(page, "__potato.state.project.canvases[0].layers[0].adj.curve") is None
+    # 뒤틀기: 창에서 그림을 끌어 밀면 바뀐 그림으로 바꿔 끼워요. 밀기 계산은 민 쪽으로 색이 옮겨 가요
+    wr = P(page, """(() => { const F = __potato.liq.makeField(64, 64), src = new ImageData(64, 64); for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) { const i = (y * 64 + x) * 4; src.data[i] = x < 32 ? 255 : 0; src.data[i + 3] = 255; }
+        __potato.liq.stroke(F, 'push', 32, 32, 24, 1, 10, 0); const out = __potato.liq.warp(F, src, new ImageData(64, 64)); return [out.data[(32 * 64 + 36) * 4], out.data[(2 * 64 + 36) * 4], out.data[(32 * 64 + 36) * 4 + 3]]; })()""")
+    assert wr[0] > 200 and wr[1] == 0 and wr[2] == 255, wr
+    P(page, "(() => { __potato.state.layerId = __potato.state.project.canvases[0].layers[0].id; __potato.emit(); })()"); mid0 = P(page, "__potato.state.project.canvases[0].layers[0].mediaId")
+    P(page, "__potato.run('layer.liquify')"); page.wait_for_selector('canvas.liq-view'); vb = page.locator('canvas.liq-view').bounding_box()
+    page.mouse.move(vb['x'] + vb['width'] * 0.4, vb['y'] + vb['height'] * 0.5); page.mouse.down(); page.mouse.move(vb['x'] + vb['width'] * 0.6, vb['y'] + vb['height'] * 0.5, steps=6); page.mouse.up()
+    shot(page, '32c-liquify'); page.click('.dlg button:has-text("이대로 바꾸기")'); page.wait_for_function("__potato.state.project.canvases[0].layers[0].mediaId !== '%s'" % mid0)
+    page.keyboard.press('Control+z'); assert P(page, "__potato.state.project.canvases[0].layers[0].mediaId") == mid0
     # 가림막: 고른 곳만 보이게 하면 바깥은 투명해지고, 없애면 돌아와요
     A = "(async (x, y) => { const cv = __potato.state.project.canvases[0], c = await __potato.image.flatten(cv, cv.layers[0].id); return c.getContext('2d').getImageData(x, y, 1, 1).data[3]; })"
     lid = P(page, "__potato.state.layerId"); P(page, "(() => { __potato.state.layerId = __potato.state.project.canvases[0].layers[0].id; __potato.sel.selRect('new', 20, 20, 60, 60); __potato.emit(); })()")
@@ -111,12 +125,13 @@ with sync_playwright() as pw:
     page.click('.zone-tab >> text=NovelAI')
     page.fill('textarea[aria-label="프롬프트"]', '1boy, solo, smile'); page.fill('textarea[aria-label="빼고 싶은 것"]', 'hat')
     page.fill('textarea[aria-label="인물별 설명"]', 'girl, red dress\nboy, glasses')
+    page.keyboard.press('Tab'); page.select_option('select[aria-label="2번째 인물 자리"]', 'r')
     page.click('text=그림 만들기'); page.wait_for_function("__sent.length === 1 && __potato.state.project.canvases[0].layers.length === 3")
     s = P(page, "__sent[0]"); b = s['b']; pr = b['parameters']
     assert s['u'] == 'https://image.novelai.net/ai/generate-image' and s['auth'] == 'Bearer pst-test'
     assert b['action'] == 'generate' and b['model'] == 'nai-diffusion-4-5-full' and b['input'] == '1boy, solo, smile, very aesthetic, masterpiece, no text'
     assert (pr['width'], pr['height'], pr['steps'], pr['sampler']) == (832, 1216, 28, 'k_euler_ancestral') and pr['seed'] > 0
-    assert [c['char_caption'] for c in pr['v4_prompt']['caption']['char_captions']] == ['girl, red dress', 'boy, glasses'] and len(pr['characterPrompts']) == 2 and pr['v4_negative_prompt']['caption']['char_captions'][1]['centers'] == [{'x': 0.5, 'y': 0.5}]
+    assert [c['char_caption'] for c in pr['v4_prompt']['caption']['char_captions']] == ['girl, red dress', 'boy, glasses'] and len(pr['characterPrompts']) == 2 and pr['v4_negative_prompt']['caption']['char_captions'][1]['centers'] == [{'x': 0.9, 'y': 0.5}] and pr['use_coords'] is True and pr['v4_prompt']['caption']['char_captions'][0]['centers'] == [{'x': 0.5, 'y': 0.5}]
     assert pr['v4_prompt']['caption']['base_caption'] == b['input'] and pr['negative_prompt'].startswith('nsfw, lowres') and pr['negative_prompt'].endswith(', hat')
     page.wait_for_selector('text=남은 Anlas 9,500'); assert page.locator('.zone-body >> text=false').count() == 0
     assert page.locator('.fold >> text=NovelAI').count() == 1
@@ -148,6 +163,13 @@ with sync_playwright() as pw:
     page.wait_for_function("__sent.length === 5 && %s.mediaId !== '%s'" % (L, mid))
     s = P(page, "__sent[4]"); assert s['u'] == 'https://image.novelai.net/ai/upscale' and s['b']['model'] == 'nai-diffusion-5-curated' and s['b']['declared_blur_sigma'] == 0 and set(s['b']) == {'image', 'model', 'declared_blur_sigma'}
     assert P(page, L + ".scale") != sc or True
+    # 분위기 참고: 참고 그림을 먼저 바꾼 뒤(한 번만), 그 결과와 세기를 그림 요청에 실어요
+    P(page, "(() => { const f = window.fetch; window.fetch = async (u, o = {}) => String(u).includes('/ai/encode-vibe') ? (__sent.push({ u: String(u), b: JSON.parse(o.body) }), new Response(new Uint8Array([1, 2, 3]), { status: 200 })) : f(u, o); })()")
+    n = P(page, "__sent.length"); v = P(page, "(async () => { const m = __potato.state.project.media[0].id; const d = await __potato.nai.naiVibe(m, 'AAAA', 'nai-diffusion-4-5-full-inpainting', 1); await __potato.nai.naiVibe(m, 'AAAA', 'nai-diffusion-4-5-full-inpainting', 1); return d; })()")
+    assert v == 'AQID' and P(page, "__sent.length") == n + 1 and P(page, "__sent.at(-1).b") == {'image': 'AAAA', 'model': 'nai-diffusion-4-5-full', 'information_extracted': 1}
+    bb = P(page, "__potato.nai.buildNai({ model: 'nai-diffusion-4-5-full', prompt: 'a', width: 832, height: 1216, steps: 28, scale: 5, sampler: 'k_euler', uc: 'none', vibes: [{ data: 'AQID', strength: 0.6 }] }).parameters")
+    assert bb['reference_image_multiple'] == ['AQID'] and bb['reference_strength_multiple'] == [0.6]
+    assert 'reference_image_multiple' not in P(page, "__potato.nai.buildNai({ model: 'nai-diffusion-5-full', prompt: 'a', width: 832, height: 1216, steps: 28, scale: 5, sampler: 'k_euler', uc: 'none', vibes: [{ data: 'AQID', strength: 0.6 }] }).parameters")
     # 오류는 쉬운 말로
     P(page, "window.fetch = async () => new Response(JSON.stringify({ message: 'x' }), { status: 402 })")
     page.click('button:has-text("전체 다시 그리기")'); page.wait_for_selector('.toast.err >> text=Anlas')

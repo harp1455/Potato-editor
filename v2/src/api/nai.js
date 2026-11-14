@@ -35,6 +35,7 @@ export const randomSeed = () => Math.floor(Math.random() * 4294967295);
 // 요청 모양을 만드는 곳 (시험에서 이 함수만 따로 확인해요)
 //   o = { model, prompt, negative, width, height, steps, scale, sampler, seed, quality, uc, cfgRescale, variety }
 //   src = { image(base64), mask(base64), strength, noise } — image만 있으면 다시 그리기, mask도 있으면 고른 곳만
+export const NAI_SPOTS = { lt: ['왼쪽 위', 0.1, 0.1], t: ['위', 0.5, 0.1], rt: ['오른쪽 위', 0.9, 0.1], l: ['왼쪽', 0.1, 0.5], c: ['가운데', 0.5, 0.5], r: ['오른쪽', 0.9, 0.5], lb: ['왼쪽 아래', 0.1, 0.9], b: ['아래', 0.5, 0.9], rb: ['오른쪽 아래', 0.9, 0.9] };
 export function buildNai(o, src = null) {
   const v5 = o.model.startsWith('nai-diffusion-5-'), infill = !!(src && src.mask);
   const prompt = o.prompt.trim() + (o.quality ? QUALITY : '');
@@ -56,12 +57,17 @@ export function buildNai(o, src = null) {
   if (infill) Object.assign(p, { image: src.image, mask: src.mask, noise: 0, request_type: 'NativeInfillingRequest', inpaintImg2ImgStrength: src.strength ?? 1 });
   else if (src) Object.assign(p, { image: src.image, strength: src.strength ?? 0.5, noise: src.noise ?? 0, color_correct: true });
   // 인물별 설명: 한 줄에 한 명 (여섯 명까지). 자리는 정하지 않고 가운데로 보내요
-  const chars = String(o.chars || '').split('\n').map(t => t.trim()).filter(Boolean).slice(0, 6).map(t => ({ prompt: t, uc: '', center: { x: 0.5, y: 0.5 } }));
+  // 자리를 하나라도 정하면(charPos) 모두 그 자리로 보내요. 안 정한 인물은 가운데
+  const pos = o.charPos || [], coords = String(o.chars || '').split('\n').map((t, i) => [t.trim(), pos[i]]).filter(x => x[0]).slice(0, 6);
+  const chars = coords.map(([t, k]) => ({ prompt: t, uc: '', center: NAI_SPOTS[k] ? { x: NAI_SPOTS[k][1], y: NAI_SPOTS[k][2] } : { x: 0.5, y: 0.5 } }));
   if (chars.length) {
+    if (coords.some(x => NAI_SPOTS[x[1]])) { p.use_coords = true; p.v4_prompt.use_coords = true; }
     p.characterPrompts = chars;
     p.v4_prompt.caption.char_captions = chars.map(c => ({ char_caption: c.prompt, centers: [c.center] }));
     p.v4_negative_prompt.caption.char_captions = chars.map(c => ({ char_caption: '', centers: [c.center] }));
   }
+  // 분위기 참고(바이브): 미리 바꿔 둔 참고 그림과 세기. V5는 받지 않아요
+  if (o.vibes && o.vibes.length && !v5) { p.reference_image_multiple = o.vibes.map(v => v.data); p.reference_strength_multiple = o.vibes.map(v => v.strength); }
   return { action: infill ? 'infill' : src ? 'img2img' : 'generate', input: prompt, model: infill && !o.model.includes('inpainting') ? o.model + '-inpainting' : o.model, parameters: p };
 }
 
@@ -119,4 +125,14 @@ export async function naiUpscale(image, w, h, signal) {
   if (![137, 80, 78, 71].every((v, i) => png[i] === v)) throw new ApiError('bad', 'NovelAI가 그림이 아닌 것을 돌려줬어요. 잠시 뒤에 다시 해 주세요.');
   logUse('nai upscale', 'upscale', null, { size: w + ' × ' + h });
   return new Blob([png], { type: 'image/png' });
+}
+
+// 분위기 참고 그림을 NovelAI가 쓰는 꼴로 바꿔요 (한 번 바꾸면 같은 그림·모델·정보량은 다시 안 바꿔요. Anlas가 들어요)
+const vibeCache = new Map();
+export async function naiVibe(key, image, model, info, signal) {
+  const k = [key, model, info].join('|'); if (vibeCache.has(k)) return vibeCache.get(k);
+  const res = await naiFetch('/ai/encode-vibe', { method: 'POST', body: JSON.stringify({ image, model: model.replace(/-inpainting$/, ''), information_extracted: info }), signal });
+  const u = new Uint8Array(await res.arrayBuffer()); let t = ''; for (let i = 0; i < u.length; i += 0x8000) t += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000));
+  const data = btoa(t); vibeCache.set(k, data); logUse('nai vibe', model, null, {});
+  return data;
 }

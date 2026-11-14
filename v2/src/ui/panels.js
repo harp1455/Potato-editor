@@ -2,7 +2,8 @@
 import { h, icon } from './dom.js';
 import { state, commit, emit, canvasOf, layerOf, history, jump } from '../core/store.js';
 import { run } from '../core/cmd.js';
-import { draw, ADJ, TONE } from '../rooms/image.js';
+import { draw, ADJ, TONE, CURVE0, curveAt } from '../rooms/image.js';
+import { drag } from './dom.js';
 import { showMenu, cmdItem } from './overlay.js';
 import { cmd } from '../core/cmd.js';
 import { binPanel } from './bin.js';
@@ -76,6 +77,7 @@ export const PANELS = {
             oninput: e => { (l.adj || (l.adj = {}))[k] = +e.target.value; out.textContent = e.target.value; draw(); },
             onchange: () => { if (l.adj && !Object.values(l.adj).some(Boolean)) delete l.adj; commit('보정: ' + label); } }), out);
         }),
+        curveBox(l),
         h('button.btn.small', { disabled: !l.adj, onclick: () => run('layer.resetAdj') }, '보정 처음으로'),
         h('p.panel-note', null, '보정은 원본 그림을 바꾸지 않아요. 언제든 값을 되돌릴 수 있어요.'));
     },
@@ -99,4 +101,23 @@ function rename(span, l) {
   i.addEventListener('keydown', e => { if (e.key === 'Enter') done(true); if (e.key === 'Escape') done(false); e.stopPropagation(); });
   i.addEventListener('blur', () => done(true));
   span.replaceWith(i); i.focus(); i.select();
+}
+
+// 곡선 보정: 다섯 점을 위아래로 끌어요. 왼쪽이 어두운 곳, 오른쪽이 밝은 곳
+function curveBox(l) {
+  const S = 132, c = h('canvas.curve', { width: S, height: S, role: 'img', 'aria-label': '곡선 보정', title: '점을 위아래로 끌어요. 왼쪽이 어두운 곳, 오른쪽이 밝은 곳이에요. 두 번 누르면 처음으로 돌아가요.' }), g = c.getContext('2d');
+  const cur = () => (l.adj && l.adj.curve) || CURVE0;
+  const paint = () => {
+    const cu = cur(), css = getComputedStyle(document.documentElement), col = k => css.getPropertyValue(k).trim();
+    g.clearRect(0, 0, S, S); g.strokeStyle = col('--edge'); g.lineWidth = 1; g.beginPath(); for (let i = 1; i < 4; i++) { g.moveTo(i * S / 4 + .5, 0); g.lineTo(i * S / 4 + .5, S); g.moveTo(0, i * S / 4 + .5); g.lineTo(S, i * S / 4 + .5); } g.moveTo(0, S); g.lineTo(S, 0); g.stroke();
+    g.strokeStyle = col('--text'); g.lineWidth = 1.5; g.beginPath(); for (let x = 0; x <= S; x += 2) { const y = S - curveAt(cu, x / S) * S; if (x) g.lineTo(x, y); else g.moveTo(x, y); } g.stroke();
+    g.fillStyle = col('--potato'); cu.forEach((v, i) => { g.beginPath(); g.arc(Math.min(S - 4, Math.max(4, i * S / 4)), Math.min(S - 4, Math.max(4, S - v * S)), 4, 0, Math.PI * 2); g.fill(); });
+  };
+  c.addEventListener('pointerdown', e => {
+    const r = c.getBoundingClientRect(), i = Math.round((e.clientX - r.left) / r.width * 4), cu = [...cur()]; let mv = false;
+    drag(e, ev => { cu[i] = Math.min(1, Math.max(0, 1 - (ev.clientY - r.top) / r.height)); (l.adj || (l.adj = {})).curve = cu; mv = true; paint(); draw(); }, () => mv && commit('보정: 곡선'));
+  });
+  c.addEventListener('dblclick', () => { if (l.adj && l.adj.curve) { delete l.adj.curve; if (!Object.values(l.adj).some(Boolean)) delete l.adj; commit('곡선 처음으로'); } });
+  paint();
+  return h('div.field', null, h('span.field-name.w', null, '곡선'), c);
 }

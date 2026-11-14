@@ -68,14 +68,21 @@ export const ADJ = [['bright', '밝기', -100, 100], ['contrast', '대비', -100
 // 톤 보정: 어두운 곳·밝은 곳의 끝점, 중간 밝기, 색온도. 색 단계표를 만들어 필터로 입혀요.
 export const TONE = [['black', '어두운 곳 조이기', 0, 100], ['white', '밝은 곳 조이기', 0, 100], ['gamma', '중간 밝기', -100, 100], ['temp', '색온도', -100, 100]];
 const luts = new Map();
+// 곡선: 밝기 0, 25, 50, 75, 100%인 곳이 각각 얼마나 밝아질지 다섯 점으로 정해요. 점 사이는 부드럽게 이어요.
+export const CURVE0 = [0, 0.25, 0.5, 0.75, 1];
+export function curveAt(cu, v) {
+  if (!cu) return v;
+  const t = Math.min(3.9999, Math.max(0, v * 4)), i = Math.floor(t), f = t - i, p0 = cu[Math.max(0, i - 1)], p1 = cu[i], p2 = cu[i + 1], p3 = cu[Math.min(4, i + 2)];
+  return Math.min(1, Math.max(0, 0.5 * (2 * p1 + (p2 - p0) * f + (2 * p0 - 5 * p1 + 4 * p2 - p3) * f * f + (3 * p1 - p0 - 3 * p2 + p3) * f * f * f)));
+}
 function lutOf(a) {
-  const key = [a.black | 0, a.white | 0, a.gamma | 0, a.temp | 0].join('_'); if (key === '0_0_0_0') return '';
+  const cu = a.curve && a.curve.length === 5 ? a.curve : null, key = [a.black | 0, a.white | 0, a.gamma | 0, a.temp | 0].join('_') + (cu ? '_c' + cu.map(v => Math.round(v * 100)).join('x') : ''); if (key === '0_0_0_0') return '';
   if (luts.has(key)) return luts.get(key);
   let svg = document.getElementById('adjLuts');
   if (!svg) { svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); svg.id = 'adjLuts'; svg.setAttribute('width', 0); svg.setAttribute('height', 0); svg.style.position = 'absolute'; document.body.append(svg); }
   const lo = (a.black || 0) / 200, hi = 1 - (a.white || 0) / 200, ex = Math.pow(2, -(a.gamma || 0) / 100), t = (a.temp || 0) / 100;
-  const table = gain => Array.from({ length: 33 }, (_, i) => Math.min(1, Math.max(0, Math.pow(Math.min(1, Math.max(0, (i / 32 - lo) / Math.max(0.02, hi - lo))), ex) * gain)).toFixed(4)).join(' ');
-  const id = 'lut' + key.replace(/-/g, 'm'), NS = 'http://www.w3.org/2000/svg', f = document.createElementNS(NS, 'filter'), ct = document.createElementNS(NS, 'feComponentTransfer');
+  const table = gain => Array.from({ length: 33 }, (_, i) => Math.min(1, Math.max(0, curveAt(cu, Math.pow(Math.min(1, Math.max(0, (i / 32 - lo) / Math.max(0.02, hi - lo))), ex)) * gain)).toFixed(4)).join(' ');
+  const id = 'lut' + key.replace(/-/g, 'm').replace(/[^\w]/g, ''), NS = 'http://www.w3.org/2000/svg', f = document.createElementNS(NS, 'filter'), ct = document.createElementNS(NS, 'feComponentTransfer');
   f.id = id; f.setAttribute('color-interpolation-filters', 'sRGB');
   for (const [ch, gain] of [['R', 1 + t * 0.18], ['G', 1], ['B', 1 - t * 0.18]]) { const fn = document.createElementNS(NS, 'feFunc' + ch); fn.setAttribute('type', 'table'); fn.setAttribute('tableValues', table(gain)); ct.append(fn); }
   f.append(ct); svg.append(f); luts.set(key, `url(#${id})`);

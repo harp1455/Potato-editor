@@ -58,6 +58,9 @@ function drawText(g, e, cx, cy, maxW) {
   return { w: Math.max(1, ...ls.map(t => g.measureText(t).width)), h: ls.length * lh };
 }
 function drawEl(g, e) {
+  if (e.rot) { g.save(); g.translate(e.x + e.w / 2, e.y + e.h / 2); g.rotate(e.rot * Math.PI / 180); g.translate(-(e.x + e.w / 2), -(e.y + e.h / 2)); drawEl0(g, e); g.restore(); } else drawEl0(g, e);
+}
+function drawEl0(g, e) {
   if (e.type === 'panel') {
     g.save(); g.beginPath(); g.rect(e.x, e.y, e.w, e.h); g.clip();
     g.fillStyle = '#e9e9e9'; g.fillRect(e.x, e.y, e.w, e.h);
@@ -249,7 +252,7 @@ export const cutRoom = {
         h('label.field', null, h('span.field-name.w', null, '바탕'), h('input', { type: 'color', value: pg.bg || '#ffffff', 'aria-label': '바탕색', onchange: ev => { pg.bg = ev.target.value; commit('바탕색'); } })),
         h('h3.sec', null, '내보내기와 번역'),
         h('div.btn-row', null, h('button.btn.small', { onclick: () => run('cut.export') }, '이 페이지 PNG'), h('button.btn.small', { onclick: () => run('cut.exportAll') }, '모든 페이지 저장')),
-        h('div.btn-row', null, h('button.btn.small', { onclick: () => run('cut.translate') }, '대사 번역…')),
+        h('div.btn-row', null, h('button.btn.small', { onclick: () => run('cut.translate') }, '대사 번역…'), h('button.btn.small', { onclick: () => run('cut.sfx') }, '효과음 넣기')),
         h('p.panel-note', null, '요소를 누르면 그 요소의 설정이 보여요. 보관함 그림을 컷 위로 끌어 담아요.'),
       ] : [
         h('h3.sec', null, { panel: '컷', bubble: '말풍선', text: '글자', lines: '집중선' }[e.type]),
@@ -259,7 +262,7 @@ export const cutRoom = {
         ...(e.type === 'lines' ? [h('div.field-row', null, num('선 수', 'count'), num('굵기', 'thick', e, 0.1)), h('div.field-row', null, num('가운데 빈 곳 %', 'hole'), col('색', 'color', '#111111')), h('div.btn-row', null, h('button.btn.small', { onclick: () => { e.seed = 1 + Math.floor(Math.random() * 99999); commit('집중선 다시 뿌리기'); } }, '다르게 뿌리기'))] : []),
         ...(e.type === 'text' ? [...textBox(), h('div.field-row', null, num('테두리', 'sw'), col('테두리색', 'sc', '#ffffff'))] : []),
         h('h3.sec', null, '자리'),
-        h('div.field-row', null, num('X', 'x'), num('Y', 'y')), e.type !== 'text' && h('div.field-row', null, num('가로', 'w'), num('세로', 'h')),
+        h('div.field-row', null, num('X', 'x'), num('Y', 'y')), h('div.field-row', null, num('회전', 'rot')), e.type !== 'text' && h('div.field-row', null, num('가로', 'w'), num('세로', 'h')),
         h('div.btn-row', null, h('button.icon-btn', { title: '맨 앞으로', 'aria-label': '맨 앞으로', onclick: () => run('cut.front') }, icon('up')), h('button.icon-btn', { title: '맨 뒤로', 'aria-label': '맨 뒤로', onclick: () => run('cut.back') }, icon('down')), h('span.grow'), h('button.icon-btn', { title: '지우기', 'aria-label': '지우기', onclick: () => run('cut.delete') }, icon('trash'))),
       ].filter(Boolean)));
       strip.replaceChildren(...pages().map((p, i) => { const t = h('canvas.cut-thumb'); t.width = 96; t.height = Math.max(24, Math.round(96 * p.h / p.w)); const g = t.getContext('2d'); g.scale(96 / p.w, 96 / p.w); renderPage(g, p);
@@ -287,6 +290,7 @@ export function registerCutCmds() {
   addCmd({ id: 'cut.back', title: '맨 뒤로', menu: '컷', group: 'el', enabled: has, run: () => order(false) });
   addCmd({ id: 'cut.dup', title: '요소 복제', menu: '컷', group: 'el', enabled: has, run: () => { const pg = pageOf(), e = elOf(), n = { ...e, id: uid('e'), x: e.x + 24, y: e.y + 24, ...(e.type === 'bubble' ? { tx: e.tx + 24, ty: e.ty + 24 } : {}) }; pg.els.push(n); V.sel = n.id; commit('요소 복제'); } });
   addCmd({ id: 'cut.delete', title: '요소 지우기', menu: '컷', group: 'el', enabled: has, run: () => { const pg = pageOf(), g = new Set(group().map(e => e.id)); pg.els = pg.els.filter(e => !g.has(e.id)); V.sel = null; commit(g.size > 1 ? `요소 ${g.size}개 지우기` : '요소 지우기'); } });
+  addCmd({ id: 'cut.sfx', title: '효과음 글자 넣기', menu: '컷', group: 'el', words: '의성어 쾅 sfx', enabled: on, run: () => { const pg = pageOf(), size = Math.round(pg.w / 7), t = { id: uid('e'), type: 'text', x: Math.round(pg.w / 2 - size), y: Math.round(pg.h / 2 - size / 2), w: size * 2, h: size, text: '쾅!', size, color: '#ffffff', sw: Math.max(4, Math.round(size / 12)), sc: '#111111', bold: true, rot: -12 }; pg.els.push(t); V.sel = t.id; V.tool = 'pick'; commit('효과음 넣기'); } });
   addCmd({ id: 'cut.translate', title: '대사 번역… (제미나이)', menu: '컷', group: 'ai', words: 'translate 번역', enabled: () => !!pageOf(), run: translateDialog });
   addCmd({ id: 'cut.export', title: '이 페이지를 PNG로', menu: '컷', group: 'out', enabled: () => !!pageOf(), run: async () => { const pg = pageOf(), c = await pageCanvas(pg); download(await new Promise(r => c.toBlob(r, 'image/png')), pg.name + '.png'); toast(`'${pg.name}.png'로 저장했어요.`); } });
   addCmd({ id: 'cut.exportAll', title: '모든 페이지 저장…', menu: '컷', group: 'out', enabled: () => pages().length > 0, run: async () => { const b = busy('페이지를 그리는 중이에요.'), files = []; for (const [i, pg] of pages().entries()) { const c = await pageCanvas(pg); files.push({ name: `${String(i + 1).padStart(3, '0')} ${pg.name}.png`, blob: await new Promise(r => c.toBlob(r, 'image/png')) }); b.set(`페이지를 그리는 중이에요. ${i + 1} / ${pages().length}`); } b.done(''); const r = await saveFiles(files, state.project.name + ' 페이지.zip'); if (r) toast(`페이지 ${files.length}쪽을 저장했어요.`); } });

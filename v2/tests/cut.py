@@ -57,6 +57,9 @@ with sync_playwright() as pw:
     page.mouse.move(X(e1['x'] + 30), Y(e1['y'] + e1['h'] - 30)); page.mouse.down(); page.mouse.move(X(e1['x'] + 70), Y(e1['y'] + e1['h'] - 30), steps=3); page.mouse.up()
     a0 = P(page, ELS + "[0].x"); a1 = P(page, ELS + "[1].x"); assert a0 - e0['x'] == a1 - e1['x'] and a0 != e0['x'], (a0, a1)
     page.keyboard.press('Control+z'); assert P(page, ELS + "[0].x") == e0['x']; page.keyboard.press('Escape')
+    # 효과음: 크게, 기울여서 들어가요
+    n1 = P(page, ELS + ".length"); P(page, "__potato.run('cut.sfx')"); sf = P(page, ELS + ".at(-1)"); assert sf['rot'] == -12 and sf['size'] > 80 and page.locator('.vid-side input[aria-label="회전"]').count() == 1
+    shot(page, '85-sfx'); page.keyboard.press('Control+z'); assert P(page, ELS + ".length") == n1
     # 집중선: 끌어서 넣으면 가장자리는 선으로 덮이고 가운데는 비어 있어요
     n0 = P(page, ELS + ".length"); page.keyboard.press('l'); page.mouse.move(X(60), Y(700)); page.mouse.down(); page.mouse.move(X(460), Y(1100), steps=4); page.mouse.up()
     ln = P(page, ELS + ".at(-1)"); assert P(page, ELS + ".length") == n0 + 1 and ln['type'] == 'lines' and abs(ln['w'] - 400) < 8
