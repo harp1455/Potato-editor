@@ -6,9 +6,9 @@ import { PANELS } from './panels.js';
 
 const ZONES = ['left', 'right', 'bottom'];
 const BASE = {
-  image: { left: ['media'], right: ['layers', 'props', 'nai', 'history'], bottom: [] },
+  image: { left: ['media'], right: ['layers', 'props', 'nai', 'dub', 'history'], bottom: [] },
   other: { left: ['media'], right: ['history', 'jobs'], bottom: [] },
-  single: { left: ['media', 'history'], right: ['layers', 'props', 'nai', 'jobs'], bottom: [] },
+  single: { left: ['media', 'history'], right: ['layers', 'props', 'nai', 'dub', 'jobs'], bottom: [] },
 };
 const SIZE = { left: 232, right: 272, bottom: 180 };
 

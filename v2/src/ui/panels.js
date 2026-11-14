@@ -8,6 +8,7 @@ import { cmd } from '../core/cmd.js';
 import { binPanel } from './bin.js';
 import { naiPanel } from './naipanel.js';
 import { jobsPanel } from './aitools.js';
+import { dubPanel } from './geminitools.js';
 
 const num = (label, value, step, on, unit) => {
   const i = h('input.num', { type: 'number', value, step, 'aria-label': label, onchange: () => { const v = parseFloat(i.value); if (!isNaN(v)) on(v); } });
@@ -87,6 +88,7 @@ export const PANELS = {
     },
   },
   nai: naiPanel,
+  dub: dubPanel,
   jobs: jobsPanel,
 };
 
