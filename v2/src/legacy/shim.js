@@ -2,7 +2,7 @@
 import { makeRig } from './rig.gen.js';
 import { makeAi2 } from './ai2.gen.js';
 import { idb as store } from '../core/store.js';
-import { aiLoad, aiCall, samState, aiDevice, charMask } from '../core/ai.js';
+import { aiLoad, aiCall, samState, aiDevice, charMask, samIds } from '../core/ai.js';
 import { missingFiles, idsOfPack } from '../core/packs.js';
 import { saveFiles } from '../core/files.js';
 import { ensureModels } from '../ui/aitools.js';
@@ -40,7 +40,7 @@ function czErrText(e) {
   return '(' + m.slice(0, 80) + ')';
 }
 const PACKS = ['bg', 'erase', 'rig'];
-const NEED = () => ['czWasm', 'czM_samE', 'czM_samD', ...PACKS.flatMap(idsOfPack)];
+const NEED = () => ['czWasm', ...samIds(), ...PACKS.flatMap(idsOfPack)];
 
 // 떼어 낸 자리를 NovelAI로 다시 그리기: 무엇을 그릴지 묻고, 결과 그림을 돌려줘요 (그만두면 null)
 function naiFill(pic, mask, label) {

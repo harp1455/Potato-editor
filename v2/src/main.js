@@ -377,6 +377,7 @@ async function start() {
   else if (settings.get('autoUpd') !== false && Date.now() - (settings.get('updSeen') || 0) > 864e5 && VERSION !== 'dev') setTimeout(() => checkUpdate(true), 4000);
   window.__potato = { state, settings, run, emit, cmds, api: { generate, buildBody, buildInteraction, speak, animate, preamble, check } };
   import('./core/files.js').then(f => { window.__potato.files = f; });
+  import('./core/ai.js').then(f => { window.__potato.ai = f; }); import('./core/packs.js').then(f => { window.__potato.packs = f; });
   import('./core/select.js').then(f => { window.__potato.sel = f; });
   import('./api/nai.js').then(f => { window.__potato.nai = f; });
   import('./core/ai.js').then(f => { window.__potato.ai = f; });

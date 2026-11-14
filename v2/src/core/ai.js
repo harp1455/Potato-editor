@@ -2,6 +2,7 @@
 // 그래픽카드(WebGPU)가 되면 그쪽으로, 안 되면 CPU로 알아서 돌아요.
 import { packBytes } from './packs.js';
 import { emit } from './store.js';
+import { settings } from './settings.js';
 
 function workerMain() {
   let ort = null, ep = 'wasm';
@@ -27,6 +28,33 @@ function workerMain() {
         let r;
         try { r = await run(); } catch (err) { if (!S[m.key] || !S[m.key].gpu) throw err; S[m.key] = await make(m.key, false); r = await run(); }   // 그래픽카드에서 안 되면 CPU로
         reply({ data: r.d, dims: r.dims, ep: S[m.key].gpu ? 'webgpu' : 'wasm' }, [r.d.buffer]);
+      } else if (m.t === 'run2' && S[m.key] && S[m.key].inputNames.includes('pixel_values') && m.feeds.input_image) {
+        // 큰 윤곽 모델(SAM 2.1): 부르는 쪽은 그대로 두고 여기서 모양만 맞춰요. 그림을 1024×1024로 맞추고 색을 고르게 한 뒤 읽혀요
+        const v = m.feeds.input_image, th = v.dims[0], tw = v.dims[1], src = v.data, N = 1024, x = new Float32Array(3 * N * N), mean = [123.675, 116.28, 103.53], std = [58.395, 57.12, 57.375];
+        for (let y = 0; y < N; y++) { const fy = Math.min(th - 1, Math.max(0, (y + 0.5) * th / N - 0.5)), y0 = fy | 0, y1 = Math.min(th - 1, y0 + 1), wy = fy - y0;
+          for (let xx = 0; xx < N; xx++) { const fx = Math.min(tw - 1, Math.max(0, (xx + 0.5) * tw / N - 0.5)), x0 = fx | 0, x1 = Math.min(tw - 1, x0 + 1), wx = fx - x0, a = (y0 * tw + x0) * 3, b2 = (y0 * tw + x1) * 3, c = (y1 * tw + x0) * 3, d = (y1 * tw + x1) * 3;
+            for (let k = 0; k < 3; k++) x[k * N * N + y * N + xx] = ((src[a + k] * (1 - wx) + src[b2 + k] * wx) * (1 - wy) + (src[c + k] * (1 - wx) + src[d + k] * wx) * wy - mean[k]) / std[k]; } }
+        const feeds = { pixel_values: new ort.Tensor('float32', x, [1, 3, N, N]) }; let out;
+        try { out = await S[m.key].run(feeds); } catch (err) { if (!S[m.key].gpu) throw err; S[m.key] = await make(m.key, false); out = await S[m.key].run(feeds); }
+        for (const k of ['image_embeddings.0', 'image_embeddings.1', 'image_embeddings.2']) K[k] = new ort.Tensor('float32', new Float32Array(out[k].data), out[k].dims);
+        K.s2 = { tw, th }; reply({ out: {}, ep: S[m.key].gpu ? 'webgpu' : 'wasm' });
+      } else if (m.t === 'run2' && S[m.key] && S[m.key].inputNames.includes('input_points') && m.feeds.point_coords) {
+        const { tw, th } = K.s2, pc = m.feeds.point_coords.data, pl = m.feeds.point_labels.data, P = [], Lb = [];
+        for (let i = 0; i < pl.length; i++) if (pl[i] >= 0) { P.push(pc[i * 2] * 1024 / tw, pc[i * 2 + 1] * 1024 / th); Lb.push(BigInt(Math.round(pl[i]))); }
+        const feeds = { input_points: new ort.Tensor('float32', Float32Array.from(P), [1, 1, Lb.length, 2]), input_labels: new ort.Tensor('int64', BigInt64Array.from(Lb), [1, 1, Lb.length]), input_boxes: new ort.Tensor('float32', new Float32Array(0), [1, 0, 4]),
+          'image_embeddings.0': K['image_embeddings.0'], 'image_embeddings.1': K['image_embeddings.1'], 'image_embeddings.2': K['image_embeddings.2'] };
+        let out;
+        try { out = await S[m.key].run(feeds); } catch (err) { if (!S[m.key].gpu) throw err; S[m.key] = await make(m.key, false); out = await S[m.key].run(feeds); }
+        // 후보 3개를 그림 크기로 키워서 돌려줘요. 맨 앞(0번)에는 점수가 가장 높은 것을 한 번 더 둬요 (작은 모델과 차례를 맞추려고)
+        const pm = out.pred_masks, mw = pm.dims[pm.dims.length - 1], mh = pm.dims[pm.dims.length - 2], lo = pm.data, sc = out.iou_scores.data, n = tw * th, masks = new Float32Array(4 * n);
+        let top = 0; for (let k = 1; k < 3; k++) if (sc[k] > sc[top]) top = k;
+        for (let k = 0; k < 3; k++) { const o = (k + 1) * n, q = k * mw * mh;
+          for (let y = 0; y < th; y++) { const fy = Math.min(mh - 1, Math.max(0, (y + 0.5) * mh / th - 0.5)), y0 = fy | 0, y1 = Math.min(mh - 1, y0 + 1), wy = fy - y0;
+            for (let xx = 0; xx < tw; xx++) { const fx = Math.min(mw - 1, Math.max(0, (xx + 0.5) * mw / tw - 0.5)), x0 = fx | 0, x1 = Math.min(mw - 1, x0 + 1), wx = fx - x0;
+              masks[o + y * tw + xx] = (lo[q + y0 * mw + x0] * (1 - wx) + lo[q + y0 * mw + x1] * wx) * (1 - wy) + (lo[q + y1 * mw + x0] * (1 - wx) + lo[q + y1 * mw + x1] * wx) * wy; } } }
+        masks.copyWithin(0, (top + 1) * n, (top + 2) * n);
+        const iou = new Float32Array([sc[top], sc[0], sc[1], sc[2]]), res = { masks: { data: masks, dims: [1, 4, th, tw] }, iou_predictions: { data: iou, dims: [1, 4] } };
+        reply({ out: res, ep: S[m.key].gpu ? 'webgpu' : 'wasm' }, [masks.buffer, iou.buffer]);
       } else if (m.t === 'run2') {   // 입력·출력이 여러 개인 모델. keep: 다음에 쓸 결과를 일꾼 안에 보관, ref: 보관한 결과를 입력으로
         const feeds = {};
         for (const [k, v] of Object.entries(m.feeds)) feeds[k] = v.ref ? K[v.ref] : new ort.Tensor('float32', v.data, v.dims);
@@ -68,11 +96,15 @@ function init() {
 }
 export function aiLoad(key) {
   if (!A.loaded[key]) {
-    const p = A.loaded[key] = (async () => { await init(); const b = await packBytes('czM_' + key); A.ep = (await call({ t: 'load', key, bytes: b }, [b])).ep; })();
+    const p = A.loaded[key] = (async () => { await init(); const b = await packBytes(fileIdOf(key)); A.ep = (await call({ t: 'load', key, bytes: b }, [b])).ep; })();
     p.catch(() => { if (A.loaded[key] === p) delete A.loaded[key]; });
   }
   return A.loaded[key];
 }
+// 윤곽 모델: 설정에서 '정밀하게'를 고르면 큰 모델(SAM 2.1)을 같은 이름(samE·samD)으로 올려요. 바꾸면 올려 둔 것을 내려요
+export const samBig = () => settings.get('samModel') === 'big';
+export const fileIdOf = key => 'czM_' + (samBig() && (key === 'samE' || key === 'samD') ? (key === 'samE' ? 'sam2E' : 'sam2D') : key);
+export const samIds = () => [fileIdOf('samE'), fileIdOf('samD')];
 export const aiRun = (key, data, dims) => call({ t: 'run', key, data, dims }, [data.buffer]);
 export const aiCall = (msg, tr) => call(msg, tr);
 // 윤곽 AI(SAM)가 지금 어떤 그림을 읽어 두었는지. 캐릭터 움직이기와 'AI로 고르기'가 같이 써요

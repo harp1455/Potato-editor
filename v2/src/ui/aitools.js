@@ -3,7 +3,7 @@ import { h } from './dom.js';
 import { state, commit, canvasOf, layerOf, addMedia, ensureBitmap, uid } from '../core/store.js';
 import { addCmd, run } from '../core/cmd.js';
 import { MAN, PACK_PAGE, canDownload, missingFiles, packGet, packAdd, packState, packDel, idsOfPack, mb } from '../core/packs.js';
-import { runJob, charMask, upscale, samMask, jobs, aiReset } from '../core/ai.js';
+import { runJob, charMask, upscale, samMask, jobs, aiReset, fileIdOf } from '../core/ai.js';
 import { sel, selFor, selMask, selBounds } from '../core/select.js';
 import { fillHole, legacyAi, aiLine } from '../legacy/shim.js';
 import { settings } from '../core/settings.js';
@@ -20,7 +20,7 @@ function pickPackFiles() {
   return new Promise(res => { const i = h('input', { type: 'file', multiple: true, accept: '.gz' }); i.onchange = () => res([...i.files]); i.oncancel = () => res([]); i.click(); });
 }
 // 필요한 팩이 다 있는지 보고, 없으면 받거나 넣게 해요. 준비되면 true
-export const ensurePacks = models => ensureModels(['czWasm', ...models.map(m => 'czM_' + m)]);
+export const ensurePacks = models => ensureModels(['czWasm', ...models.map(fileIdOf)]);
 // packs = 모델 파일 이름(id)들
 export async function ensureModels(packs) {
   let miss = await missingFiles(packs);
@@ -116,7 +116,8 @@ export function registerAiCmds(openPacks) {
   addCmd({ id: 'ai.censor', title: '자동 흰칠', menu: 'AI', group: 'cz', keys: 'Ctrl+Shift+W', words: '가리기 모자이크 검열 성기', enabled: hasLayer, run: () => { const k = censorCfg(); return job('자동 흰칠', ['deep', 'deepn', k.model === 'precise' ? 'segM' : 'segN', 'samE', 'samD'], async (j, say) => {
     const l = layerOf(), bmp = await layerPic(l), r = await censorMask(bmp, j, say);
     if (!r.found) { toast('가릴 곳을 찾지 못했어요. 설정에서 민감도를 올려 볼 수 있어요.'); return; }
-    await overlay(l, r.canvas, l.name + ' 흰칠'); commit('자동 흰칠');
+    const n = await overlay(l, r.canvas, l.name + ' 흰칠'); if (n) n.paint = true;   // 지우개와 가리기 붓으로 고칠 수 있게
+    commit('자동 흰칠');
   }); } });
   addCmd({ id: 'ai.censorCfg', title: '자동 흰칠 설정…', menu: 'AI', group: 'cz', run: censorDialog });
   addCmd({ id: 'ai.line', title: '선화 추출', menu: 'AI', group: 'fx', words: '라인 스케치 lineart', enabled: hasLayer, run: () => job('선화 추출', ['lineF'], async (j, say) => {
@@ -169,6 +170,9 @@ export async function packsPane(redraw) {
     h('p.set-note', null, dl ? 'AI 도구가 쓰는 모델 묶음이에요. 필요한 것만 받아 두면 돼요. 그림은 이 컴퓨터 안에서만 처리해요.' : 'AI 도구가 쓰는 모델 묶음이에요. HTML판은 팩을 스스로 받을 수 없어서, 내려받은 파일을 넣어 줘야 해요. 그림은 이 컴퓨터 안에서만 처리해요.'),
     h('div.btn-row', null, h('a.btn', { href: PACK_PAGE, target: '_blank', rel: 'noopener' }, '팩 받는 곳 열기'),
       h('button.btn', { onclick: async () => { const fs = await pickPackFiles(); if (!fs.length) return; const b = busy('파일을 확인하는 중이에요.'); const r = await packAdd(fs); b.done(r.added.length ? `팩 파일 ${r.added.length}개를 넣었어요.` : '맞는 팩 파일이 없어요.', r.added.length ? '' : 'err'); redraw(); } }, '받은 파일 넣기')),
+    h('b', null, '윤곽 모델'),
+    h('div.choice', { role: 'radiogroup' }, [['fast', '빠르게', '작은 모델이에요. 금방 끝나고 기본 팩만 있으면 돼요.'], ['big', '정밀하게', '큰 모델이에요. 옷, 팔, 다리 같은 부위를 훨씬 잘 나눠요. 정밀 윤곽 팩(약 300MB)이 필요하고, 그림을 처음 읽을 때 더 걸려요.']].map(([v, t, d]) => h('label.choice-item' + (settings.get('samModel') === v ? '.on' : ''), null, h('input', { type: 'radio', name: 'samm', checked: settings.get('samModel') === v, onchange: () => { settings.set('samModel', v); aiReset(); redraw(); } }), h('span', null, h('b', null, t), h('small', null, d))))),
+    h('p.set-note', null, 'AI로 고르기, 캐릭터 움직이기의 부위 나누기, 자동 흰칠이 이 모델로 윤곽을 따요.'),
     h('div.packs', null, Object.entries(MAN.packs).map(([k, p]) => h('div.pack' + (st[k] ? '.on' : ''), null,
       h('div', null, h('b', null, p.label), h('small', null, p.desc)),
       h('span.pack-size', null, mb(p.size)),

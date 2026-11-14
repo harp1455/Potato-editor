@@ -1,5 +1,5 @@
 // 이미지 작업실: 그림판에 레이어를 올리고, 옮기고, 고르고, 고쳐요.
-import { PAINT_TOOLS, SHAPES, COVERS, COVER_SHAPES, paintDown, paintOpt, setPaint, drawPaintDraft } from './paint.js';
+import { PAINT_TOOLS, SHAPES, COVERS, COVER_SHAPES, COVER_HINT, paintDown, paintOpt, setPaint, drawPaintDraft } from './paint.js';
 import { h, icon, clamp, drag } from '../ui/dom.js';
 import { state, commit, emit, tick, canvasOf, layerOf, newCanvas, addLayer, addMedia, uid, ensureBitmap } from '../core/store.js';
 import { settings } from '../core/settings.js';
@@ -466,7 +466,13 @@ export const imageRoom = {
           t.id === 'magic' && range('붓 굵기', 'size', 6, 120, 28, 'px'),
           t.id === 'magic' && range('번짐', 'spread', 0, 100, 35, ''),
           ...(t.id === 'cover' ? (() => { const o = paintOpt(), pick = (label, k, list) => h('select.text', { 'aria-label': label, style: 'width:auto', onchange: e => { setPaint(k, e.target.value); emit(); } }, list.map(([v, tt]) => h('option', { value: v, selected: o[k] === v }, tt))), rg = (label, k, min, max, unit) => { const out = h('span.opt-val', null, o[k] + unit); return h('label.opt', null, h('span', null, label), h('input.range', { type: 'range', min, max, value: o[k], 'aria-label': label, oninput: e => { setPaint(k, +e.target.value); out.textContent = e.target.value + unit; } }), out); };
-            return [pick('가리는 방식', 'cover', COVERS), pick('가리는 모양', 'cshape', COVER_SHAPES), o.cover === 'white' && h('label.opt', null, h('span', null, '색'), h('input', { type: 'color', value: o.ccolor, 'aria-label': '흰칠 색', onchange: e => setPaint('ccolor', e.target.value) })), o.cshape === 'brush' && rg('굵기', 'csize', 4, 400, 'px'), rg('가장자리 부드럽게', 'csoft', 0, 100, '%')]; })() : []),
+            const brushOnly = o.cover === 'smudge' || o.cover === 'clone', shaped = !brushOnly && (o.cshape === 'ellipse' || o.cshape === 'rect');
+            return [pick('가리는 방식', 'cover', COVERS), !brushOnly && pick('가리는 모양', 'cshape', COVER_SHAPES), o.cover === 'white' && h('label.opt', null, h('span', null, '색'), h('input', { type: 'color', value: o.ccolor, 'aria-label': '흰칠 색', onchange: e => setPaint('ccolor', e.target.value) })), (brushOnly || o.cshape === 'brush') && rg('굵기', 'csize', 4, 400, 'px'),
+              ['mosaic', 'blur', 'dodge', 'burn', 'smudge'].includes(o.cover) && rg('세기', 'cstr', 5, 100, ''), o.cover !== 'aierase' && rg('가장자리 부드럽게', 'csoft', 0, 100, '%'),
+              o.cover === 'white' && shaped && h('label.check', { title: '끌 때마다 흰칠이 따로 레이어가 돼요. 옮기기 도구로 옮기고, 크기를 바꾸고, 지울 수 있어요.' }, h('input', { type: 'checkbox', checked: !!o.csep, onchange: e => setPaint('csep', e.target.checked) }), '나중에 옮길 수 있게'),
+              h('button.btn.small', { title: '가린 곳을 다시 지워요 (X). 자동 흰칠로 가린 곳도 지워져요.', onclick: () => run('tool.eraser') }, '가린 곳 지우개'),
+              h('button.btn.small', { title: 'AI가 가릴 곳을 찾아 모양대로 가려요 (Ctrl+Shift+W)', onclick: () => run('ai.censor') }, '자동 흰칠'),
+              COVER_HINT[o.cover] && h('span.opt-hint', null, COVER_HINT[o.cover])]; })() : []),
           ...(PAINT_TOOLS.some(x => x.id === t.id) && t.id !== 'text' && t.id !== 'cover' ? (() => { const o = paintOpt(), rg = (label, k, min, max, unit) => { const out = h('span.opt-val', null, o[k] + unit); return h('label.opt', null, h('span', null, label), h('input.range', { type: 'range', min, max, value: o[k], 'aria-label': label, oninput: e => { setPaint(k, +e.target.value); out.textContent = e.target.value + unit; } }), out); };
             return [t.id === 'shape' && h('select.text', { 'aria-label': '도형 모양', style: 'width:auto', onchange: e => { setPaint('shape', e.target.value); emit(); } }, SHAPES.map(([v, tt]) => h('option', { value: v, selected: o.shape === v }, tt))),
               t.id !== 'eraser' && h('label.opt', null, h('span', null, '색'), h('input', { type: 'color', value: o.color, 'aria-label': '그리는 색', onchange: e => setPaint('color', e.target.value) })),

@@ -6,6 +6,7 @@ const DEFAULTS = {
   layouts: {},              // 화면 방식·작업실마다 저장된 패널 배치
   keys: {},                 // 내가 바꾼 단축키 { 명령 이름: 'Ctrl+K' }
   theme: 'dark',
+  samModel: 'fast',         // 윤곽 모델: fast(작은 모델) | big(큰 모델, 정밀 윤곽 팩)
   adult: false,             // 성인 확인을 마쳤는지
   adultAt: '',
   askedAdult: false,

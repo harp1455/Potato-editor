@@ -255,6 +255,7 @@ body[data-mode="single"] .rail { display: none; }
 .opt-name { color: var(--text); font-weight: 600; }
 .opt { display: flex; align-items: center; gap: 6px; color: var(--dim); } .opt .range { width: 110px; flex: none; }
 .opt-val { min-width: 34px; color: var(--faint); }
+.opt-hint { color: var(--faint); white-space: nowrap; }
 .optbar .btn + .btn { margin-left: -6px; }
 .field-name.w { min-width: 34px; }
 

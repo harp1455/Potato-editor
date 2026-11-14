@@ -50,6 +50,11 @@
    "label": "AI 캐릭터 뼈대 팩",
    "desc": "캐릭터의 관절과 눈 자리, 캐릭터가 몇 명인지 찾는 모델 (캐릭터 움직이기)",
    "size": 73454156
+  },
+  "outline": {
+   "label": "정밀 윤곽 팩",
+   "desc": "옷, 팔, 다리 같은 부위와 물건의 윤곽을 더 정확하게 따는 큰 모델 (SAM 2.1). 윤곽 모델을 '정밀하게'로 바꾸면 써요",
+   "size": 303103293
   }
  },
  "files": [
@@ -204,6 +209,22 @@
    "size": 5609118,
    "raw": 6104417,
    "sha256": "08afd26252087200ae13e3cea6dfe396eca68c44e801f59362e5d376969a5092"
+  },
+  {
+   "id": "czM_sam2E",
+   "file": "sam2.1-base-plus-encoder.onnx.gz",
+   "pack": "outline",
+   "size": 284074227,
+   "raw": 306429892,
+   "sha256": "3eb4299d09fab8489b31352af7db77d7d7c9ae1ddc4556f3470bcab28f07c61d"
+  },
+  {
+   "id": "czM_sam2D",
+   "file": "sam2.1-decoder.onnx.gz",
+   "pack": "outline",
+   "size": 19029066,
+   "raw": 21162352,
+   "sha256": "601295d4fb23b9b6121e5fe07fa6960f38f14dc6d30b900488a6337697e9202e"
   }
  ]
 }

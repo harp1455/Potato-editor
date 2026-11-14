@@ -143,7 +143,7 @@ with sync_playwright() as pw:
     page.keyboard.press('u'); c1 = P(page, D2S + "(40, 150)"); c2 = P(page, D2S + "(120, 200)"); page.mouse.move(vb['x'] + c1[0], vb['y'] + c1[1]); page.mouse.down(); m2 = P(page, C0 + ".layers.find(l => l.paint).mediaId"); page.mouse.move(vb['x'] + c2[0], vb['y'] + c2[1], steps=4); page.mouse.up(); page.wait_for_function(C0 + ".layers.find(l => l.paint).mediaId !== '%s'" % m2); page.wait_for_timeout(200)
     assert P(page, PX + "(80, 175)")[0] > 240 and P(page, C0 + ".layers.length") == nl + 1; shot(page, '32e-paint')
     # 가리기 붓(수동 흰칠): 타원으로 끌면 그 자리가 흰색으로 덮여요. 모자이크도 돼요
-    P(page, "__potato.settings.set('paint', { color: '#ff0000', size: 20, alpha: 100, shape: 'rect', fill: true, cover: 'white', cshape: 'ellipse', csize: 40, ccolor: '#ffffff', csoft: 0 })"); page.keyboard.press('k')
+    P(page, "__potato.settings.set('paint', { color: '#ff0000', size: 20, alpha: 100, shape: 'rect', fill: true, cover: 'white', cshape: 'ellipse', csize: 40, ccolor: '#ffffff', csoft: 0, csep: False })".replace('False', 'false')); page.keyboard.press('k')
     k1 = P(page, D2S + "(200, 40)"); k2 = P(page, D2S + "(280, 100)"); m3 = P(page, C0 + ".layers.find(l => l.paint).mediaId")
     page.mouse.move(vb['x'] + k1[0], vb['y'] + k1[1]); page.mouse.down(); page.mouse.move(vb['x'] + k2[0], vb['y'] + k2[1], steps=4); page.mouse.up(); page.wait_for_function(C0 + ".layers.find(l => l.paint).mediaId !== '%s'" % m3); page.wait_for_timeout(200)
     kp = P(page, PX + "(240, 70)"); assert kp[0] > 250 and kp[1] > 250 and kp[2] > 250 and kp[3] == 255, kp; assert P(page, PX + "(202, 42)")[3] == 0   # 타원 바깥 모서리는 안 덮여요
@@ -151,7 +151,31 @@ with sync_playwright() as pw:
     k3 = P(page, D2S + "(200, 120)"); k4 = P(page, D2S + "(260, 170)"); page.mouse.move(vb['x'] + k3[0], vb['y'] + k3[1]); page.mouse.down(); page.mouse.move(vb['x'] + k4[0], vb['y'] + k4[1], steps=4); page.mouse.up(); page.wait_for_function(C0 + ".layers.find(l => l.paint).mediaId !== '%s'" % m4); page.wait_for_timeout(200)
     assert P(page, PX + "(230, 145)")[3] == 255; shot(page, '32f-cover')
     for _ in range(5): page.keyboard.press('Control+z')
-    assert P(page, C0 + ".layers.length") == nl; page.keyboard.press('v')
+    assert P(page, C0 + ".layers.length") == nl
+    # 가리기 붓의 나머지(8.x에서 옮김): 나중에 옮길 수 있는 흰칠, 밝게, 잡티 지우기, 문지르기, 도장, 지우기
+    def stroke(x0, y0, x1, y1):
+        s0 = P(page, D2S + "(%d, %d)" % (x0, y0)); s1 = P(page, D2S + "(%d, %d)" % (x1, y1)); page.mouse.move(vb['x'] + s0[0], vb['y'] + s0[1]); page.mouse.down(); page.mouse.move(vb['x'] + s1[0], vb['y'] + s1[1], steps=5); page.mouse.up()
+    setp = lambda js: P(page, "__potato.settings.set('paint', { ...__potato.settings.get('paint'), %s })" % js)
+    page.keyboard.press('k'); setp("cover: 'white', cshape: 'ellipse', csep: true, csoft: 0"); stroke(200, 40, 280, 100)
+    page.wait_for_function(C0 + ".layers.length === %d" % (nl + 1)); assert P(page, C0 + ".layers.at(-1).cover") is True and P(page, C0 + ".layers.at(-1).name") == '흰칠' and abs(P(page, C0 + ".layers.at(-1).x") - 198) < 6
+    page.keyboard.press('Control+z'); assert P(page, C0 + ".layers.length") == nl
+    hist = "__potato.store.history.items.at(-1).t"; base = P(page, "(async () => { const cv = %s, c = await __potato.image.flatten(cv); return [...c.getContext('2d').getImageData(100, 80, 1, 1).data]; })()" % C0)
+    for kind in ['dodge', 'heal', 'smudge', 'burn']:
+        setp("cover: '%s', cshape: 'brush', csize: 30, cstr: 80" % kind); h0 = P(page, hist); stroke(80, 80, 140, 90); page.wait_for_function(hist + " > %d" % h0); page.wait_for_timeout(150)
+        px = P(page, PX + "(100, 82)"); assert px[3] > 200, (kind, px)
+        if kind == 'dodge': assert sum(px[:3]) >= sum(base[:3]), (px, base)
+    assert page.locator('.optbar >> text=가린 곳 지우개').count() == 1 and page.locator('.optbar >> text=자동 흰칠').count() == 1; shot(page, '32g-cover-more')
+    setp("cover: 'clone'"); stroke(60, 60, 61, 60); page.wait_for_selector('.toast >> text=먼저 Alt를 누른 채'); h0 = P(page, hist)
+    s0 = P(page, D2S + "(200, 150)"); page.keyboard.down('Alt'); page.mouse.click(vb['x'] + s0[0], vb['y'] + s0[1]); page.keyboard.up('Alt'); page.wait_for_selector('.toast >> text=복사해 올 곳을 정했어요')
+    want = P(page, "(async () => { const cv = %s, c = await __potato.image.flatten(cv); return [...c.getContext('2d').getImageData(210, 150, 1, 1).data]; })()" % C0)
+    stroke(40, 200, 60, 200); page.wait_for_function(hist + " > %d" % h0); page.wait_for_timeout(150); got = P(page, PX + "(50, 200)"); assert got[3] > 200 and all(abs(got[i] - want[i]) < 12 for i in range(3)), (got, want)
+    # 지우기: 고른 레이어의 그림이 비워져요. 지우개(X)는 그리기 레이어가 골라져 있지 않아도 가린 곳을 지워요
+    P(page, "(() => { const c = %s; __potato.state.project.sel = c.layers[0].id; __potato.emit(); })()" % C0); m0 = P(page, C0 + ".layers[0].mediaId"); setp("cover: 'erase', cshape: 'rect', csoft: 0"); stroke(20, 20, 50, 50)
+    page.wait_for_function(C0 + ".layers[0].mediaId !== '%s'" % m0); page.wait_for_timeout(150)
+    assert P(page, "(async () => { const cv = %s, c = await __potato.image.flatten(cv, cv.layers[0].id); return c.getContext('2d').getImageData(35, 35, 1, 1).data[3]; })()" % C0) == 0
+    page.keyboard.press('x'); mp = P(page, C0 + ".layers.find(l => l.paint).mediaId"); stroke(80, 82, 140, 88); page.wait_for_function(C0 + ".layers.find(l => l.paint).mediaId !== '%s'" % mp); page.wait_for_timeout(150); assert P(page, PX + "(110, 85)")[3] < 40
+    for _ in range(7): page.keyboard.press('Control+z')
+    assert P(page, C0 + ".layers.length") == nl and P(page, C0 + ".layers[0].mediaId") == m0; page.keyboard.press('v')
     # 자유 변형(8.x에서 옮김): 그림판을 90도 돌리면 가로세로가 바뀌고, 한 번 더 반대로 돌리면 돌아와요
     wh0 = P(page, "[%s.w, %s.h]" % (C0, C0)); l0 = P(page, C0 + ".layers[0]"); P(page, "__potato.run('canvas.turnR')"); assert P(page, "[%s.w, %s.h]" % (C0, C0)) == wh0[::-1] and P(page, C0 + ".layers[0].rot") == (l0['rot'] + 90) % 360
     P(page, "__potato.run('canvas.turnL')"); l1 = P(page, C0 + ".layers[0]"); assert P(page, "[%s.w, %s.h]" % (C0, C0)) == wh0 and abs(l1['x'] - l0['x']) <= 1 and abs(l1['y'] - l0['y']) <= 1 and l1['rot'] == l0['rot']
