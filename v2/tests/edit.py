@@ -116,6 +116,13 @@ with sync_playwright() as pw:
     P(page, "__potato.run('file.exportSet')")
     with page.expect_download() as dl: page.click('.dlg button:has-text("내보내기")')
     import zipfile as _z; zn = _z.ZipFile(dl.value.path()).namelist(); assert len(zn) == 4 and sum(n.endswith('.jpg') for n in zn) == 2, zn
+    # 8.x에서 옮긴 것: 섞는 법, 뒤집기, 고른 곳 모자이크(새 레이어), 고른 곳으로 자르기
+    C0 = "__potato.state.project.canvases[0]"
+    P(page, "(() => { const c = %s; __potato.state.layerId = c.layers[0].id; __potato.emit(); })()" % C0); assert page.locator('select[aria-label="섞는 법"]').count() == 1
+    P(page, "__potato.run('layer.flipX')"); assert P(page, C0 + ".layers[0].flipX") is True; page.keyboard.press('Control+z')
+    nl = P(page, C0 + ".layers.length"); P(page, "__potato.sel.selRect('new', 30, 30, 120, 90)"); P(page, "__potato.run('sel.mosaic')"); page.wait_for_function(C0 + ".layers.length === %d" % (nl + 1)); assert P(page, C0 + ".layers.at(-1).name") == '모자이크'
+    page.keyboard.press('Control+z'); wh = P(page, "[%s.w, %s.h]" % (C0, C0)); P(page, "__potato.sel.selRect('new', 30, 30, 120, 90)"); P(page, "__potato.run('sel.crop')"); assert P(page, "[%s.w, %s.h]" % (C0, C0)) == [120, 90]
+    page.keyboard.press('Control+z'); assert P(page, "[%s.w, %s.h]" % (C0, C0)) == wh
     # 가림막: 고른 곳만 보이게 하면 바깥은 투명해지고, 없애면 돌아와요
     A = "(async (x, y) => { const cv = __potato.state.project.canvases[0], c = await __potato.image.flatten(cv, cv.layers[0].id); return c.getContext('2d').getImageData(x, y, 1, 1).data[3]; })"
     lid = P(page, "__potato.state.layerId"); P(page, "(() => { __potato.state.layerId = __potato.state.project.canvases[0].layers[0].id; __potato.sel.selRect('new', 20, 20, 60, 60); __potato.emit(); })()")

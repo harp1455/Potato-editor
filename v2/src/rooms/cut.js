@@ -30,6 +30,7 @@ function overview() {
       h('div.btn-row', null, h('span.grow', null, `${i + 1}. ${p.name}`), h('button.icon-btn', { title: '앞으로 옮기기', 'aria-label': `${p.name} 앞으로 옮기기`, disabled: i === 0, onclick: () => mv(-1) }, icon('up')), h('button.icon-btn', { title: '뒤로 옮기기', 'aria-label': `${p.name} 뒤로 옮기기`, disabled: i === pages().length - 1, onclick: () => mv(1) }, icon('down')))); }));
   paint();
 }
+let clip = [];   // 복사해 둔 요소들
 const elOf = () => { const p = pageOf(); return p ? p.els.find(e => e.id === V.sel) || null : null; };
 // 함께 고른 요소들: Shift를 누르고 누르면 더해져요. 맨 마지막에 누른 것이 설정을 보여 주는 요소예요.
 const extra = () => (V.more && V.more.anchor === V.sel ? V.more.ids : null);
@@ -131,10 +132,10 @@ const toPage = (sx, sy) => ({ x: (sx - V.ox) / V.zoom, y: (sy - V.oy) / V.zoom }
 const hit = (pg, p) => { for (let i = pg.els.length - 1; i >= 0; i--) { const e = pg.els[i]; if (p.x >= e.x && p.y >= e.y && p.x <= e.x + e.w && p.y <= e.y + e.h) return e; } return null; };
 
 // ---- 번역: 페이지의 대사를 모아 제미나이에 보내고, 같은 차례로 받아 넣어요 ----
-const LANGS = [['Korean', '한국어'], ['English', '영어'], ['Japanese', '일본어'], ['Simplified Chinese', '중국어 (간체)'], ['Traditional Chinese', '중국어 (번체)'], ['Spanish', '스페인어']];
+const LANGS = [['polish', '번역하지 않고 다듬기만'], ['Korean', '한국어'], ['English', '영어'], ['Japanese', '일본어'], ['Simplified Chinese', '중국어 (간체)'], ['Traditional Chinese', '중국어 (번체)'], ['Spanish', '스페인어']];
 export async function translateTexts(texts, lang, tone) {
   const r = await generate('translate', settings.get('textModel'), {
-    systemInstruction: { parts: [{ text: `You translate comic dialogue into ${lang}. The input is a JSON array of lines in reading order. Return ONLY a JSON array of strings with exactly the same number of items in the same order. Keep line breaks (\\n) where they help the line fit a speech bubble. Keep names, sound effects and tone natural for ${lang} comics.${tone ? ' Tone: ' + tone : ''}` }] },
+    systemInstruction: { parts: [{ text: lang === 'polish' ? `You polish comic dialogue without translating it: keep each line in its original language and meaning, and make it read naturally as spoken dialogue (fix awkward wording, spacing and punctuation). The input is a JSON array of lines in reading order. Return ONLY a JSON array of strings with exactly the same number of items in the same order. Keep line breaks (\\n) where they help the line fit a speech bubble.${tone ? ' Tone: ' + tone : ''}` : `You translate comic dialogue into ${lang}. The input is a JSON array of lines in reading order. Return ONLY a JSON array of strings with exactly the same number of items in the same order. Keep line breaks (\\n) where they help the line fit a speech bubble. Keep names, sound effects and tone natural for ${lang} comics.${tone ? ' Tone: ' + tone : ''}` }] },
     contents: [{ role: 'user', parts: [{ text: JSON.stringify(texts) }] }], generationConfig: { responseMimeType: 'application/json', temperature: 0.4 } });
   let out; try { out = JSON.parse(r.text.replace(/^```(?:json)?|```$/g, '').trim()); } catch (_) { throw new Error('제미나이의 답을 읽지 못했어요. 다시 해 주세요.'); }
   if (!Array.isArray(out) || out.length !== texts.length) throw new Error(`대사 ${texts.length}줄을 보냈는데 ${Array.isArray(out) ? out.length : 0}줄이 돌아왔어요. 다시 해 주세요.`);
@@ -314,6 +315,7 @@ export const cutRoom = {
   zoomText: () => pageOf() ? Math.round(V.zoom * 100) + '%' : '',
 };
 
+export const pick = id => { V.sel = id; V.more = null; emit(); };   // 요소 하나를 골라요
 export function registerCutCmds() {
   const on = () => !!cv && !!pageOf(), has = () => on() && !!elOf();
   const order = front => { const pg = pageOf(), e = elOf(); pg.els.splice(pg.els.indexOf(e), 1); front ? pg.els.push(e) : pg.els.unshift(e); commit(front ? '맨 앞으로' : '맨 뒤로'); };
@@ -322,6 +324,12 @@ export function registerCutCmds() {
   addCmd({ id: 'cut.deletePage', title: '페이지 지우기', menu: '컷', enabled: on, run: () => { const pg = pageOf(), i = pages().indexOf(pg); pages().splice(i, 1); state.project.activePage = (pages()[Math.min(i, pages().length - 1)] || {}).id || null; V.sel = null; V.fitted = null; commit('페이지 지우기'); } });
   addCmd({ id: 'cut.front', title: '맨 앞으로', menu: '컷', group: 'el', enabled: has, run: () => order(true) });
   addCmd({ id: 'cut.back', title: '맨 뒤로', menu: '컷', group: 'el', enabled: has, run: () => order(false) });
+  // 요소 복사·붙여넣기: 다른 페이지에도 붙일 수 있어요
+  addCmd({ id: 'cut.copy', title: '요소 복사', menu: '컷', group: 'el', keys: 'Ctrl+C', enabled: has, run: () => { clip = group().map(e => JSON.parse(JSON.stringify(e))); toast(`요소 ${clip.length}개를 복사했어요.`); } });
+  addCmd({ id: 'cut.paste', title: '요소 붙여넣기', menu: '컷', group: 'el', keys: 'Ctrl+V', enabled: () => !!pageOf() && clip.length > 0, run: () => { const pg = pageOf(), same = clip.some(c => pg.els.some(e => e.x === c.x && e.y === c.y)), d = same ? 24 : 0, ns = clip.map(c => ({ ...JSON.parse(JSON.stringify(c)), id: uid('e'), x: c.x + d, y: c.y + d, ...(c.type === 'bubble' ? { tx: c.tx + d, ty: c.ty + d } : {}) })); pg.els.push(...ns); V.sel = ns.at(-1).id; V.more = { anchor: V.sel, ids: new Set(ns.slice(0, -1).map(n => n.id)) }; clip = ns.map(n => JSON.parse(JSON.stringify(n))); commit('요소 붙여넣기'); } });
+  // 컷 나누기: 고른 컷을 가로나 세로로 똑같이 나눠요 (사이 틈은 컷 테두리 굵기의 3배)
+  const splitCmd = (id, title, cols, rows) => addCmd({ id, title, menu: '컷', group: 'split', enabled: () => !!elOf() && elOf().type === 'panel', run: () => { const pg = pageOf(), e = elOf(), gap = Math.max(8, Math.round((e.bw || 4) * 3)), w = (e.w - gap * (cols - 1)) / cols, hh = (e.h - gap * (rows - 1)) / rows, i = pg.els.indexOf(e), ns = []; for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) ns.push({ ...JSON.parse(JSON.stringify(e)), id: r || c ? uid('e') : e.id, x: Math.round(e.x + c * (w + gap)), y: Math.round(e.y + r * (hh + gap)), w: Math.round(w), h: Math.round(hh), ...(r || c ? { mediaId: null } : {}) }); pg.els.splice(i, 1, ...ns); commit(title); } });
+  splitCmd('cut.splitV', '컷을 좌우 둘로 나누기', 2, 1); splitCmd('cut.splitH', '컷을 위아래 둘로 나누기', 1, 2); splitCmd('cut.split3V', '컷을 좌우 셋으로 나누기', 3, 1); splitCmd('cut.split3H', '컷을 위아래 셋으로 나누기', 1, 3); splitCmd('cut.split4', '컷을 넷으로 나누기', 2, 2);
   addCmd({ id: 'cut.dup', title: '요소 복제', menu: '컷', group: 'el', enabled: has, run: () => { const pg = pageOf(), e = elOf(), n = { ...e, id: uid('e'), x: e.x + 24, y: e.y + 24, ...(e.type === 'bubble' ? { tx: e.tx + 24, ty: e.ty + 24 } : {}) }; pg.els.push(n); V.sel = n.id; commit('요소 복제'); } });
   addCmd({ id: 'cut.delete', title: '요소 지우기', menu: '컷', group: 'el', enabled: has, run: () => { const pg = pageOf(), g = new Set(group().map(e => e.id)); pg.els = pg.els.filter(e => !g.has(e.id)); V.sel = null; commit(g.size > 1 ? `요소 ${g.size}개 지우기` : '요소 지우기'); } });
   addCmd({ id: 'cut.overview', title: '페이지 한눈에 보기…', menu: '컷', words: '전체 목록 순서', enabled: () => pages().length > 0, run: overview });

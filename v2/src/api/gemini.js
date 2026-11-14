@@ -89,8 +89,15 @@ const WHY = {
   BLOCKLIST: '구글이 금지어로 정한 말이 들어 있어요.',
   RECITATION: '이미 있는 글과 너무 비슷해서 막혔어요.',
   IMAGE_SAFETY: '구글의 그림 거름막이 막았어요. 그림 거름막은 안전 설정으로 끌 수 없어요.',
+  SPII: '개인 정보로 보이는 내용이 있어서 막혔어요.',
+  LANGUAGE: '이 모델이 지원하지 않는 언어예요.',
+  NO_IMAGE: '모델이 그림을 만들지 않았어요.',
+  IMAGE_PROHIBITED_CONTENT: '구글이 어떤 설정으로도 허용하지 않는 그림으로 판단했어요.',
+  IMAGE_OTHER: '구글이 그림을 만들다가 이유를 밝히지 않고 멈췄어요.',
   OTHER: '구글이 이유를 밝히지 않고 막았어요.',
 };
+// 모르는 이유는 구글이 준 이름을 그대로 붙여 보여 줘요 (무엇 때문인지 찾을 수 있게)
+const why = r => WHY[r] || `구글이 준 이유: ${r}`;
 
 export function ready() {
   if (!settings.get('adult')) throw new ApiError('adult', '성인 확인을 마친 뒤에 쓸 수 있어요. 설정 > AI와 API에서 확인해 주세요.');
@@ -124,11 +131,14 @@ export async function generate(kind, model, body, opt = {}) {
     else throw e;
   }
   const fb = j.promptFeedback && j.promptFeedback.blockReason;
-  if (fb) throw new ApiError('blocked', '보낸 내용이 막혔어요. ' + (WHY[fb] || WHY.OTHER), fb);
+  if (fb) throw new ApiError('blocked', '보낸 내용이 막혔어요. ' + why(fb), fb);
   const c = (j.candidates || [])[0];
   if (!c) throw new ApiError('empty', '제미나이가 아무것도 돌려주지 않았어요.');
   const text = ((c.content && c.content.parts) || []).map(p => p.text || '').join('');
-  if (!text && c.finishReason && c.finishReason !== 'STOP') throw new ApiError('blocked', '답을 만들다가 막혔어요. ' + (WHY[c.finishReason] || WHY.OTHER), c.finishReason);
+  // 길이 제한에 걸린 것은 막힌 게 아니에요 (생각하는 모델은 생각에 쓴 만큼도 길이에 들어가요)
+  if (!text && c.finishReason === 'MAX_TOKENS') { if (opt.allowCut) return { text: '', finish: 'MAX_TOKENS', usage: j.usageMetadata || null, raw: j }; throw new ApiError('cut', '답이 길이 제한에 걸려 나오지 못했어요. 한 번에 보내는 양을 줄여서 다시 해 주세요.', 'MAX_TOKENS'); }
+  const pic = ((c.content && c.content.parts) || []).some(p => p.inlineData);
+  if (!text && !pic && c.finishReason && c.finishReason !== 'STOP') throw new ApiError('blocked', '답을 만들다가 막혔어요. ' + why(c.finishReason), c.finishReason);
   logUse(kind, model, j.usageMetadata);
   return { text, finish: c.finishReason || '', usage: j.usageMetadata || null, raw: j };
 }
@@ -136,8 +146,9 @@ export async function generate(kind, model, body, opt = {}) {
 // 설정 창의 '연결 확인': 키가 맞는지, 안전 설정을 끈 요청을 서버가 받아 주는지 한 번에 봐요.
 export async function check() {
   ready();
-  const r = await generate('write', settings.get('textModel'), { contents: [{ role: 'user', parts: [{ text: 'Reply with the single word: ok' }] }], generationConfig: { maxOutputTokens: 16 } });
-  return r.text.trim();
+  // 길이 제한을 걸지 않아요: 생각하는 모델은 생각만으로 제한을 다 써서 답이 비어 버려요 (알파 14까지 '막혔어요'로 잘못 나오던 까닭)
+  const r = await generate('write', settings.get('textModel'), { contents: [{ role: 'user', parts: [{ text: 'Reply with the single word: ok' }] }] }, { allowCut: true });
+  return r.text.trim() || 'ok';
 }
 
 // ---- Interactions API (목소리·영상처럼 새 모델이 쓰는 길) ----

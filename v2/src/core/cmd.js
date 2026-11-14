@@ -41,7 +41,9 @@ export function handleKey(e) {
   if (!name) return false;
   if (typing && !/^Ctrl\+|^F\d/.test(name)) return false;
   if (typing && /^Ctrl\+(Z|Y|A|C|V|X|Shift\+Z)$/.test(name)) return false;
+  const room = settings.get('room'), own = { tool: 'image', layer: 'image', sel: 'image', video: 'video', cut: 'cut' };
   for (const c of list.values()) {
+    const r = own[c.id.split('.')[0]]; if (r && r !== room) continue;   // 작업실 전용 단축키는 그 작업실에서만
     if (keysOf(c.id) === name && canRun(c)) { e.preventDefault(); run(c.id); return true; }
   }
   return false;

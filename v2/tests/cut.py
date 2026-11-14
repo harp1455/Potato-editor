@@ -69,6 +69,11 @@ with sync_playwright() as pw:
     assert P(page, "__potato.cut.draftLines(__potato.state.project.pages[0], '둘이 인사해요')") == nb and P(page, ELS + ".find(e => e.type === 'bubble').text") == '초안 1'
     db = P(page, "__db"); assert 'CRITICAL' in db['systemInstruction']['parts'][0]['text'] and len(db['safetySettings']) == 5 and db['contents'][0]['parts'][0]['inlineData']
     P(page, "(() => { window.fetch = window.__f0; })()")
+    # 8.x에서 옮긴 것: 요소 복사·붙여넣기, 컷 나누기
+    page.keyboard.press('Escape'); pe = P(page, ELS + ".find(e => e.type === 'panel')"); n2 = P(page, ELS + ".length")
+    P(page, "__potato.cut.pick('%s')" % pe['id']); page.keyboard.press('Control+c'); page.keyboard.press('Control+v'); assert P(page, ELS + ".length") == n2 + 1 and P(page, ELS + ".at(-1).x") == pe['x'] + 24
+    page.keyboard.press('Control+z'); P(page, "__potato.cut.pick('%s')" % pe['id']); P(page, "__potato.run('cut.splitV')"); sp = P(page, ELS + ".filter(e => e.type === 'panel' && e.y === %d && e.h === %d)" % (pe['y'], pe['h'])); assert P(page, ELS + ".length") == n2 + 1 and len(sp) >= 2 and sp[0]['w'] < pe['w'] / 2, sp
+    page.keyboard.press('Control+z'); assert P(page, ELS + ".length") == n2
     # 효과음: 크게, 기울여서 들어가요
     n1 = P(page, ELS + ".length"); P(page, "__potato.run('cut.sfx')"); sf = P(page, ELS + ".at(-1)"); assert sf['rot'] == -12 and sf['size'] > 80 and page.locator('.vid-side input[aria-label="회전"]').count() == 1
     shot(page, '85-sfx'); page.keyboard.press('Control+z'); assert P(page, ELS + ".length") == n1

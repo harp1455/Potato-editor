@@ -115,7 +115,7 @@ function syncAudio(s, restart) {
   const live = new Set();
   for (const a of s ? tracksOf(s) : []) {
     live.add(a.id); const o = AUD.get(a.id); if (!o) { audOf(a).then(() => syncAudio(seqOf())); continue; }
-    const on = V.playing && V.t >= a.t0 && V.t < a.t0 + lenOf(a, o); o.el.volume = Math.min(1, a.vol ?? 1);
+    const on = V.playing && V.t >= a.t0 && V.t < a.t0 + lenOf(a, o); { const L = lenOf(a, o), q = V.t - a.t0; o.el.volume = clamp((a.vol ?? 1) * Math.min(1, a.fin ? q / a.fin : 1, a.fout ? (L - q) / a.fout : 1), 0, 1); }
     if (on && (o.el.paused || restart)) { o.el.currentTime = (a.from || 0) + (V.t - a.t0); o.el.play().catch(() => {}); } else if (!on && !o.el.paused) o.el.pause();
   }
   for (const [id, o] of AUD) if (!live.has(id)) o.el.pause();
@@ -126,7 +126,7 @@ async function audioBuffer(s, secs) {
   for (const a of T) {
     const b = await idb.get('blobs', 'aud:' + a.id); if (!b) continue;
     const src = await ac.decodeAudioData(await b.arrayBuffer()), r = src.sampleRate, f0 = Math.round((a.from || 0) * r), len = Math.round((a.dur ?? (src.duration - (a.from || 0))) * r), o0 = Math.round(a.t0 * 48000), vol = a.vol ?? 1; any = true;
-    for (let c = 0; c < 2; c++) { const d = out.getChannelData(c), f = src.getChannelData(Math.min(c, src.numberOfChannels - 1)), k = r / 48000, m = Math.min(n - o0, Math.floor(Math.min(len, f.length - f0) / k)); for (let q = Math.max(0, -o0); q < m; q++) d[o0 + q] += f[f0 + Math.floor(q * k)] * vol; }
+    for (let c = 0; c < 2; c++) { const d = out.getChannelData(c), f = src.getChannelData(Math.min(c, src.numberOfChannels - 1)), k = r / 48000, m = Math.min(n - o0, Math.floor(Math.min(len, f.length - f0) / k)); const fi = (a.fin || 0) * 48000, fo = (a.fout || 0) * 48000; for (let q = Math.max(0, -o0); q < m; q++) { const g = Math.min(1, fi ? q / fi : 1, fo ? (m - q) / fo : 1); d[o0 + q] += f[f0 + Math.floor(q * k)] * vol * g; } }
   }
   ac.close(); return any ? out : null;
 }
@@ -271,6 +271,7 @@ export const videoRoom = {
         h('h3.sec', null, '소리'),
         ...tracksOf(s).map((a0, ti) => { const A = () => ownTracks(s)[ti]; return h('div.cap', null, h('p.clip-text', { title: a0.name }, a0.name), waveBox(new Proxy(a0, { set: (_, k, v) => { A()[k] = v; a0[k] = v; return true; } })),
           h('div.field-row', null, num('영상의', +(a0.t0 || 0).toFixed(2), 0.1, 0, v => { A().t0 = Math.max(0, v); commit('소리 시작'); }, '초부터'), num('크기', Math.round((a0.vol ?? 1) * 100), 5, 0, v => { A().vol = clamp(v, 0, 200) / 100; commit('소리 크기'); }, '%')),
+          h('div.field-row', null, num('서서히 커짐', a0.fin || 0, 0.1, 0, v => { A().fin = clamp(v, 0, 30); commit('소리 서서히'); }, '초'), num('서서히 작아짐', a0.fout || 0, 0.1, 0, v => { A().fout = clamp(v, 0, 30); commit('소리 서서히'); }, '초')),
           h('div.btn-row', null, h('button.btn.small', { onclick: () => { A().t0 = +V.t.toFixed(2); commit('소리 시작'); } }, '지금 시각부터 나오게'), h('span.grow'), h('button.icon-btn', { title: '소리 빼기', 'aria-label': `${a0.name} 빼기`, onclick: () => { ownTracks(s).splice(ti, 1); commit('소리 빼기'); } }, icon('trash')))); }),
         h('button.btn.small', { onclick: () => run('video.audio') }, '소리 파일 넣기'),
         tracksOf(s).length ? h('p.panel-note', null, '소리는 MP4로 내보낼 때만 들어가요. 여러 개를 넣으면 겹쳐서 나와요.') : null,
@@ -333,6 +334,7 @@ async function interp() {
   } catch (e) { toast('중간 장면을 만들지 못했어요. ' + (e.message || ''), 'err'); }
 }
 
+export const seek = t => { V.t = t; emit(); };   // 재생 막대를 옮겨요
 export function registerVideoCmds() {
   const inRoom = () => !!cv, has = () => inRoom() && !!seqOf() && V.sel.size > 0;
   const shift = d => { const s = seqOf(), ids = s.scenes.filter(x => V.sel.has(x.id)); (d < 0 ? ids : ids.reverse()).forEach(x => { const i = s.scenes.indexOf(x), j = i + d; if (j >= 0 && j < s.scenes.length && !V.sel.has(s.scenes[j].id)) { s.scenes.splice(i, 1); s.scenes.splice(j, 0, x); } }); commit('장면 옮기기'); };
@@ -342,6 +344,8 @@ export function registerVideoCmds() {
   addCmd({ id: 'video.play', title: '재생·멈춤', menu: '영상', group: 'play', enabled: () => inRoom() && !!seqOf(), run: () => play(!V.playing) });
   addCmd({ id: 'video.left', title: '장면을 앞으로', menu: '영상', group: 'scene', enabled: has, run: () => shift(-1) });
   addCmd({ id: 'video.right', title: '장면을 뒤로', menu: '영상', group: 'scene', enabled: has, run: () => shift(1) });
+  addCmd({ id: 'video.split', title: '지금 시각에서 장면 나누기', menu: '영상', group: 'scene', keys: 'Ctrl+B', words: '자르기 컷 split', enabled: () => { const s = seqOf(); return !!s && V.t > 0.05 && V.t < total(s) - 0.05; }, run: () => { const s = seqOf(); let a = 0; for (const x of s.scenes) { if (V.t < a + x.dur) { const d1 = +(V.t - a).toFixed(3); if (d1 < 0.05 || x.dur - d1 < 0.05) return; const i = s.scenes.indexOf(x), y = { ...x, id: uid('s'), dur: +(x.dur - d1).toFixed(3), fade: 0 }; delete y.keys; x.dur = d1; s.scenes.splice(i + 1, 0, y); V.sel = new Set([y.id]); commit('장면 나누기'); return; } a += x.dur; } } });
+  addCmd({ id: 'video.frame', title: '지금 화면을 PNG로 저장', menu: '영상', group: 'out', enabled: () => !!seqOf() && seqOf().scenes.length > 0, run: async () => { const s = seqOf(), c = document.createElement('canvas'); c.width = s.w; c.height = s.h; renderSeq(c.getContext('2d'), s, V.t, s.w, s.h); const { download } = await import('../core/files.js'); download(await new Promise(r => c.toBlob(r, 'image/png')), `${s.name} ${V.t.toFixed(2)}초.png`); } });
   addCmd({ id: 'video.dup', title: '장면 복제', menu: '영상', group: 'scene', enabled: has, run: () => { const s = seqOf(); [...s.scenes].forEach(x => { if (V.sel.has(x.id)) s.scenes.splice(s.scenes.indexOf(x) + 1, 0, { ...x, id: uid('s') }); }); commit('장면 복제'); } });
   addCmd({ id: 'video.delete', title: '장면 지우기', menu: '영상', group: 'scene', enabled: has, run: () => { const s = seqOf(); s.scenes = s.scenes.filter(x => !V.sel.has(x.id)); V.sel.clear(); commit('장면 지우기'); } });
   addCmd({ id: 'video.import', title: '영상·움짤 파일을 장면으로 불러오기…', menu: '영상', group: 'in', words: 'mp4 gif webp 불러오기', run: importClip });

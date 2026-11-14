@@ -103,9 +103,10 @@ export function paint(g, c, only) {
     if (!l.visible || (only && l.id !== only)) continue;
     const bmp = state.bitmaps.get(l.mediaId); if (!bmp) { ensureBitmap(l.mediaId); continue; }
     const s = layerSize(l);
-    g.save(); g.globalAlpha = l.opacity; g.filter = filterOf(l);
+    g.save(); g.globalAlpha = l.opacity; g.filter = filterOf(l); if (l.blend && !only) g.globalCompositeOperation = l.blend;
     g.translate(l.x + s.w / 2, l.y + s.h / 2); g.rotate(l.rot * Math.PI / 180);
     g.imageSmoothingQuality = 'high';
+    if (l.flipX || l.flipY) g.scale(l.flipX ? -1 : 1, l.flipY ? -1 : 1);
     g.drawImage(l.maskId ? masked(l, bmp) : bmp, -s.w / 2, -s.h / 2, s.w, s.h);
     g.restore();
   }
@@ -279,6 +280,25 @@ export async function layerFromBlob(c, blob, name, { x = 0, y = 0, scale = 1, hi
 
 // ---- 고른 곳으로 하는 일 ----
 // 고른 곳을 새 레이어로: 레이어를 골랐으면 그 레이어에서만, 아니면 보이는 그대로
+// 섞는 법: 아래 레이어와 색을 어떻게 섞을지
+export const BLENDS = [['', '보통'], ['multiply', '곱하기 (어둡게)'], ['screen', '스크린 (밝게)'], ['overlay', '오버레이'], ['soft-light', '부드러운 빛'], ['hard-light', '강한 빛'], ['darken', '어둡게만'], ['lighten', '밝게만'], ['color-dodge', '색 닷지'], ['color-burn', '색 번'], ['difference', '차이'], ['hue', '색조만'], ['saturation', '채도만'], ['color', '색만'], ['luminosity', '밝기만']];
+// 고른 곳에 효과를 입힌 조각을 새 레이어로 올려요 (원본은 그대로). kind = blur | mosaic | fill
+async function selEffect(kind, color) {
+  const c = canvasOf(), b = selBounds(); if (!c || !b) return;
+  const src = await flatten(c), t = document.createElement('canvas'); t.width = b.w; t.height = b.h; const g = t.getContext('2d'), size = Math.max(4, Math.round(Math.max(b.w, b.h) / (kind === 'mosaic' ? 18 : 28)));
+  if (kind === 'fill') { g.fillStyle = color || '#ffffff'; g.fillRect(0, 0, b.w, b.h); }
+  else if (kind === 'mosaic') { const sw = Math.max(1, Math.round(b.w / size)), sh = Math.max(1, Math.round(b.h / size)), sm = document.createElement('canvas'); sm.width = sw; sm.height = sh; sm.getContext('2d').drawImage(src, b.x, b.y, b.w, b.h, 0, 0, sw, sh); g.imageSmoothingEnabled = false; g.drawImage(sm, 0, 0, b.w, b.h); }
+  else { g.filter = `blur(${size}px)`; g.drawImage(src, -b.x, -b.y); g.filter = 'none'; }
+  g.globalCompositeOperation = 'destination-in'; g.drawImage(sel.cv, -b.x, -b.y);
+  const name = { blur: '흐리게', mosaic: '모자이크', fill: '색 채우기' }[kind];
+  await layerFromBlob(c, await toBlob(t), name, { x: b.x, y: b.y }); commit('고른 곳 ' + name);
+}
+// 고른 곳의 네모로 그림판을 잘라요. 레이어는 그대로 두고 자리만 옮겨요(되돌릴 수 있어요)
+function cropToSel() {
+  const c = canvasOf(), b = selBounds(); if (!c || !b) return;
+  c.layers.forEach(l => { l.x -= b.x; l.y -= b.y; }); if (c.lines) c.lines = { v: (c.lines.v || []).map(x => x - b.x), h: (c.lines.h || []).map(y => y - b.y) };
+  c.w = b.w; c.h = b.h; selNone(); commit('고른 곳으로 자르기'); fit();
+}
 async function selToLayer() {
   const c = canvasOf(), b = selBounds(); if (!c || !b) return;
   const cur = layerOf(), src = await flatten(c, cur ? cur.id : null);
@@ -490,6 +510,13 @@ export function registerImageCmds() {
   addCmd({ id: 'view.100', title: '실제 크기 (100%)', menu: '보기', keys: 'Ctrl+1', enabled: hasCanvas, run: () => zoomAt(1 / view.zoom) });
   addCmd({ id: 'view.in', title: '확대', menu: '보기', keys: 'Ctrl+=', enabled: hasCanvas, run: () => zoomAt(1.25) });
   addCmd({ id: 'view.out', title: '축소', menu: '보기', keys: 'Ctrl+-', enabled: hasCanvas, run: () => zoomAt(0.8) });
+  addCmd({ id: 'layer.flipX', title: '레이어 좌우로 뒤집기', menu: '레이어', group: 'flip', words: '반전 flip', enabled: hasLayer, run: () => { const l = layerOf(); l.flipX = !l.flipX; commit('좌우로 뒤집기'); } });
+  addCmd({ id: 'layer.flipY', title: '레이어 위아래로 뒤집기', menu: '레이어', group: 'flip', words: '반전 flip', enabled: hasLayer, run: () => { const l = layerOf(); l.flipY = !l.flipY; commit('위아래로 뒤집기'); } });
+  addCmd({ id: 'layer.rot90', title: '레이어 90도 돌리기', menu: '레이어', group: 'flip', enabled: hasLayer, run: () => { const l = layerOf(); l.rot = ((l.rot || 0) + 90) % 360; commit('90도 돌리기'); } });
+  addCmd({ id: 'sel.crop', title: '고른 곳으로 그림판 자르기', menu: '고르기', group: 'fx', words: '크롭 crop 잘라내기', enabled: hasSel, run: cropToSel });
+  addCmd({ id: 'sel.blur', title: '고른 곳 흐리게', menu: '고르기', group: 'fx', enabled: hasSel, run: () => selEffect('blur') });
+  addCmd({ id: 'sel.mosaic', title: '고른 곳 모자이크', menu: '고르기', group: 'fx', enabled: hasSel, run: () => selEffect('mosaic') });
+  addCmd({ id: 'sel.fill', title: '고른 곳 색 채우기…', menu: '고르기', group: 'fx', enabled: hasSel, run: () => { const i = h('input', { type: 'color', value: settings.get('fillColor') || '#ffffff', 'aria-label': '채울 색' }); dialog({ title: '고른 곳 색 채우기', body: h('div.vid-form', null, h('label.field', null, h('span.field-name', null, '색'), i), h('p.dlg-text', null, '고른 곳을 이 색으로 채운 조각을 새 레이어로 올려요.')), buttons: [{ label: '취소' }, { label: '채우기', primary: true, run: () => { settings.set('fillColor', i.value); selEffect('fill', i.value); } }] }); } });
   addCmd({ id: 'layer.dup', title: '레이어 복제', menu: '레이어', keys: 'Ctrl+J', enabled: hasLayer, run: () => { const c = canvasOf(), l = layerOf(), n = { ...l, ...(l.adj ? { adj: { ...l.adj } } : {}), id: uid('l'), name: l.name + ' 복사', x: l.x + 20, y: l.y + 20 }; c.layers.splice(c.layers.indexOf(l) + 1, 0, n); state.project.sel = n.id; commit('레이어 복제'); } });
   addCmd({ id: 'layer.up', title: '레이어 위로', menu: '레이어', keys: 'Ctrl+]', enabled: hasLayer, run: () => moveLayer(1) });
   addCmd({ id: 'layer.down', title: '레이어 아래로', menu: '레이어', keys: 'Ctrl+[', enabled: hasLayer, run: () => moveLayer(-1) });

@@ -2,7 +2,7 @@
 import { h, icon } from './dom.js';
 import { state, commit, emit, canvasOf, layerOf, history, jump } from '../core/store.js';
 import { run } from '../core/cmd.js';
-import { draw, ADJ, TONE, CURVE0, curveAt } from '../rooms/image.js';
+import { draw, ADJ, TONE, CURVE0, curveAt, BLENDS } from '../rooms/image.js';
 import { drag } from './dom.js';
 import { showMenu, cmdItem } from './overlay.js';
 import { cmd } from '../core/cmd.js';
@@ -79,6 +79,7 @@ export const PANELS = {
         h('div.field-row', null, num('크기', +(l.scale * 100).toFixed(1), 1, v => { l.scale = Math.min(50, Math.max(0.01, v / 100)); commit('크기'); }, '%'), num('회전', l.rot, 1, v => { l.rot = v; commit('회전'); }, '°')),
         h('h3.sec', null, '보이기'),
         h('label.field', null, h('span.field-name', null, '불투명도'), op, opv),
+        h('label.field', null, h('span.field-name', null, '섞는 법'), h('select.text', { 'aria-label': '섞는 법', onchange: e => { if (e.target.value) l.blend = e.target.value; else delete l.blend; commit('섞는 법'); } }, BLENDS.map(([v, t]) => h('option', { value: v, selected: (l.blend || '') === v }, t)))),
         h('h3.sec', null, '보정'),
         ...[...ADJ, ...TONE].map(([k, label, min, max]) => {
           const v = (l.adj && l.adj[k]) || 0, out = h('span.field-unit', null, String(v));

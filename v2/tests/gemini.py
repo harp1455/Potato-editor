@@ -64,6 +64,16 @@ with sync_playwright() as pw:
         const src = document.createElement('canvas'); src.width = 20; src.height = 10;
         const blob = await __potato.gem.editByText(src, 'make it blue', 'gemini-3.1-flash-image'); window.fetch = f; return [blob.type, blob.size > 50]; })()""")
     eb = P(page, "__eb"); assert ok == ['image/png', True] and 'gemini-3.1-flash-image:generateContent' in eb['u'] and eb['b']['generationConfig']['responseModalities'] == ['TEXT', 'IMAGE'] and len(eb['b']['safetySettings']) == 5 and 'CRITICAL' in eb['b']['systemInstruction']['parts'][0]['text'] and eb['b']['contents'][0]['parts'][1]['text'] == 'make it blue'
+    # 길이 제한(MAX_TOKENS)은 '막힘'이 아니에요. 연결 확인은 제한 없이 보내고, 모르는 이유는 이름을 그대로 보여 줘요
+    rr = P(page, """(async () => { const f = window.fetch, out = []; let sent = null;
+        const fake = body => { window.fetch = async (u, o) => { sent = JSON.parse(o.body); return new Response(JSON.stringify(body), { status: 200 }); }; };
+        fake({ candidates: [{ content: { parts: [] }, finishReason: 'MAX_TOKENS' }], usageMetadata: {} });
+        out.push(await __potato.api.check()); out.push('maxOutputTokens' in (sent.generationConfig || {}));
+        try { await __potato.api.generate('write', 'm', { contents: [] }); out.push('no'); } catch (e) { out.push(e.code + ':' + e.message); }
+        fake({ candidates: [{ content: { parts: [] }, finishReason: 'WEIRD_NEW' }] });
+        try { await __potato.api.generate('write', 'm', { contents: [] }); out.push('no'); } catch (e) { out.push(e.message); }
+        window.fetch = f; return out; })()""")
+    assert rr[0] == 'ok' and rr[1] is False and rr[2].startswith('cut:') and '막혔' not in rr[2] and 'WEIRD_NEW' in rr[3], rr
     # 금액 어림: 요금표에 있는 모델은 원과 달러로, 합계는 오늘·이번 달·전체로 보여요
     P(page, "localStorage.setItem('potato2.usage', JSON.stringify([{ t: Date.now(), kind: 'translate', model: 'gemini-3.8-flash', in: 1000000, out: 0, th: 0 }, { t: Date.now(), kind: 'nai generate', model: 'nai-diffusion-4-5-full', size: '832 × 1216', steps: 28 }]))")
     P(page, "__potato.run('help.usage')"); page.wait_for_selector('.dlg >> text=API 사용 기록')

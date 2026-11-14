@@ -103,6 +103,12 @@ with sync_playwright() as pw:
     P(page, "(() => { const s = __potato.state.project.sequences[0], x = s.scenes[0]; s.overs = []; delete x.move; x.keys = [{ t: 1, zoom: 180, x: 0, y: 0 }, { t: 2, zoom: 100, x: 0, y: 0 }]; __potato.emit(); })()")
     a, b, c = P(page, R + "(0.02)"), P(page, R + "(1.0)"), P(page, R + "(1.98)"); assert a != b and b != c, (a, b, c)
     page.click('.vid-scene >> nth=0'); assert page.locator('.vid-side .key').count() == 2; shot(page, '76-keys')
+    # 8.x에서 옮긴 것: 지금 시각에서 장면 나누기. 다른 작업실의 단축키는 여기서 안 먹어요(Delete가 레이어를 지우지 않음)
+    P(page, "(() => { const s = __potato.state.project.sequences[0]; s.scenes[0].dur = 2; delete s.scenes[0].keys; __potato.emit(); })()")
+    n = P(page, "__potato.state.project.sequences[0].scenes.length"); P(page, "__potato.video.seek(0.8)")
+    lays = P(page, "__potato.state.project.canvases.reduce((a, c) => a + c.layers.length, 0)"); page.keyboard.press('Control+b')
+    sc = P(page, "__potato.state.project.sequences[0].scenes.slice(0, 2).map(x => x.dur)"); assert P(page, "__potato.state.project.sequences[0].scenes.length") == n + 1 and abs(sc[0] - 0.8) < 0.01 and abs(sc[1] - 1.2) < 0.01, sc
+    page.keyboard.press('Escape'); P(page, "(() => { __potato.state.project.sequences[0]; })()"); page.keyboard.press('v'); assert P(page, "__potato.state.project.canvases.reduce((a, c) => a + c.layers.length, 0)") == lays
     assert not errs, errs
     br.close()
 print('통과')

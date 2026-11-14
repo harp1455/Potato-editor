@@ -59,6 +59,9 @@ function registerCmds() {
   Object.entries(PANELS).forEach(([id, p]) => addCmd({ id: 'panel.' + id, title: p.title + ' 패널', menu: '보기', group: 'panel', checked: () => hasPanel(id), run: () => togglePanel(id) }));
   addCmd({ id: 'view.resetLayout', title: '패널 배치 처음으로', menu: '보기', group: 'panel', run: () => { resetLayout(); toast('이 화면의 패널 배치를 처음 모양으로 돌렸어요.'); } });
   ROOMS.forEach((r, i) => addCmd({ id: 'room.' + r.id, title: r.title + ' 작업실', menu: '작업실', keys: 'Alt+' + (i + 1), checked: () => settings.get('room') === r.id, run: () => settings.set('room', r.id) }));
+  addCmd({ id: 'view.full', title: '전체 화면', menu: '보기', keys: 'F11', checked: () => !!document.fullscreenElement, run: async () => { const T = window.__TAURI__; try { if (T && T.window) { const w = T.window.getCurrentWindow(); await w.setFullscreen(!(await w.isFullscreen())); } else if (document.fullscreenElement) await document.exitFullscreen(); else await document.documentElement.requestFullscreen(); } catch (_) { toast('전체 화면으로 바꾸지 못했어요.', 'err'); } } });
+  addCmd({ id: 'help.guide', title: '사용법', menu: '도움말', keys: 'F1', run: helpDialog });
+  addCmd({ id: 'help.changes', title: '업데이트 기록', menu: '도움말', run: () => { const u = 'https://github.com/harp1455/Potato-editor/releases', T = window.__TAURI__; if (T && T.opener && T.opener.openUrl) T.opener.openUrl(u); else window.open(u, '_blank', 'noopener'); } });
   addCmd({ id: 'help.plan', title: '2.0에서 달라지는 것', menu: '도움말', run: planDialog });
   addCmd({ id: 'help.update', title: '새 판 확인', menu: '도움말', run: () => checkUpdate(false) });
   addCmd({ id: 'tool.swatches', title: '색 견본…', menu: '도구', group: 'color', words: '팔레트 색상 스포이드 palette', run: swatchDialog });
@@ -139,6 +142,18 @@ function refresh() {
 }
 
 // ---------- 창들 ----------
+// 밝기: 어둡게 / 밝게 / 컴퓨터 설정 따르기
+function applyTheme() { const t = settings.get('theme'); document.documentElement.dataset.theme = t === 'light' || (t === 'system' && matchMedia('(prefers-color-scheme: light)').matches) ? 'light' : 'dark'; }
+// 사용법: 처음 쓰는 사람이 어디서 무엇을 하는지 한눈에 보게
+function helpDialog() {
+  const sec = (t, rows) => [h('h3', null, t), h('table.plan', null, h('tbody', null, rows.map(([a, b]) => h('tr', null, h('th', { scope: 'row' }, a), h('td', null, b)))))];
+  dialog({ title: '사용법', wide: true, buttons: [{ label: '단축키 보기', run: () => { settingsDialog('keys'); } }, { label: '닫기', primary: true }], body: h('div.help', null,
+    ...sec('시작하기', [['그림 넣기', '그림이나 폴더를 창에 끌어다 놓거나, 파일 메뉴의 그림 열기·폴더째 넣기를 써요. 넣은 그림은 왼쪽 보관함에 모여요.'], ['작업실', '위쪽 단추나 Alt+1~5로 이미지, 컷, 영상, 캐릭터, 일괄 처리를 오가요.'], ['명령 찾기', 'Ctrl+K를 누르고 하고 싶은 일을 적으면 어느 메뉴에 있든 바로 찾아요.'], ['저장', '작업은 저절로 저장돼요. 파일 메뉴의 작업 목록에서 다른 작업을 열거나 백업해요.']]),
+    ...sec('이미지 작업실', [['고르기', '네모·동그라미·올가미·마법봉·마법 붓·AI로 고르기. Shift는 더하기, Alt는 빼기예요.'], ['고른 곳에 하는 일', '고르기 메뉴에서 새 레이어로, 지우기, 흐리게, 모자이크, 색 채우기, 그림판 자르기, 가림막.'], ['보정', '레이어를 고르면 오른쪽 속성에 밝기·대비·곡선이 나와요. 아무것도 안 고르면 전체 보정이에요.'], ['AI', 'AI 메뉴에 배경 지우기, 화질 키우기, AI로 지우기, 자동 흰칠, NovelAI, 제미나이가 있어요.']]),
+    ...sec('컷 작업실', [['도구', 'V 고르기, C 컷, B 말풍선, T 글자, L 집중선. Shift를 누르고 누르면 여러 개를 함께 골라요.'], ['대사', '컷 메뉴에서 번역, 다듬기, 대사 초안, 그림 속 글자 번역을 해요.']]),
+    ...sec('영상 작업실', [['장면', '보관함에서 그림을 골라 장면으로 넣어요. 장면마다 길이, 겹쳐 바뀜, 화면 움직임을 정해요.'], ['자막·소리·얹는 그림', '오른쪽 칸에서 넣어요. 움직임 점으로 시간에 따라 바뀌게 할 수 있어요.'], ['내보내기', 'Ctrl+M. MP4, GIF, WebP로 저장해요.']]),
+    ...sec('캐릭터 작업실', [['차례', '① 뼈대 맞추기 → ② 부위 나누기 → ③ 움직임 만들기. 다 되면 영상 작업실로 보내거나 파일로 내보내요.']])) });
+}
 // 색 견본: 자주 쓰는 색을 모아 두면 모든 색 고르는 창에 견본으로 나와요
 function swatchList() {
   let dl = document.getElementById('swatches'); if (!dl) { dl = h('datalist', { id: 'swatches' }); document.body.append(dl); new MutationObserver(ms => { for (const m of ms) for (const n of m.addedNodes) if (n.querySelectorAll) (n.matches('input[type=color]') ? [n] : n.querySelectorAll('input[type=color]')).forEach(i => i.setAttribute('list', 'swatches')); }).observe(document.body, { childList: true, subtree: true }); }
@@ -260,7 +275,7 @@ function settingsDialog(tab = 'screen') {
       h('h3', null, '화면 방식'),
       radio('mode', settings.get('layoutMode'), [['rooms', '작업실 나누기', '이미지, 컷, 영상, 캐릭터 작업실을 오가요. 작업실마다 패널 배치를 따로 기억해요.'], ['single', '한 화면에 모두', '패널 배치 하나로 모든 일을 해요. 가운데 화면만 위쪽 단추로 바꿔요.']], v => settings.set('layoutMode', v)),
       h('h3', null, '밝기'),
-      radio('theme', settings.get('theme'), [['dark', '어두운 화면', '그림의 색이 가장 정확하게 보여요.'], ['light', '밝은 화면', '밝은 곳에서 일하거나 흰 종이 위 그림을 볼 때 편해요.']], v => { settings.set('theme', v); document.documentElement.dataset.theme = v; }),
+      radio('theme', settings.get('theme'), [['dark', '어두운 화면', '그림의 색이 가장 정확하게 보여요.'], ['light', '밝은 화면', '밝은 곳에서 일하거나 흰 종이 위 그림을 볼 때 편해요.'], ['system', '컴퓨터 설정 따르기', '윈도우의 밝게·어둡게 설정을 따라가요.']], v => { settings.set('theme', v); applyTheme(); }),
       h('h3', null, '도움말'),
       h('label.check', null, h('input', { type: 'checkbox', checked: settings.get('hints'), onchange: e => settings.set('hints', e.target.checked) }), '아래 상태 줄에 지금 도구의 쓰는 법 보여 주기'),
       h('h3', null, '패널'),
@@ -321,7 +336,7 @@ function settingsDialog(tab = 'screen') {
 
 // ---------- 시작 ----------
 async function start() {
-  document.documentElement.dataset.theme = settings.get('theme') === 'light' ? 'light' : 'dark';
+  applyTheme(); matchMedia('(prefers-color-scheme: light)').addEventListener('change', applyTheme);
   swatchList();
   setErrHandler(e => { console.error(e); toast(e.message || '문제가 생겼어요.', 'err'); });
   registerCmds(); build();
@@ -340,7 +355,7 @@ async function start() {
   document.addEventListener('contextmenu', e => { if (!e.target.closest('input, textarea, .viewport, .layer')) e.preventDefault(); });
   if (!settings.get('askedAdult')) adultDialog();
   else if (settings.get('autoUpd') !== false && Date.now() - (settings.get('updSeen') || 0) > 864e5 && VERSION !== 'dev') setTimeout(() => checkUpdate(true), 4000);
-  window.__potato = { state, settings, run, emit, api: { generate, buildBody, buildInteraction, speak, animate, preamble } };
+  window.__potato = { state, settings, run, emit, cmds, api: { generate, buildBody, buildInteraction, speak, animate, preamble, check } };
   import('./core/files.js').then(f => { window.__potato.files = f; });
   import('./core/select.js').then(f => { window.__potato.sel = f; });
   import('./api/nai.js').then(f => { window.__potato.nai = f; });
