@@ -250,3 +250,18 @@ select.text { padding: 0 4px; }
 .btn-row.wide { align-self: stretch; } .btn-row.wide .btn { flex: 1; }
 .nai-busy { color: var(--potato); }
 .link.more { text-decoration: none; }
+
+/* AI 작업 줄, 팩 */
+.job { align-self: stretch; display: grid; gap: 5px; padding-bottom: 8px; border-bottom: 1px solid var(--raise); }
+.job-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 22px; }
+.job-bar { height: 3px; background: var(--well); border-radius: 2px; overflow: hidden; } .job-bar span { display: block; height: 100%; background: var(--potato); }
+.job.done .job-bar span { background: var(--edge); } .job.err .job-bar span, .job.stop .job-bar span { background: var(--bad); }
+.job-text { color: var(--dim); } .job.err .job-text { color: var(--bad); }
+.packs { align-self: stretch; display: grid; gap: 4px; max-height: 330px; overflow: auto; }
+.pack { display: grid; grid-template-columns: 1fr auto 64px; gap: 12px; align-items: center; padding: 8px 10px; border: 1px solid var(--edge); border-radius: 4px; }
+.pack.on { border-color: var(--potato); } .pack div { display: grid; gap: 2px; min-width: 0; } .pack small { color: var(--dim); font-size: 12px; line-height: 1.5; }
+.pack-size, .pack-none { color: var(--faint); white-space: nowrap; } .pack .btn, .pack-none { justify-self: end; }
+.pack-files { margin: 10px 0; padding: 0; list-style: none; display: grid; gap: 2px; }
+.pack-files li { display: flex; justify-content: space-between; gap: 16px; padding: 5px 10px; background: var(--well); border-radius: var(--r); color: var(--dim); }
+.pack-files code { font: inherit; color: var(--text); user-select: all; }
+a.btn { display: inline-flex; align-items: center; text-decoration: none; color: inherit; }

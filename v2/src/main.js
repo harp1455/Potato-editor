@@ -9,12 +9,13 @@ import { imageRoom, registerImageCmds, setMenuItem } from './rooms/image.js';
 import { stubRooms } from './rooms/stub.js';
 import { registerBinCmds } from './ui/bin.js';
 import { naiAccount } from './api/nai.js';
+import { registerAiCmds, packsPane } from './ui/aitools.js';
 import { preamble, check, generate, buildBody, SAFETY_CATEGORIES } from './api/gemini.js';
 
 const VERSION = typeof __VERSION__ === 'string' ? __VERSION__ : 'dev';
 const ROOMS = [imageRoom, ...stubRooms];
 const roomOf = () => ROOMS.find(r => r.id === settings.get('room')) || imageRoom;
-const MENUS = ['파일', '편집', '보기', '레이어', '고르기', '도구', '작업실', '도움말'];
+const MENUS = ['파일', '편집', '보기', '레이어', '고르기', 'AI', '도구', '작업실', '도움말'];
 
 let live = null;      // 지금 가운데에 떠 있는 작업실
 const els = {};
@@ -25,6 +26,7 @@ function registerCmds() {
   addCmd({ id: 'file.projects', title: '작업 목록…', menu: '파일', keys: 'Ctrl+Shift+O', words: '열기 최근', run: projectsDialog });
   registerImageCmds();
   registerBinCmds();
+  registerAiCmds(() => settingsDialog('packs'));
   addCmd({ id: 'file.save', title: '지금 저장', menu: '파일', keys: 'Ctrl+S', run: async () => { await saveNow(); toast('저장했어요. 평소에는 고칠 때마다 알아서 저장돼요.'); } });
   addCmd({ id: 'edit.undo', title: '되돌리기', menu: '편집', keys: 'Ctrl+Z', enabled: canUndo, run: undo });
   addCmd({ id: 'edit.redo', title: '다시 하기', menu: '편집', keys: 'Ctrl+Shift+Z', enabled: canRedo, run: redo });
@@ -152,7 +154,7 @@ function adultDialog(then) {
 }
 
 function settingsDialog(tab = 'screen') {
-  const TABS = [['screen', '화면'], ['api', 'AI와 API'], ['keys', '단축키'], ['about', '정보']];
+  const TABS = [['screen', '화면'], ['api', 'AI와 API'], ['packs', 'AI 팩'], ['keys', '단축키'], ['about', '정보']];
   const nav = h('div.set-nav', { role: 'tablist' }), pane = h('div.set-pane');
   const d = dialog({ title: '설정', wide: true, body: h('div.set', null, nav, pane), buttons: [{ label: '닫기', primary: true }] });
   const radio = (name, cur, opts, on) => h('div.choice', { role: 'radiogroup' }, opts.map(([v, title, desc]) => h('label.choice-item' + (v === cur ? '.on' : ''), null,
@@ -209,6 +211,7 @@ function settingsDialog(tab = 'screen') {
   const show = t => {
     tab = t;
     nav.replaceChildren(...TABS.map(([id, title]) => h('button.set-tab' + (id === t ? '.on' : ''), { role: 'tab', 'aria-selected': String(id === t), onclick: () => show(id) }, title)));
+    if (t === 'packs') { pane.replaceChildren(h('p.set-note', null, '팩을 확인하는 중이에요.')); packsPane(() => tab === 'packs' && show('packs')).then(kids => { if (tab === 'packs') pane.replaceChildren(...kids); }); return; }
     pane.replaceChildren(...P[t]());
   };
   show(tab);
@@ -236,5 +239,6 @@ async function start() {
   import('./core/files.js').then(f => { window.__potato.files = f; });
   import('./core/select.js').then(f => { window.__potato.sel = f; });
   import('./api/nai.js').then(f => { window.__potato.nai = f; });
+  import('./core/ai.js').then(f => { window.__potato.ai = f; });
 }
 start();

@@ -7,6 +7,7 @@ import { showMenu, cmdItem } from './overlay.js';
 import { cmd } from '../core/cmd.js';
 import { binPanel } from './bin.js';
 import { naiPanel } from './naipanel.js';
+import { jobsPanel } from './aitools.js';
 
 const num = (label, value, step, on, unit) => {
   const i = h('input.num', { type: 'number', value, step, 'aria-label': label, onchange: () => { const v = parseFloat(i.value); if (!isNaN(v)) on(v); } });
@@ -86,12 +87,7 @@ export const PANELS = {
     },
   },
   nai: naiPanel,
-  jobs: {
-    title: 'AI 작업',
-    render(el) {
-      el.append(h('p.empty', null, '오래 걸리는 AI 작업이 여기 줄을 서요. 진행 상황을 보고 멈출 수 있어요.'), h('p.panel-note', null, 'AI 도구는 다음 단계에서 옮겨 와요.'));
-    },
-  },
+  jobs: jobsPanel,
 };
 
 function rename(span, l) {

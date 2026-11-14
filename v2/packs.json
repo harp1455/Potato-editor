@@ -1,0 +1,209 @@
+{
+ "version": 1,
+ "packs": {
+  "base": {
+   "label": "기본 팩",
+   "desc": "AI 실행 도구, 찾기 모델, '빠르게' 모양 모델, 윤곽 따기",
+   "size": 56806896
+  },
+  "precise": {
+   "label": "정밀 팩",
+   "desc": "'정밀하게' 모양 모델",
+   "size": 43670436
+  },
+  "bg": {
+   "label": "AI 배경 지우기 팩",
+   "desc": "애니 캐릭터만 따내는 모델 (skytnt/anime-seg)",
+   "size": 81646253
+  },
+  "sr": {
+   "label": "AI 화질 키우기 팩",
+   "desc": "Real-ESRGAN 애니 업스케일 모델 (빠르게·고화질)",
+   "size": 10681522
+  },
+  "erase": {
+   "label": "AI 지우개 팩",
+   "desc": "칠한 곳을 둘레에 맞게 메우는 LaMa 모델 (애니·만화용)",
+   "size": 95101428
+  },
+  "line": {
+   "label": "AI 선화 추출 팩",
+   "desc": "그림에서 선만 뽑는 모델 (가는 선·굵은 선)",
+   "size": 15860093
+  },
+  "interp": {
+   "label": "AI 중간 장면 팩",
+   "desc": "움짤 장면 사이를 새로 그려 부드럽게 하는 RIFE 모델 (애니용 v4.9)",
+   "size": 9890541
+  },
+  "depth": {
+   "label": "AI 깊이 팩",
+   "desc": "그림의 앞뒤 거리를 재는 Depth Anything V2 모델 (배경 흐림·입체 움짤)",
+   "size": 45817725
+  },
+  "text": {
+   "label": "AI 글자 찾기 팩",
+   "desc": "그림 속 글자 자리를 찾는 PP-OCR 모델 (페이지 번역에서 글자 부분만 보낼 때)",
+   "size": 4386403
+  },
+  "rig": {
+   "label": "AI 캐릭터 뼈대 팩",
+   "desc": "캐릭터의 관절과 눈 자리, 캐릭터가 몇 명인지 찾는 모델 (캐릭터 움직이기)",
+   "size": 73454156
+  }
+ },
+ "files": [
+  {
+   "id": "czWasm",
+   "file": "ort-1.31.1-asyncify.wasm.gz",
+   "pack": "base",
+   "size": 7101248,
+   "raw": 28747738,
+   "sha256": "1d2c2b97e30e351c2d9928ea9ade17fd0315331462d1a5d0c61e9a0254888b8d"
+  },
+  {
+   "id": "czM_deep",
+   "file": "censor-detect-s.onnx.gz",
+   "pack": "base",
+   "size": 20665237,
+   "raw": 22346418,
+   "sha256": "d8cae389b867a649a12194fd9f18740380e7f63a9538b5fa4b91e8496ee63acb"
+  },
+  {
+   "id": "czM_deepn",
+   "file": "censor-detect-n.onnx.gz",
+   "pack": "base",
+   "size": 5602445,
+   "raw": 6105235,
+   "sha256": "43c848648b3d006384f8e3df48a23de9abaaf8dc3d1994fee5a5c29f49a8ee78"
+  },
+  {
+   "id": "czM_segN",
+   "file": "nsfw-segm-nano.onnx.gz",
+   "pack": "base",
+   "size": 5032514,
+   "raw": 5512227,
+   "sha256": "19c9f45c625f34126d9c53e11e4539d3c3bfc2b06517c9102ad8cb08330dc1f0"
+  },
+  {
+   "id": "czM_samE",
+   "file": "mobilesam-encoder.onnx.gz",
+   "pack": "base",
+   "size": 10801902,
+   "raw": 16716155,
+   "sha256": "66415907cf3163356c57054928bb041deafdad4e5769e440711cc73329c583b1"
+  },
+  {
+   "id": "czM_samD",
+   "file": "mobilesam-decoder.onnx.gz",
+   "pack": "base",
+   "size": 7603550,
+   "raw": 8389000,
+   "sha256": "f5a0b4b8b0d7295d68c174062ede3259e9903d2c3c44201279d66bc218fea09a"
+  },
+  {
+   "id": "czM_segM",
+   "file": "nsfw-segm-medium.onnx.gz",
+   "pack": "precise",
+   "size": 43670436,
+   "raw": 47167469,
+   "sha256": "23275a38fde161d6d27a5dc07a5fcec60574f29e13ea2b63784b8f2101a30f4a"
+  },
+  {
+   "id": "czM_isnet",
+   "file": "anime-seg-isnetis.onnx.gz",
+   "pack": "bg",
+   "size": 81646253,
+   "raw": 88071600,
+   "sha256": "7cfa63677fdd906bc0c90e9af40aa67a85a2961a2b3e63dab7e5b4454ab8852e"
+  },
+  {
+   "id": "czM_sr4",
+   "file": "realesrgan-anime-4b32f.onnx.gz",
+   "pack": "sr",
+   "size": 2386824,
+   "raw": 2597722,
+   "sha256": "8051427df72ed0d5cfd0313d7e24905708670bd3ea31da099538c2fbc5d89f77"
+  },
+  {
+   "id": "czM_sr6",
+   "file": "realesrgan-anime-6b.onnx.gz",
+   "pack": "sr",
+   "size": 8294698,
+   "raw": 8990827,
+   "sha256": "75e0ec8276bf2f733b2912ce54093f0db3612ff6d34d40dfb7291e8aa4c7029a"
+  },
+  {
+   "id": "czM_lama",
+   "file": "lama-anime.onnx.gz",
+   "pack": "erase",
+   "size": 95101428,
+   "raw": 106154205,
+   "sha256": "190d816ae13b1d6ea1db79835b6f6f4bba1dfa759132a2154f9ad37f878aa97b"
+  },
+  {
+   "id": "czM_lineF",
+   "file": "lineart-fine.onnx.gz",
+   "pack": "line",
+   "size": 7930478,
+   "raw": 8746962,
+   "sha256": "356bb34e45741bfc6d8d0c6d171451727c0cd3606a3f7c0ef954b9b67731f5fa"
+  },
+  {
+   "id": "czM_lineC",
+   "file": "lineart-coarse.onnx.gz",
+   "pack": "line",
+   "size": 7929615,
+   "raw": 8746962,
+   "sha256": "bfca8f2a69b4116a1d057ec193a2457b97f3d00adcda79939ca3712236ebc89d"
+  },
+  {
+   "id": "czM_rife",
+   "file": "rife-v4.9.onnx.gz",
+   "pack": "interp",
+   "size": 9890541,
+   "raw": 10731699,
+   "sha256": "0ca76b5f52ea2d5d2ad7699ebb784ba6ab859f561892aaae6a0ddcde8227e318"
+  },
+  {
+   "id": "czM_depth",
+   "file": "depth-anything-v2-small.onnx.gz",
+   "pack": "depth",
+   "size": 45817725,
+   "raw": 49545124,
+   "sha256": "3d0f864ef302a713567162bf057c9fed5c35e354be42852b05cdb5047f3c29d4"
+  },
+  {
+   "id": "czM_tdet",
+   "file": "ppocr-det-v4.onnx.gz",
+   "pack": "text",
+   "size": 4386403,
+   "raw": 4745517,
+   "sha256": "f5b43d0c0b1e245b1f9763b9e7d3f3646b38ec6135ca9b62fc57e768861a7d56"
+  },
+  {
+   "id": "czM_pose",
+   "file": "dwpose-l-384.onnx.gz",
+   "pack": "rig",
+   "size": 62243396,
+   "raw": 67230414,
+   "sha256": "bee562ebb6e0c16bc44a6ca2958879f2d8565a2dec8912664ac4bb569e047738"
+  },
+  {
+   "id": "czM_eye",
+   "file": "anime-eye-n.onnx.gz",
+   "pack": "rig",
+   "size": 5601642,
+   "raw": 6104414,
+   "sha256": "67b644fbbe7f47b972da73d1deb03ebaf6a2e7fdc8c23c505f6931d50c89ff59"
+  },
+  {
+   "id": "czM_person",
+   "file": "anime-person-n.onnx.gz",
+   "pack": "rig",
+   "size": 5609118,
+   "raw": 6104417,
+   "sha256": "08afd26252087200ae13e3cea6dfe396eca68c44e801f59362e5d376969a5092"
+  }
+ ]
+}
