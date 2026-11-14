@@ -87,4 +87,23 @@ ${encMain}
   return { encodeMp4, encodeGif, encodeWebp };
 }
 `);
+
+// 5) AI 도구들: 자동 흰칠(찾기·모양 따기), 선화 추출, 깊이 흐림, AI 중간 장면
+const czSrc = read('cz.js'), h0 = czSrc.indexOf('const CZ_MODELS = {'), h1 = czSrc.indexOf('/* ---- 일꾼'), c0 = czSrc.indexOf('function czPrep('), c1 = czSrc.indexOf('function czProgress(');
+if (h0 < 0 || h1 < h0 || c0 < h1 || c1 < c0) throw new Error('cz.js에서 자동 흰칠 부분을 찾지 못했어요');
+const czHead = czSrc.slice(h0, h1).replace(/\(\(\) => \{ try \{ return JSON\.parse\(localStorage\.getItem\('cutCzCfg'\)[^\n]*/, '{});');
+writeFileSync(join(out, 'ai2.gen.js'), `// 자동으로 만든 파일이에요. 고치지 마세요 (tools/legacy.mjs가 8.x의 cz.js·ai.js·depth.js·gif2.js에서 만들어요)
+/* eslint-disable */
+export function makeAi2(deps) {
+  const { newCanvas, clamp, czLoad, czCall, cz, aiLine } = deps;
+  const dpCache = new Map();
+${czHead}
+${czSrc.slice(c0, c1)}
+${pick('cz.js', ['czDrawShapes'])}
+${pick('ai.js', ['aiPixels', 'aiLineArt'])}
+${pick('depth.js', ['dpRaw', 'dpBox', 'dpGuided', 'dpGray', 'dpDepth', 'dpOtsu', 'dpNormBlur', 'dpDof'])}
+${pick('gif2.js', ['riPlane', 'riRun'])}
+  return { czCfg, czNewState, czAnalyze, czComposeMask, czDilate, aiLineArt, dpDepth, dpOtsu, dpDof, riRun };
+}
+`);
 console.log(`캐릭터 움직이기 묶음: 코드 ${(rig.length / 1024).toFixed(0)} KB, 꾸밈 규칙 ${rules.length}개`);

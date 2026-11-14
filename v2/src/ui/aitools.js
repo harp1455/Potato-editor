@@ -5,7 +5,9 @@ import { addCmd } from '../core/cmd.js';
 import { MAN, PACK_PAGE, canDownload, missingFiles, packGet, packAdd, packState, packDel, idsOfPack, mb } from '../core/packs.js';
 import { runJob, charMask, upscale, samMask, jobs, aiReset } from '../core/ai.js';
 import { sel, selFor, selMask, selBounds } from '../core/select.js';
-import { fillHole } from '../legacy/shim.js';
+import { fillHole, legacyAi, aiLine } from '../legacy/shim.js';
+import { settings } from '../core/settings.js';
+import { h as H } from './dom.js';
 import { flatten, samPick, layerFromBlob } from '../rooms/image.js';
 import { dialog, toast, busy, confirmBox } from './overlay.js';
 
@@ -108,6 +110,25 @@ export function registerAiCmds(openPacks) {
       await swapImage(l, await upscale(bmp, k, model, j, say), `${k}배`, { hidden: false, rescale: k }); commit(label);
     }) });
   }
+  // ---- 8.x에서 가져온 계산을 쓰는 도구들 ----
+  // 결과를 '그 레이어와 같은 자리'에 새 레이어로 올려요 (원본을 안 바꾸니 끄고 켜며 견줄 수 있어요)
+  const overlay = async (l, canvas, name) => { const c = canvasOf(), n = await layerFromBlob(c, await png(canvas), name, { hidden: true }); Object.assign(n, { x: l.x, y: l.y, scale: l.scale * (mediaOf(l).w / canvas.width), rot: l.rot }); const i = c.layers.indexOf(n); c.layers.splice(i, 1); c.layers.splice(c.layers.indexOf(l) + 1, 0, n); return n; };
+  addCmd({ id: 'ai.censor', title: '자동 흰칠', menu: 'AI', group: 'cz', keys: 'Ctrl+Shift+W', words: '가리기 모자이크 검열 성기', enabled: hasLayer, run: () => { const k = censorCfg(); return job('자동 흰칠', ['deep', 'deepn', k.model === 'precise' ? 'segM' : 'segN', 'samE', 'samD'], async (j, say) => {
+    const l = layerOf(), bmp = await ensureBitmap(l.mediaId), r = await censorMask(bmp, j, say);
+    if (!r.found) { toast('가릴 곳을 찾지 못했어요. 설정에서 민감도를 올려 볼 수 있어요.'); return; }
+    await overlay(l, r.canvas, l.name + ' 흰칠'); commit('자동 흰칠');
+  }); } });
+  addCmd({ id: 'ai.censorCfg', title: '자동 흰칠 설정…', menu: 'AI', group: 'cz', run: censorDialog });
+  addCmd({ id: 'ai.line', title: '선화 추출', menu: 'AI', group: 'fx', words: '라인 스케치 lineart', enabled: hasLayer, run: () => job('선화 추출', ['lineF'], async (j, say) => {
+    const l = layerOf(), bmp = await ensureBitmap(l.mediaId); say('선을 따는 중', 0.3); aiLine.model = 'F'; aiLine.gain = 1;
+    await overlay(l, await legacyAi().aiLineArt({ im: bmp, W: bmp.width, H: bmp.height }, j), l.name + ' 선화'); commit('선화 추출');
+  }) });
+  for (const [amt, label] of [[30, '배경 흐리게 (약하게)'], [60, '배경 흐리게 (보통)'], [95, '배경 흐리게 (강하게)']]) addCmd({ id: 'ai.dof' + amt, title: label, menu: 'AI', group: 'fx', words: '아웃포커스 깊이 심도 depth', enabled: hasLayer, run: () => job(label, ['depth'], async (j, say) => {
+    const l = layerOf(), bmp = await ensureBitmap(l.mediaId), k = Math.min(1, 2048 / Math.max(bmp.width, bmp.height)), W = Math.round(bmp.width * k), Hh = Math.round(bmp.height * k), A = legacyAi();
+    const src = mk(W, Hh); src.getContext('2d').drawImage(bmp, 0, 0, W, Hh); say('깊이를 재는 중', 0.3);
+    const D = await A.dpDepth(src, W, Hh, null, j), cut0 = A.dpOtsu(D); let s2 = 0, n2 = 0; for (let i = 0; i < D.length; i++) if (D[i] > cut0) { s2 += D[i]; n2++; }
+    say('흐리는 중', 0.8); await swapImage(l, A.dpDof(src, W, Hh, D, { focus: n2 ? s2 / n2 : 0.7, band: 0.06, amt, subj: null }), '배경 흐림', { rescale: k }); commit(label);
+  }) });
   addCmd({ id: 'ai.packs', title: 'AI 팩 관리…', menu: 'AI', group: 'packs', run: openPacks });
 }
 
@@ -137,4 +158,35 @@ export async function packsPane(redraw) {
         : dl ? h('button.btn.small', { onclick: async () => { const b = busy('AI 팩을 받는 중이에요.'); try { await packGet(idsOfPack(k), (n, t) => b.set(`AI 팩을 받는 중이에요. ${mb(n)} / ${mb(t)}`)); b.done(`${p.label}을 받았어요.`); } catch (_) { b.done('받지 못했어요. 인터넷 연결을 확인하거나 파일을 직접 넣어 주세요.', 'err'); } redraw(); } }, '받기')
           : h('span.pack-none', null, '없음')))),
   ];
+}
+
+// ---- 자동 흰칠 ----
+const CZ_DEF = { model: 'fast', shape: 'contour', pad: 3, sens: 50, male: true, female: true, anus: false, color: '#ffffff' };
+export const censorCfg = () => ({ ...CZ_DEF, ...(settings.get('censor') || {}) });
+// 그림(비트맵·캔버스) → { canvas(가릴 곳만 색칠, 나머지 투명), found }. 그림은 이 컴퓨터 안에서만 처리해요
+export async function censorMask(src, job, say) {
+  const A = legacyAi(), k = censorCfg(), ds = Math.min(1, 4096 / Math.max(src.width, src.height)), W = Math.round(src.width * ds), Hh = Math.round(src.height * ds);
+  Object.assign(A.czCfg, { model: k.model, shape: k.shape, pad: k.pad, sens: k.sens, male: k.male, female: k.female, anus: k.anus, color: k.color });
+  const cv = mk(W, Hh), g = cv.getContext('2d', { willReadFrequently: true }); g.fillStyle = '#fff'; g.fillRect(0, 0, W, Hh); g.drawImage(src, 0, 0, W, Hh);
+  const st = A.czNewState(W, Hh, k.pad * Math.max(W, Hh) / 1000);
+  await A.czAnalyze(cv, st, job, t => say && say(String(t).replace('…', ''), 0.5));
+  let M = A.czComposeMask(st); const pad = Math.round(k.pad * Math.max(W, Hh) / 1000); if (pad > 0) M = A.czDilate(M, W, Hh, pad);
+  const out = mk(W, Hh), og = out.getContext('2d'), id = og.createImageData(W, Hh), col = [1, 3, 5].map(i => parseInt(k.color.slice(i, i + 2), 16)); let found = 0;
+  for (let i = 0; i < M.length; i++) if (M[i]) { id.data[i * 4] = col[0]; id.data[i * 4 + 1] = col[1]; id.data[i * 4 + 2] = col[2]; id.data[i * 4 + 3] = 255; found++; }
+  og.putImageData(id, 0, 0);
+  return { canvas: out, found };
+}
+function censorDialog() {
+  const k = censorCfg(), set = (key, v) => { k[key] = v; settings.set('censor', k); draw(); }, box = H('div.vid-form');
+  const chk = (key, label) => H('label.check', null, H('input', { type: 'checkbox', checked: !!k[key], onchange: e => set(key, e.target.checked) }), label);
+  const rng = (key, label, min, max, unit) => H('label.field', null, H('span.field-name.w', null, label), H('input.range', { type: 'range', min, max, value: k[key], 'aria-label': label, onchange: e => set(key, +e.target.value) }), H('span.field-unit', null, k[key] + unit));
+  const draw = () => box.replaceChildren(
+    H('p.dlg-text', null, '그림 속 성기를 찾아 그 모양대로 가려요. 결과는 새 레이어로 올라가서 끄고 켜거나 지울 수 있어요. 그림은 이 컴퓨터 안에서만 처리해요.'),
+    H('div.choice', { role: 'radiogroup' }, [['fast', '빠르게', '가벼운 모델로 모양을 따요. 대부분 이걸로 충분해요.'], ['precise', '정밀하게', '큰 모델이라 모양이 더 정확하고 항문도 잘 찾아요. 몇 배 느려요.']].map(([v, t, d]) => H('label.choice-item' + (k.model === v ? '.on' : ''), null, H('input', { type: 'radio', name: 'czm', checked: k.model === v, onchange: () => set('model', v) }), H('span', null, H('b', null, t), H('small', null, d))))),
+    H('div.btn-row', null, chk('male', '남성 성기'), chk('female', '여성 성기'), chk('anus', '항문')),
+    H('label.field', null, H('span.field-name.w', null, '모양'), H('select.text', { 'aria-label': '모양', onchange: e => set('shape', e.target.value) }, [['contour', '윤곽을 따라'], ['ellipse', '타원으로']].map(([v, t]) => H('option', { value: v, selected: k.shape === v }, t)))),
+    rng('sens', '민감도', 0, 100, ''), rng('pad', '여유', 0, 12, ''),
+    H('label.field', null, H('span.field-name.w', null, '색'), H('input', { type: 'color', value: k.color, 'aria-label': '가리는 색', onchange: e => set('color', e.target.value) })));
+  draw();
+  dialog({ title: '자동 흰칠 설정', body: box, buttons: [{ label: '닫기', primary: true }] });
 }

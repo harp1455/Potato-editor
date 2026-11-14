@@ -1,5 +1,6 @@
 // 8.x '캐릭터 움직이기'를 2.0에 이어 붙이는 곳. rig.js가 바깥에서 가져다 쓰던 것들을 2.0 것으로 내줘요.
 import { makeRig } from './rig.gen.js';
+import { makeAi2 } from './ai2.gen.js';
 import { idb as store } from '../core/store.js';
 import { aiLoad, aiCall, samState, aiDevice } from '../core/ai.js';
 import { missingFiles, idsOfPack } from '../core/packs.js';
@@ -77,3 +78,11 @@ export const openRig = from => load().rgOpen(from);
 // 구멍 메우기(AI 지우개): px = RGBA, hole = 0~1(메울 곳) → { px, by: 'lama' | 'blur' }
 export const fillHole = (px, hole, W, H, tk) => load().dpFill(px, hole, W, H, tk);
 export const rigSaved = async key => !!(await store.get('blobs', 'kv:rig:' + key));
+
+// 8.x의 AI 계산들(자동 흰칠·선화·깊이·중간 장면). 설정은 czCfg, 선화 세기는 aiLine에 넣어요
+export const aiLine = { model: 'F', gain: 1 };
+let ai2 = null;
+export const legacyAi = () => ai2 || (ai2 = makeAi2({
+  newCanvas: (w, h) => { const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(w)); c.height = Math.max(1, Math.round(h)); return c; },
+  clamp, czLoad: aiLoad, czCall: aiCall, cz: samState, aiLine,
+}));

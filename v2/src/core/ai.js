@@ -49,7 +49,7 @@ function call(msg, tr) {   // 한 번에 하나씩 차례로
 function reset(err) {
   if (A.w) { try { A.w.terminate(); } catch (_) { /* 이미 끝남 */ } }
   for (const p of A.wait.values()) p.rej(err || new Error('reset'));
-  A.w = null; A.ready = null; A.loaded = {}; A.wait.clear(); A.ep = ''; A.q = Promise.resolve(); samState.samEnc = '';
+  A.w = null; A.ready = null; A.loaded = {}; A.wait.clear(); A.ep = ''; A.q = Promise.resolve(); samState.samEnc = ''; samState.samQ = Promise.resolve();
 }
 function init() {
   if (A.ready) return A.ready;
@@ -76,7 +76,7 @@ export function aiLoad(key) {
 export const aiRun = (key, data, dims) => call({ t: 'run', key, data, dims }, [data.buffer]);
 export const aiCall = (msg, tr) => call(msg, tr);
 // 윤곽 AI(SAM)가 지금 어떤 그림을 읽어 두었는지. 캐릭터 움직이기와 'AI로 고르기'가 같이 써요
-export const samState = { samEnc: '' };
+export const samState = { samEnc: '', samQ: Promise.resolve() };
 export const aiDevice = () => A.ep === 'webgpu' ? '그래픽카드' : A.ep === 'wasm' ? 'CPU' : '';
 export const aiReset = reset;
 
