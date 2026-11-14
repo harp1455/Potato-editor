@@ -143,15 +143,15 @@ const czHead = czSrc.slice(h0, h1).replace(/\(\(\) => \{ try \{ return JSON\.par
 writeFileSync(join(out, 'ai2.gen.js'), `// 자동으로 만든 파일이에요. 고치지 마세요 (tools/legacy.mjs가 8.x의 cz.js·ai.js·depth.js·gif2.js에서 만들어요)
 /* eslint-disable */
 export function makeAi2(deps) {
-  const { newCanvas, clamp, czLoad, czCall, cz, aiLine } = deps;
+  const { newCanvas, clamp, czLoad, czCall, cz, aiLine, czPackState, aiMask } = deps;
   const dpCache = new Map();
 ${czHead}
 ${czSrc.slice(c0, c1)}
 ${pick('cz.js', ['czDrawShapes'])}
 ${pick('ai.js', ['aiPixels', 'aiLineArt'])}
-${pick('depth.js', ['dpRaw', 'dpBox', 'dpGuided', 'dpGray', 'dpDepth', 'dpOtsu', 'dpNormBlur', 'dpDof'])}
+${pick('depth.js', ['dpRaw', 'dpBox', 'dpGuided', 'dpGray', 'dpDepth', 'dpSubject', 'dpOtsu', 'dpNormBlur', 'dpDof', 'dpFill', 'dpExtend', 'dpPrepare', 'dpFrame'])}
 ${pick('gif2.js', ['riPlane', 'riRun'])}
-  return { czCfg, czNewState, czAnalyze, czComposeMask, czDilate, aiLineArt, dpDepth, dpOtsu, dpDof, riRun };
+  return { czCfg, czNewState, czAnalyze, czComposeMask, czDilate, aiLineArt, dpDepth, dpOtsu, dpDof, dpPrepare, dpFrame, riRun };
 }
 `);
 // 6) 움짤 연출: 움직임 97가지(Animate.css), 장면 넘김 196가지(gl-transitions), 입자·화면 효과, 카메라 화면

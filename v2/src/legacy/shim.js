@@ -2,7 +2,7 @@
 import { makeRig } from './rig.gen.js';
 import { makeAi2 } from './ai2.gen.js';
 import { idb as store } from '../core/store.js';
-import { aiLoad, aiCall, samState, aiDevice } from '../core/ai.js';
+import { aiLoad, aiCall, samState, aiDevice, charMask } from '../core/ai.js';
 import { missingFiles, idsOfPack } from '../core/packs.js';
 import { saveFiles } from '../core/files.js';
 import { ensureModels } from '../ui/aitools.js';
@@ -85,4 +85,7 @@ let ai2 = null;
 export const legacyAi = () => ai2 || (ai2 = makeAi2({
   newCanvas: (w, h) => { const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(w)); c.height = Math.max(1, Math.round(h)); return c; },
   clamp, czLoad: aiLoad, czCall: aiCall, cz: samState, aiLine,
+  // 입체 움짤이 쓰는 것: 팩은 시작하기 전에 받아 두므로 있다고 답하고, 인물 윤곽은 2.0의 것을 써요
+  czPackState: async () => ({ bg: true, erase: true, depth: true }),
+  aiMask: async (src, W, H, tk) => { const m = await charMask(src, tk), c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d', { willReadFrequently: true }); g.drawImage(m, 0, 0, W, H); const d = g.getImageData(0, 0, W, H).data, a = new Uint8ClampedArray(W * H); for (let i = 0; i < a.length; i++) a[i] = d[i * 4 + 3]; return a; },
 }));

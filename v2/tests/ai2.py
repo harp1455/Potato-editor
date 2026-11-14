@@ -44,6 +44,14 @@ with sync_playwright() as pw:
     page.wait_for_function("__potato.state.project.sequences[0].scenes.length === 3", timeout=TIME)
     sc = P(page, "__potato.state.project.sequences[0].scenes"); assert sc[0]['dur'] == 1 and sc[1]['dur'] == 1 and sc[1]['mediaId'] not in ids
     page.click('.vid-scene >> nth=1'); page.wait_for_timeout(400); shot(page, '92-interp')
+    # 입체 움짤: 깊이·인물·배경 메우기 뒤 미리 보기 창이 뜨고, 보내면 장면이 늘어요
+    P(page, "__potato.run('room.image')"); page.wait_for_selector('canvas.viewport'); P(page, "(() => { const c = __potato.state.project.canvases[0]; __potato.state.project.sel = c.layers[0].id; __potato.emit(); })()")
+    P(page, "__potato.run('ai.parallax')")
+    try: page.wait_for_selector('.dlg >> text=AI 팩 받기', timeout=5000); page.click('.dlg-foot >> text=받기')
+    except Exception: pass
+    page.wait_for_selector('.dlg >> text=영상 작업실로 보내기', timeout=TIME); page.wait_for_timeout(800); shot(page, '93-parallax')
+    P(page, "__potato.settings.set('parallax', { move: 'sway', amt: 60, base: 'subj', secs: 1.5, fps: 10 })"); n0 = P(page, "__potato.state.project.sequences[0].scenes.length")
+    page.click('.dlg button:has-text("영상 작업실로 보내기")'); page.wait_for_function("__potato.state.project.sequences[0].scenes.length > %d" % n0, timeout=TIME); print('입체 움짤 장면:', P(page, "__potato.state.project.sequences[0].scenes.length") - n0)
     assert not errs, errs
     br.close()
 srv.shutdown(); print('통과')

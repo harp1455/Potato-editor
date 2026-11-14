@@ -123,6 +123,23 @@ export function registerAiCmds(openPacks) {
     const l = layerOf(), bmp = await layerPic(l); say('선을 따는 중', 0.3); aiLine.model = 'F'; aiLine.gain = 1;
     await overlay(l, await legacyAi().aiLineArt({ im: bmp, W: bmp.width, H: bmp.height }, j), l.name + ' 선화'); commit('선화 추출');
   }) });
+  // 입체 움짤(8.x에서 옮김): 깊이를 재서 인물과 배경을 따로 움직여요. 미리 본 뒤 영상 작업실로 보내요
+  addCmd({ id: 'ai.parallax', title: '입체 움짤 만들기…', menu: 'AI', group: 'fx', words: '패럴랙스 3d 깊이 depth 움직이는 사진', enabled: hasLayer, run: () => job('입체 움짤 준비', ['depth', 'isnet', 'lama'], async (j, say) => {
+    const l = layerOf(), bmp = await layerPic(l), k = Math.min(1, 720 / Math.max(bmp.width, bmp.height)), W = Math.round(bmp.width * k), Hh = Math.round(bmp.height * k), A = legacyAi(), src = mk(W, Hh); src.getContext('2d').drawImage(bmp, 0, 0, W, Hh);
+    const P = await A.dpPrepare(src, W, Hh, null, { set: (t, p) => say(String(t).replace('…', ''), p), get stop() { return j.stop; } });
+    const O = { move: 'orbit', amt: 50, base: 'subj', secs: 2, fps: 15, ...(settings.get('parallax') || {}) }, cv = h('canvas.liq-view', { width: W, height: Hh, 'aria-label': '입체 움짤 미리 보기' }), g = cv.getContext('2d'), buf = g.createImageData(W, Hh);
+    let raf = 0, last = 0; const t0 = performance.now(), loop = now => { if (!cv.isConnected) return; raf = requestAnimationFrame(loop); if (now - last < 1000 / O.fps - 2) return; last = now; A.dpFrame(P, ((now - t0) / 1000 / O.secs) % 1, O, buf); g.putImageData(buf, 0, 0); };
+    const sel = (label, key, list, num) => h('label.field', null, h('span.field-name.w', null, label), h('select.text', { 'aria-label': label, onchange: e => { O[key] = num ? +e.target.value : e.target.value; } }, list.map(([v, t]) => h('option', { value: v, selected: String(O[key]) === String(v) }, t))));
+    const send = async () => { settings.set('parallax', O); const b = busy('입체 움짤을 만드는 중이에요.'); try { const n = Math.max(2, Math.round(O.secs * O.fps)), frames = []; for (let i = 0; i < n; i++) { const c = mk(W, Hh), id = c.getContext('2d').createImageData(W, Hh); A.dpFrame(P, i / n, O, id); c.getContext('2d').putImageData(id, 0, 0); frames.push(c); if (i % 4 === 0) { b.set(`입체 움짤을 만드는 중이에요. ${i + 1} / ${n}`); await new Promise(r => setTimeout(r)); } }
+      const { addFrames } = await import('../rooms/video.js'); await addFrames(frames, O.fps, l.name + ' 입체', (i, t) => b.set(`영상 작업실로 보내는 중이에요. ${i} / ${t}`)); b.done(`장면 ${n}개를 영상 작업실에 넣었어요. 영상 작업실에서 MP4·GIF·WebP로 내보내요.`); } catch (e) { b.done(e.message || '만들지 못했어요.', 'err'); } };
+    dialog({ title: '입체 움짤', wide: true, onClose: () => cancelAnimationFrame(raf), body: h('div.liq', null, h('div.liq-stage', null, cv), h('div.liq-side', null,
+      sel('움직임', 'move', [['orbit', '빙글'], ['sway', '좌우'], ['nod', '위아래'], ['zoom', '다가가기']]), sel('기준', 'base', [['subj', '인물 고정 (배경이 움직임)'], ['bg', '배경 고정 (인물이 움직임)']]),
+      h('label.field', null, h('span.field-name.w', null, '세기'), h('input.range', { type: 'range', min: 10, max: 100, value: O.amt, 'aria-label': '세기', oninput: e => { O.amt = +e.target.value; } })),
+      sel('길이', 'secs', [[1.5, '1.5초'], [2, '2초'], [3, '3초'], [4, '4초']], true), sel('빠르기', 'fps', [[10, '초당 10장'], [12, '초당 12장'], [15, '초당 15장'], [24, '초당 24장']], true),
+      h('p.dlg-text', null, /lama/.test(P.by) ? '인물 뒤 배경은 AI가 메웠어요. 세기가 크면 메운 자리가 흐릿하게 보일 수 있어요.' : '세기가 크면 가장자리가 어색해질 수 있어요.'))),
+      buttons: [{ label: '닫기' }, { label: '영상 작업실로 보내기', primary: true, run: () => { send(); } }] });
+    raf = requestAnimationFrame(loop);
+  }) });
   for (const [amt, label] of [[30, '배경 흐리게 (약하게)'], [60, '배경 흐리게 (보통)'], [95, '배경 흐리게 (강하게)']]) addCmd({ id: 'ai.dof' + amt, title: label, menu: 'AI', group: 'fx', words: '아웃포커스 깊이 심도 depth', enabled: hasLayer, run: () => job(label, ['depth'], async (j, say) => {
     const l = layerOf(), bmp = await layerPic(l), k = Math.min(1, 2048 / Math.max(bmp.width, bmp.height)), W = Math.round(bmp.width * k), Hh = Math.round(bmp.height * k), A = legacyAi();
     const src = mk(W, Hh); src.getContext('2d').drawImage(bmp, 0, 0, W, Hh); say('깊이를 재는 중', 0.3);
