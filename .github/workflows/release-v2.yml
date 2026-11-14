@@ -62,11 +62,18 @@ jobs:
       - name: 2.0 설정 만들기 (버전 넣기)
         shell: bash
         run: |
-          python -c "import json; c=json.load(open('src-tauri/v2.conf.json',encoding='utf-8')); c['version']='${{ needs.check.outputs.version }}'; json.dump(c,open('src-tauri/v2.build.json','w',encoding='utf-8'),ensure_ascii=False)"
+          python -c "import json,os; c=json.load(open('src-tauri/v2.conf.json',encoding='utf-8')); c['version']='${{ needs.check.outputs.version }}'; c['bundle']['createUpdaterArtifacts']=bool(os.environ.get('K')); json.dump(c,open('src-tauri/v2.build.json','w',encoding='utf-8'),ensure_ascii=False)"
+          if [ -z "$K" ]; then echo "::warning::서명 키가 없어서 스스로 업데이트하는 파일 없이 만들어요"; fi
+        env:
+          K: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
         with:
+          includeUpdaterJson: true
+          updaterJsonPreferNsis: true
           tagName: ${{ needs.check.outputs.tag }}
           releaseCommitish: ${{ github.sha }}
           releaseName: 감자 편집기 ${{ needs.check.outputs.tag }} (미리보기판)
@@ -77,6 +84,16 @@ jobs:
           prerelease: true
           assetNamePattern: PotatoEditor2_[version]_[arch][setup][ext]
           args: --config src-tauri/v2.build.json
+      # 설치판이 새 판을 찾는 고정 주소(v2-update)에 이번 판의 안내 파일을 올려요. 8.x가 보는 주소와는 따로예요.
+      - name: 업데이트 안내 파일 올리기
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          rm -f latest.json
+          gh release download "${{ needs.check.outputs.tag }}" -p latest.json -R "${{ github.repository }}" || { echo "::warning::latest.json이 없어요 (서명 키 없음)"; exit 0; }
+          gh release view v2-update -R "${{ github.repository }}" >/dev/null 2>&1 || gh release create v2-update -R "${{ github.repository }}" --prerelease --target "${{ github.sha }}" --title "감자 편집기 2 업데이트 안내 (손대지 마세요)" --notes "설치판이 새 판을 찾을 때 보는 파일이에요. 받을 것은 없어요."
+          gh release upload v2-update latest.json --clobber -R "${{ github.repository }}"
   html:
     needs: [check, windows]
     runs-on: ubuntu-latest

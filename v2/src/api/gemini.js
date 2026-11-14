@@ -55,7 +55,7 @@ export function preamble(kind = 'write') {
 const USE = 'potato2.usage';
 export function usageLog() { try { return JSON.parse(localStorage.getItem(USE) || '[]'); } catch (_) { return []; } }
 export function logUse(kind, model, usage, extra) {
-  const u = usage || {}, row = { t: Date.now(), kind, model, in: u.promptTokenCount ?? u.total_input_tokens ?? u.input_tokens ?? 0, out: u.candidatesTokenCount ?? u.total_output_tokens ?? u.output_tokens ?? 0, ...(extra || {}) };
+  const u = usage || {}, row = { t: Date.now(), kind, model, in: u.promptTokenCount ?? u.total_input_tokens ?? u.input_tokens ?? 0, out: u.candidatesTokenCount ?? u.total_output_tokens ?? u.output_tokens ?? 0, th: u.thoughtsTokenCount ?? u.total_thought_tokens ?? u.total_reasoning_tokens ?? 0, ...(extra || {}) };
   try { localStorage.setItem(USE, JSON.stringify([row, ...usageLog()].slice(0, 500))); } catch (_) { /* 저장 공간이 막혀 있으면 건너뜀 */ }
 }
 export const usageClear = () => { try { localStorage.removeItem(USE); } catch (_) { /* 없음 */ } };

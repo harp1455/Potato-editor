@@ -58,6 +58,11 @@ with sync_playwright() as pw:
     assert b['model'] == 'gemini-omni-1.1-flash' and b['response_format'] == {'type': 'video', 'aspect_ratio': '16:9', 'resolution': '720p'} and b['generation_config']['video_config']['task'] == 'image_to_video'
     assert b['input'][0]['type'] == 'image' and b['input'][1]['text'].endswith('gentle wind') and 'Animate the scene as described' in b['system_instruction'] and len(b['safety_settings']) == 5
     assert [s['m'] for s in P(page, "__sent")][1:] == ['GET', 'GET']
+    # 금액 어림: 요금표에 있는 모델은 원과 달러로, 합계는 오늘·이번 달·전체로 보여요
+    P(page, "localStorage.setItem('potato2.usage', JSON.stringify([{ t: Date.now(), kind: 'translate', model: 'gemini-3.8-flash', in: 1000000, out: 0, th: 0 }, { t: Date.now(), kind: 'nai generate', model: 'nai-diffusion-4-5-full', size: '832 × 1216', steps: 28 }]))")
+    P(page, "__potato.run('help.usage')"); page.wait_for_selector('.dlg >> text=API 사용 기록')
+    txt = page.locator('.dlg[aria-label="API 사용 기록"]').inner_text(); assert '($0.75)' in txt and 'Anlas' in txt and '이번 달' in txt, txt
+    page.keyboard.press('Escape')
     assert not errs, errs
     br.close()
 print('통과')

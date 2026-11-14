@@ -8,11 +8,28 @@
   },
   "app": {
     "windows": [
-      { "label": "main", "title": "감자 편집기 2", "width": 1440, "height": 900, "minWidth": 900, "minHeight": 600, "center": true, "dragDropEnabled": false, "maximized": true }
+      {
+        "label": "main",
+        "title": "감자 편집기 2",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 900,
+        "minHeight": 600,
+        "center": true,
+        "dragDropEnabled": false,
+        "maximized": true
+      }
     ]
   },
   "bundle": {
-    "createUpdaterArtifacts": false,
+    "createUpdaterArtifacts": true,
     "shortDescription": "감자 편집기 2.0 (미리보기판)"
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/harp1455/Potato-editor/releases/download/v2-update/latest.json"
+      ]
+    }
   }
 }

@@ -15,6 +15,7 @@ import { characterRoom, registerCharCmds } from './rooms/character.js';
 import { naiAccount } from './api/nai.js';
 import { registerAiCmds, packsPane } from './ui/aitools.js';
 import { registerNaiTools } from './ui/naitools.js';
+import { costOf, money, totals, krw } from './core/cost.js';
 import { registerLiquify, makeField, stroke, warp } from './ui/liquify.js';
 import { preamble, check, generate, buildBody, buildInteraction, speak, animate, SAFETY_CATEGORIES, usageLog, usageClear } from './api/gemini.js';
 
@@ -165,17 +166,47 @@ function planDialog() {
       h('table.plan', null, h('tbody', null, rows.map(r => h('tr' + (r[2] === '지금' ? '.now' : ''), null, h('th', { scope: 'row' }, r[0]), h('td', null, r[1]), h('td.plan-when', null, r[2])))))) });
 }
 
-const KIND = { write: '글쓰기', translate: '번역', dub: '더빙', video: 'AI 영상', edit: '그림 고치기', 'nai generate': 'NovelAI 그림', 'nai img2img': 'NovelAI 다시 그리기', 'nai infill': 'NovelAI 고른 곳' };
+const KIND = { write: '글쓰기', translate: '번역', dub: '더빙', video: 'AI 영상', edit: '그림 고치기', 'nai generate': 'NovelAI 그림', 'nai img2img': 'NovelAI 다시 그리기', 'nai infill': 'NovelAI 고른 곳', 'nai upscale': 'NovelAI 화질 키우기', 'nai vibe': 'NovelAI 분위기 참고', 'nai lineart': 'NovelAI 선화', 'nai sketch': 'NovelAI 스케치', 'nai colorize': 'NovelAI 색 입히기', 'nai emotion': 'NovelAI 표정', 'nai declutter': 'NovelAI 글자 지우기' };
 function usageDialog() {
-  const L = usageLog();
-  dialog({ title: 'API 사용 기록', wide: true, buttons: [{ label: '기록 지우기', run: () => { usageClear(); } }, { label: '닫기', primary: true }],
-    body: L.length ? h('table.plan', null, h('tbody', null, L.slice(0, 200).map(r => h('tr', null, h('td.plan-when', null, new Date(r.t).toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'short' })), h('th', { scope: 'row' }, KIND[r.kind] || r.kind), h('td', null, r.model || ''), h('td.plan-when', null, r.size ? `${r.size}, ${r.steps}스텝` : `보냄 ${(r.in || 0).toLocaleString('ko-KR')} / 받음 ${(r.out || 0).toLocaleString('ko-KR')} 토큰`)))))
-      : h('p.dlg-text', null, '아직 기록이 없어요. 제미나이나 NovelAI를 쓰면 여기에 남아요. 금액은 구글과 NovelAI의 요금표에 따라 달라서 토큰과 횟수만 적어요.') });
+  const L = usageLog(), T = totals(L);
+  const rate = h('input.num', { type: 'number', min: 500, max: 3000, step: 10, value: krw(), 'aria-label': '1달러가 몇 원인지', style: 'width:80px', onchange: e => { settings.set('krw', Math.min(3000, Math.max(500, +e.target.value || 1340))); d.close(); usageDialog(); } });
+  const d = dialog({ title: 'API 사용 기록', wide: true, buttons: [{ label: '기록 지우기', run: () => { usageClear(); } }, { label: '닫기', primary: true }],
+    body: L.length ? h('div.vid-form', null,
+      h('table.plan', null, h('tbody', null, [['오늘', T.day], ['이번 달', T.month], ['전체', T.all]].map(([t, v]) => h('tr', null, h('th', { scope: 'row' }, t), h('td', null, money(v)))))),
+      h('p.dlg-text', null, '금액은 제미나이 요금표로 어림한 값이에요. 실제 청구액은 구글이 정해요. NovelAI는 Anlas로 내서 금액에 넣지 않았어요.'),
+      h('label.field', null, h('span.field-name', null, '1달러 ='), rate, h('span.field-unit', null, '원')),
+      h('table.plan', null, h('tbody', null, L.slice(0, 200).map(r => h('tr', null, h('td.plan-when', null, new Date(r.t).toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'short' })), h('th', { scope: 'row' }, KIND[r.kind] || r.kind), h('td', null, r.model || ''), h('td.plan-when', null, r.size ? `${r.size}${r.steps ? `, ${r.steps}스텝` : ''}` : `보냄 ${(r.in || 0).toLocaleString('ko-KR')} / 받음 ${((r.out || 0) + (r.th || 0)).toLocaleString('ko-KR')} 토큰`), h('td.plan-when', null, String(r.kind).startsWith('nai') ? 'Anlas' : money(costOf(r))))))))
+      : h('p.dlg-text', null, '아직 기록이 없어요. 제미나이나 NovelAI를 쓰면 여기에 남고, 제미나이는 금액도 어림해 보여 줘요.') });
 }
 // 새 판 확인: 깃허브에 올라온 2.0 판 중 가장 새것과 견줘요
 const verNum = v => { const m = /(\d+)\.(\d+)\.(\d+)(?:-([a-z]+)\.(\d+))?/.exec(v) || []; return [+m[1] || 0, +m[2] || 0, +m[3] || 0, m[4] ? ({ alpha: 0, beta: 1, rc: 2 }[m[4]] ?? 0) : 9, +m[5] || 0]; };
 const newer = (a, b) => { const x = verNum(a), y = verNum(b); for (let i = 0; i < 5; i++) if (x[i] !== y[i]) return x[i] > y[i]; return false; };
+// 설치판: 새 판을 스스로 받아 설치하고 다시 켜요. 안 되면 아래의 '받는 곳 열기' 안내로 넘어가요
+async function selfUpdate() {
+  const T = window.__TAURI__; if (!T || !T.updater) return false;
+  let up = null; try { up = await T.updater.check(); } catch (_) { return false; }
+  if (!up) return false;
+  const msg = h('p.dlg-text', { role: 'status' }, '\u00a0'), bar = h('div.job-bar', null, h('span', { style: 'width:0%' }));
+  const d = dialog({ title: '새 판이 나왔어요', body: h('div.vid-form', null, h('p.dlg-text', null, `지금 쓰는 판은 ${VERSION}, 새 판은 ${up.version}이에요. 받아서 설치한 뒤 감자 편집기가 잠깐 닫혔다가 새 판으로 다시 열려요. 작업은 그대로 남아요.`), bar, msg),
+    buttons: [{ label: '나중에' }, { label: '지금 업데이트', primary: true, run: () => { go(); return false; } }] });
+  let busyNow = false;
+  const go = async () => {
+    if (busyNow) return; busyNow = true;
+    try {
+      await saveNow(); let total = 0, got = 0;
+      await up.downloadAndInstall(ev => {
+        if (ev.event === 'Started') total = (ev.data && ev.data.contentLength) || 0;
+        else if (ev.event === 'Progress') got += (ev.data && ev.data.chunkLength) || 0;
+        else if (ev.event === 'Finished') { msg.textContent = '설치하는 중이에요.'; return; }
+        bar.firstChild.style.width = (total ? Math.round(got / total * 100) : 50) + '%'; msg.textContent = total ? `${(got / 1e6).toFixed(1)}MB / ${(total / 1e6).toFixed(1)}MB 받는 중이에요.` : '받는 중이에요.';
+      });
+      if (T.process) await T.process.relaunch(); else d.close();
+    } catch (e) { busyNow = false; msg.textContent = '업데이트하지 못했어요. 나중에 다시 해 주세요. (' + String((e && e.message) || e).slice(0, 80) + ')'; }
+  };
+  return true;
+}
 async function checkUpdate(quiet) {
+  if (await selfUpdate()) { settings.set('updSeen', Date.now()); return true; }
   try {
     const res = await fetch('https://api.github.com/repos/harp1455/Potato-editor/releases?per_page=30', { headers: { Accept: 'application/vnd.github+json' } }); if (!res.ok) throw new Error(String(res.status));
     const top = (await res.json()).filter(r => /^v2\./.test(r.tag_name) && !r.draft).sort((a, b) => newer(a.tag_name, b.tag_name) ? -1 : 1)[0];
