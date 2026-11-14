@@ -53,8 +53,10 @@ export function renderSeq(g, s, t, w, h) {
   for (const o of s.overs || []) {
     if (t < o.t0 || t >= o.t0 + o.dur) continue;
     const b = state.bitmaps.get(o.mediaId); if (!b) { ensureBitmap(o.mediaId); continue; }
-    const dw = w * (o.size ?? 30) / 100, dh = dw * b.height / b.width;
-    g.save(); g.globalAlpha = o.opacity ?? 1; g.imageSmoothingQuality = 'high'; g.drawImage(b, w * (o.x ?? 50) / 100 - dw / 2, h * (o.y ?? 50) / 100 - dh / 2, dw, dh); g.restore();
+    // 끝 값(to)이 있으면 나오는 동안 처음 값에서 끝 값으로 부드럽게 바뀌어요
+    const p = (t - o.t0) / o.dur, e = p * p * (3 - 2 * p), at = (k, def) => { const a = o[k] ?? def; return o.to && o.to[k] != null ? a + (o.to[k] - a) * e : a; };
+    const dw = w * at('size', 30) / 100, dh = dw * b.height / b.width;
+    g.save(); g.globalAlpha = clamp(at('opacity', 1), 0, 1); g.imageSmoothingQuality = 'high'; g.drawImage(b, w * at('x', 50) / 100 - dw / 2, h * at('y', 50) / 100 - dh / 2, dw, dh); g.restore();
   }
   // 자막: 영상 높이에 맞춰 크기를 정해요
   for (const c of s.caps || []) {
@@ -83,18 +85,53 @@ async function addFramesTo(path, frames, fps, name, onStep) {
 }
 
 // 소리(배경 음악·더빙): 파일은 보관 공간에 두고, 미리 볼 때 같이 틀고, MP4로 내보낼 때 같이 넣어요
-const AUD = { el: null, id: null };
-async function audioEl(s) {
-  if (!s.audio) { if (AUD.el) AUD.el.pause(); AUD.el = null; AUD.id = null; return null; }
-  if (AUD.id !== s.audio.id) { const b = await idb.get('blobs', 'aud:' + s.audio.id); if (AUD.el) AUD.el.pause(); AUD.el = b ? new Audio(URL.createObjectURL(b)) : null; AUD.id = s.audio.id; }
-  if (AUD.el) AUD.el.volume = s.audio.vol ?? 1;
-  return AUD.el;
+// 소리 줄은 여러 개: { id, name, vol, t0(영상의 몇 초부터), from(파일의 몇 초부터), dur(얼마 동안, 없으면 끝까지) }
+export const tracksOf = s => s.audios || (s.audio ? [{ t0: 0, from: 0, ...s.audio }] : []);
+function ownTracks(s) { if (!s.audios) { s.audios = tracksOf(s).map(a => ({ ...a })); delete s.audio; } return s.audios; }
+const AUD = new Map();   // id → { el, len, peaks }
+async function audOf(a) {
+  let o = AUD.get(a.id); if (o) return o;
+  const b = await idb.get('blobs', 'aud:' + a.id); if (!b) return null;
+  o = { el: new Audio(URL.createObjectURL(b)), len: 0, peaks: null }; AUD.set(a.id, o);
+  try {   // 파형: 800칸으로 줄여서 가장 큰 값만 남겨요
+    const ac = new (window.AudioContext || window.webkitAudioContext)(), buf = await ac.decodeAudioData(await b.arrayBuffer()), d = buf.getChannelData(0), N = 800, st = Math.max(1, Math.floor(d.length / N)); o.len = buf.duration; o.peaks = new Float32Array(N);
+    for (let k = 0; k < N; k++) { let m = 0; for (let q = k * st, e = Math.min(d.length, q + st); q < e; q += 8) { const v = Math.abs(d[q]); if (v > m) m = v; } o.peaks[k] = m; }
+    ac.close();
+  } catch (_) { /* 파형을 못 그려도 소리는 나요 */ }
+  return o;
+}
+const lenOf = (a, o) => Math.max(0.05, a.dur ?? ((o && o.len) || 0) - (a.from || 0));
+// 미리 보기: 지금 시각에 나와야 할 소리만 틀어요
+function syncAudio(s, restart) {
+  const live = new Set();
+  for (const a of s ? tracksOf(s) : []) {
+    live.add(a.id); const o = AUD.get(a.id); if (!o) { audOf(a).then(() => syncAudio(seqOf())); continue; }
+    const on = V.playing && V.t >= a.t0 && V.t < a.t0 + lenOf(a, o); o.el.volume = Math.min(1, a.vol ?? 1);
+    if (on && (o.el.paused || restart)) { o.el.currentTime = (a.from || 0) + (V.t - a.t0); o.el.play().catch(() => {}); } else if (!on && !o.el.paused) o.el.pause();
+  }
+  for (const [id, o] of AUD) if (!live.has(id)) o.el.pause();
 }
 async function audioBuffer(s, secs) {
-  if (!s.audio) return null; const b = await idb.get('blobs', 'aud:' + s.audio.id); if (!b) return null;
-  const ac = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 }), src = await ac.decodeAudioData(await b.arrayBuffer()), n = Math.max(1, Math.round(secs * src.sampleRate)), out = ac.createBuffer(Math.min(2, src.numberOfChannels), n, src.sampleRate), vol = s.audio.vol ?? 1;
-  for (let c = 0; c < out.numberOfChannels; c++) { const d = out.getChannelData(c), f = src.getChannelData(c), m = Math.min(n, f.length); for (let i = 0; i < m; i++) d[i] = f[i] * vol; }
-  ac.close(); return out;
+  const T = tracksOf(s); if (!T.length) return null;
+  const ac = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 }), n = Math.max(1, Math.round(secs * 48000)), out = ac.createBuffer(2, n, 48000); let any = false;
+  for (const a of T) {
+    const b = await idb.get('blobs', 'aud:' + a.id); if (!b) continue;
+    const src = await ac.decodeAudioData(await b.arrayBuffer()), r = src.sampleRate, f0 = Math.round((a.from || 0) * r), len = Math.round((a.dur ?? (src.duration - (a.from || 0))) * r), o0 = Math.round(a.t0 * 48000), vol = a.vol ?? 1; any = true;
+    for (let c = 0; c < 2; c++) { const d = out.getChannelData(c), f = src.getChannelData(Math.min(c, src.numberOfChannels - 1)), k = r / 48000, m = Math.min(n - o0, Math.floor(Math.min(len, f.length - f0) / k)); for (let q = Math.max(0, -o0); q < m; q++) d[o0 + q] += f[f0 + Math.floor(q * k)] * vol; }
+  }
+  ac.close(); return any ? out : null;
+}
+// 파형과 자르는 손잡이: 밝은 구간이 영상에 들어가는 부분이에요. 양 끝을 끌어 잘라요
+function waveBox(a) {
+  const W = 236, H = 44, c = h('canvas.wave', { width: W, height: H, title: '밝은 부분만 영상에 들어가요. 양 끝을 끌어 잘라요.', 'aria-label': `${a.name} 파형` }), g = c.getContext('2d');
+  const paint = () => { const o = AUD.get(a.id), css = getComputedStyle(document.documentElement), L = (o && o.len) || 0; g.clearRect(0, 0, W, H); if (!o || !o.peaks || !L) return;
+    const x0 = (a.from || 0) / L * W, x1 = ((a.from || 0) + lenOf(a, o)) / L * W;
+    for (let x = 0; x < W; x++) { const v = o.peaks[Math.floor(x / W * o.peaks.length)] * (H / 2 - 2); g.fillStyle = css.getPropertyValue(x >= x0 && x <= x1 ? '--potato' : '--faint'); g.fillRect(x, H / 2 - v, 1, Math.max(1, v * 2)); }
+    g.fillStyle = css.getPropertyValue('--text'); g.fillRect(Math.round(x0), 0, 2, H); g.fillRect(Math.round(x1) - 2, 0, 2, H); };
+  audOf(a).then(paint);
+  c.addEventListener('pointerdown', e => { const o = AUD.get(a.id); if (!o || !o.len) return; const r = c.getBoundingClientRect(), L = o.len, at = ev => clamp((ev.clientX - r.left) / r.width, 0, 1) * L, end0 = (a.from || 0) + lenOf(a, o), left = Math.abs(at(e) - (a.from || 0)) < Math.abs(at(e) - end0); let mv = false;
+    drag(e, ev => { const t = at(ev); if (left) { const f = clamp(t, 0, end0 - 0.05); a.dur = +(end0 - f).toFixed(3); a.from = +f.toFixed(3); } else a.dur = +clamp(t - (a.from || 0), 0.05, L - (a.from || 0)).toFixed(3); mv = true; paint(); }, () => mv && commit('소리 자르기')); });
+  return c;
 }
 
 function draw() {
@@ -109,7 +146,7 @@ function draw() {
 function tickPlay(now) {
   const s = seqOf(); if (!V.playing || !s) return;
   V.t += (now - V.last) / 1000; V.last = now;
-  if (V.t >= total(s)) { V.t = 0; if (AUD.el) AUD.el.currentTime = 0; }
+  if (V.t >= total(s)) { V.t = 0; syncAudio(s, true); } else syncAudio(s);
   draw(); const clock = document.querySelector('.vid-clock'); if (clock) clock.textContent = fmt(V.t) + ' / ' + fmt(total(s));
   const head = document.querySelector('.vid-head'); if (head) head.style.left = headX(s) + 'px';
   V.raf = requestAnimationFrame(tickPlay);
@@ -121,7 +158,7 @@ const fmt = t => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, '0')}`
 function play(on) {
   V.playing = on; cancelAnimationFrame(V.raf); const s = seqOf();
   if (on) { V.last = performance.now(); V.raf = requestAnimationFrame(tickPlay); }
-  if (s) audioEl(s).then(a => { if (!a) return; if (V.playing) { a.currentTime = Math.min(V.t, a.duration || V.t); a.play().catch(() => {}); } else a.pause(); });
+  syncAudio(s, true);
   emit();
 }
 
@@ -173,9 +210,9 @@ export const videoRoom = {
         h('button.btn.small.primary', { disabled: !T, onclick: () => run('video.export') }, '내보내기'));
       // 둘째 줄: 얹는 그림과 자막이 언제 나오는지 막대로 보여요. 누르면 그 시각으로 가요
       const xOf = tt => { let a = 0, px = 8; for (const x of s.scenes) { if (tt < a + x.dur) return px + (tt - a) / x.dur * widthOf(x); a += x.dur; px += widthOf(x); } return px; };
-      const bars = s && s.scenes.length ? [...(s.overs || []).map(o => [o, 'over', (state.project.media.find(m => m.id === o.mediaId) || {}).name || '그림']), ...(s.caps || []).map(c => [c, 'cap', String(c.text || '').split('\n')[0]])] : [];
+      const bars = s && s.scenes.length ? [...(s.overs || []).map(o => [o, 'over', (state.project.media.find(m => m.id === o.mediaId) || {}).name || '그림']), ...(s.caps || []).map(c => [c, 'cap', String(c.text || '').split('\n')[0]]), ...tracksOf(s).map(a => [{ t0: a.t0 || 0, dur: lenOf(a, AUD.get(a.id)) || 1 }, 'aud', a.name])] : [];
       lane.hidden = !bars.length;
-      lane.replaceChildren(h('div.vid-lane-in', { style: `width:${s ? xOf(1e9) + 8 : 0}px` }, bars.map(([o, kind, name]) => h('button.vid-chip.' + kind, { style: `left:${xOf(o.t0)}px;width:${Math.max(10, xOf(o.t0 + o.dur) - xOf(o.t0))}px`, title: `${kind === 'over' ? '얹는 그림' : '자막'}: ${name}, ${o.t0.toFixed(2)}초부터 ${o.dur.toFixed(2)}초 동안`, onclick: () => { V.t = o.t0; emit(); } }, name))));
+      lane.replaceChildren(h('div.vid-lane-in', { style: `width:${s ? xOf(1e9) + 8 : 0}px` }, bars.map(([o, kind, name]) => h('button.vid-chip.' + kind, { style: `left:${xOf(o.t0)}px;width:${Math.max(10, xOf(o.t0 + o.dur) - xOf(o.t0))}px`, title: `${kind === 'over' ? '얹는 그림' : kind === 'aud' ? '소리' : '자막'}: ${name}, ${o.t0.toFixed(2)}초부터 ${o.dur.toFixed(2)}초 동안`, onclick: () => { V.t = o.t0; emit(); } }, name))));
       lane.scrollLeft = strip.scrollLeft;
       strip.replaceChildren(...(s && s.scenes.length ? [
         ...s.scenes.map((x, i) => h('button.vid-scene' + (V.sel.has(x.id) ? '.on' : ''), { style: `width:${widthOf(x)}px`, title: `${i + 1}번 장면, ${x.dur.toFixed(2)}초`, 'aria-pressed': String(V.sel.has(x.id)),
@@ -209,14 +246,18 @@ export const videoRoom = {
           h('div.field-row', null, num('시작', +o.t0.toFixed(2), 0.1, 0, v => { o.t0 = Math.max(0, v); commit('얹는 그림 시작'); }, '초'), num('길이', +o.dur.toFixed(2), 0.1, 0.1, v => { o.dur = Math.max(0.1, v); commit('얹는 그림 길이'); }, '초')),
           h('div.field-row', null, num('가로', o.x ?? 50, 1, -50, v => { o.x = clamp(v, -50, 150); commit('얹는 그림 자리'); }, '%'), num('세로', o.y ?? 50, 1, -50, v => { o.y = clamp(v, -50, 150); commit('얹는 그림 자리'); }, '%')),
           h('div.field-row', null, num('크기', o.size ?? 30, 1, 1, v => { o.size = clamp(v, 1, 400); commit('얹는 그림 크기'); }, '%'), num('진하기', Math.round((o.opacity ?? 1) * 100), 5, 0, v => { o.opacity = clamp(v, 0, 100) / 100; commit('얹는 그림 불투명도'); }, '%')),
+          h('label.check', null, h('input', { type: 'checkbox', checked: !!o.to, onchange: e => { if (e.target.checked) o.to = { x: o.x ?? 50, y: o.y ?? 50, size: o.size ?? 30, opacity: o.opacity ?? 1 }; else delete o.to; commit('얹는 그림 움직임'); } }), '나오는 동안 움직이기'),
+          ...(o.to ? [h('p.panel-note', null, '위는 처음 값, 아래는 끝날 때의 값이에요.'),
+            h('div.field-row', null, num('끝 가로', o.to.x, 1, -50, v => { o.to.x = clamp(v, -50, 150); commit('얹는 그림 끝 자리'); }, '%'), num('끝 세로', o.to.y, 1, -50, v => { o.to.y = clamp(v, -50, 150); commit('얹는 그림 끝 자리'); }, '%')),
+            h('div.field-row', null, num('끝 크기', o.to.size, 1, 1, v => { o.to.size = clamp(v, 1, 400); commit('얹는 그림 끝 크기'); }, '%'), num('끝 진하기', Math.round(o.to.opacity * 100), 5, 0, v => { o.to.opacity = clamp(v, 0, 100) / 100; commit('얹는 그림 끝 진하기'); }, '%'))] : []),
           h('div.btn-row', null, h('span.grow'), h('button.icon-btn', { title: '얹는 그림 빼기', 'aria-label': '얹는 그림 빼기', onclick: () => { s.overs = s.overs.filter(x => x !== o); commit('얹는 그림 빼기'); } }, icon('trash')))); }),
         h('button.btn.small', { disabled: !picked.size, title: picked.size ? '' : '보관함에서 얹을 그림을 먼저 골라 주세요', onclick: () => run('video.addOver') }, '고른 그림을 지금 시각에 얹기'),
         h('h3.sec', null, '소리'),
-        s.audio ? h('div.cap', null, h('p.clip-text', { title: s.audio.name }, s.audio.name),
-          h('label.field', null, h('span.field-name.w', null, '크기'), h('input.range', { type: 'range', min: 0, max: 100, value: Math.round((s.audio.vol ?? 1) * 100), 'aria-label': '소리 크기', onchange: e => { s.audio.vol = e.target.value / 100; commit('소리 크기'); } })),
-          h('div.btn-row', null, h('button.btn.small', { onclick: () => { delete s.audio; commit('소리 빼기'); } }, '소리 빼기')),
-          h('p.panel-note', null, '소리는 MP4로 내보낼 때만 들어가요. 영상보다 길면 영상 길이에서 잘려요.'))
-          : h('button.btn.small', { onclick: () => run('video.audio') }, '소리 파일 넣기'),
+        ...tracksOf(s).map((a0, ti) => { const A = () => ownTracks(s)[ti]; return h('div.cap', null, h('p.clip-text', { title: a0.name }, a0.name), waveBox(new Proxy(a0, { set: (_, k, v) => { A()[k] = v; a0[k] = v; return true; } })),
+          h('div.field-row', null, num('영상의', +(a0.t0 || 0).toFixed(2), 0.1, 0, v => { A().t0 = Math.max(0, v); commit('소리 시작'); }, '초부터'), num('크기', Math.round((a0.vol ?? 1) * 100), 5, 0, v => { A().vol = clamp(v, 0, 200) / 100; commit('소리 크기'); }, '%')),
+          h('div.btn-row', null, h('button.btn.small', { onclick: () => { A().t0 = +V.t.toFixed(2); commit('소리 시작'); } }, '지금 시각부터 나오게'), h('span.grow'), h('button.icon-btn', { title: '소리 빼기', 'aria-label': `${a0.name} 빼기`, onclick: () => { ownTracks(s).splice(ti, 1); commit('소리 빼기'); } }, icon('trash')))); }),
+        h('button.btn.small', { onclick: () => run('video.audio') }, '소리 파일 넣기'),
+        tracksOf(s).length ? h('p.panel-note', null, '소리는 MP4로 내보낼 때만 들어가요. 여러 개를 넣으면 겹쳐서 나와요.') : null,
       ].filter(Boolean)));
       draw();
     };
@@ -288,7 +329,7 @@ export function registerVideoCmds() {
   addCmd({ id: 'video.dup', title: '장면 복제', menu: '영상', group: 'scene', enabled: has, run: () => { const s = seqOf(); [...s.scenes].forEach(x => { if (V.sel.has(x.id)) s.scenes.splice(s.scenes.indexOf(x) + 1, 0, { ...x, id: uid('s') }); }); commit('장면 복제'); } });
   addCmd({ id: 'video.delete', title: '장면 지우기', menu: '영상', group: 'scene', enabled: has, run: () => { const s = seqOf(); s.scenes = s.scenes.filter(x => !V.sel.has(x.id)); V.sel.clear(); commit('장면 지우기'); } });
   addCmd({ id: 'video.import', title: '영상·움짤 파일을 장면으로 불러오기…', menu: '영상', group: 'in', words: 'mp4 gif webp 불러오기', run: importClip });
-  addCmd({ id: 'video.audio', title: '소리 파일 넣기…', menu: '영상', group: 'in', words: '음악 배경음 더빙 mp3 wav', run: () => { const i = h('input', { type: 'file', accept: 'audio/*' }); i.onchange = async () => { const f = i.files[0]; if (!f) return; const s = ensureSeq(), id = uid('a'); await idb.put('blobs', 'aud:' + id, f); s.audio = { id, name: f.name, vol: 1 }; commit('소리 넣기'); toast(`'${f.name}'을 넣었어요. 재생하면 같이 들려요.`); }; i.click(); } });
+  addCmd({ id: 'video.audio', title: '소리 파일 넣기…', menu: '영상', group: 'in', words: '음악 배경음 더빙 mp3 wav', run: () => { const i = h('input', { type: 'file', accept: 'audio/*' }); i.onchange = async () => { const f = i.files[0]; if (!f) return; const s = ensureSeq(), id = uid('a'); await idb.put('blobs', 'aud:' + id, f); ownTracks(s).push({ id, name: f.name, vol: 1, t0: ownTracks(s).length ? +V.t.toFixed(2) : 0, from: 0 }); commit('소리 넣기'); toast(`'${f.name}'을 넣었어요. 재생하면 같이 들려요.`); }; i.click(); } });
   addCmd({ id: 'video.interp', title: 'AI 중간 장면 넣기', menu: '영상', group: 'scene', words: '보간 부드럽게 rife', enabled: has, run: interp });
   addEventListener('keydown', e => { if (!cv || document.querySelector('.dlg-back, #modalRoot .modal-bg') || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return; if (e.code === 'Space') { e.preventDefault(); e.stopImmediatePropagation(); if (seqOf()) play(!V.playing); } else if (e.key === 'Delete' && V.sel.size) { e.preventDefault(); e.stopImmediatePropagation(); run('video.delete'); } }, true);
 }

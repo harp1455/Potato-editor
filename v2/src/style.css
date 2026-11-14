@@ -342,3 +342,6 @@ label.batch-row { cursor: pointer; } .batch-row input[type=checkbox] { accent-co
 .cut-over-item.on .cut-over-pic { outline: 2px solid var(--potato); outline-offset: 1px; }
 
 .sw-list { display: flex; flex-wrap: wrap; gap: 6px; min-height: 28px; } .sw { width: 28px; height: 28px; padding: 0; border: 1px solid var(--line); border-radius: 2px; cursor: pointer; } .sw:hover { outline: 2px solid var(--bad); outline-offset: 1px; }
+
+.wave { width: 100%; height: 44px; display: block; background: var(--well); border: 1px solid var(--line); border-radius: 2px; cursor: ew-resize; touch-action: none; }
+.vid-chip.aud { top: 5px; height: 12px; line-height: 12px; font-size: 10px; background: none; box-shadow: inset 0 0 0 1px var(--edge); color: var(--dim); }

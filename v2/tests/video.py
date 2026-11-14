@@ -58,7 +58,13 @@ with sync_playwright() as pw:
     wav = os.path.join(tmp, '소리.wav'); n = 24000; pcm = b''.join(struct.pack('<h', int(8000 * math.sin(i * 0.05))) for i in range(n))
     open(wav, 'wb').write(b'RIFF' + struct.pack('<I', 36 + len(pcm)) + b'WAVEfmt ' + struct.pack('<IHHIIHH', 16, 1, 1, 24000, 48000, 2, 16) + b'data' + struct.pack('<I', len(pcm)) + pcm)
     with page.expect_file_chooser() as fc: page.click('.vid-side >> text=소리 파일 넣기')
-    fc.value.set_files(wav); page.wait_for_function("__potato.state.project.sequences[0].audio")
+    fc.value.set_files(wav); page.wait_for_function("(__potato.state.project.sequences[0].audios || []).length === 1")
+    # 파형이 그려지고, 오른쪽 끝을 끌면 길이가 잘려요. 소리를 하나 더 넣으면 겹쳐져요
+    page.wait_for_function("(() => { const c = document.querySelector('canvas.wave'); if (!c) return false; const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; for (let i = 3; i < d.length; i += 4) if (d[i]) return true; return false; })()")
+    wb = page.locator('canvas.wave').bounding_box(); page.mouse.move(wb['x'] + wb['width'] - 2, wb['y'] + 20); page.mouse.down(); page.mouse.move(wb['x'] + wb['width'] * 0.5, wb['y'] + 20, steps=3); page.mouse.up()
+    du = P(page, "__potato.state.project.sequences[0].audios[0].dur"); assert 0.4 < du < 0.6, du
+    with page.expect_file_chooser() as fc: page.click('.vid-side >> text=소리 파일 넣기')
+    fc.value.set_files(wav); page.wait_for_function("__potato.state.project.sequences[0].audios.length === 2"); assert page.locator('.vid-chip.aud').count() == 2
     if P(page, "__potato.enc.canMp4() && typeof AudioEncoder !== 'undefined'"):
         page.click('.vid-bar >> text=내보내기')
         with page.expect_download() as dl: page.click('.dlg-foot >> text=내보내기')
@@ -88,6 +94,9 @@ with sync_playwright() as pw:
     assert P(page, R + "(0.1)") != P(page, R + "(0.7)") and P(page, R + "(0.1)") == P(page, R + "(1.8)")
     assert page.locator('.vid-chip.over').count() == 1 and page.locator('.vid-side >> text=얹는 그림').count() >= 1
     shot(page, '75-over')
+    # 얹는 그림 움직이기: 끝 값을 주면 나오는 동안 모습이 바뀌어요
+    assert P(page, R + "(0.6)") == P(page, R + "(1.4)")
+    P(page, "(() => { __potato.state.project.sequences[0].overs[0].to = { x: 80, y: 50, size: 20, opacity: 1 }; __potato.emit(); })()"); assert P(page, R + "(0.6)") != P(page, R + "(1.4)")
     assert not errs, errs
     br.close()
 print('통과')
