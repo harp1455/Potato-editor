@@ -1,4 +1,5 @@
 // 위에 뜨는 것들: 메뉴, 대화 창, 알림, 명령 찾기
+import { logErr, takeDetail } from '../core/errlog.js';
 import { h, icon, fmtKeys } from './dom.js';
 import { cmds, canRun, keysOf, run } from '../core/cmd.js';
 
@@ -35,11 +36,16 @@ addEventListener('blur', closeMenu);
 
 // ---- 알림 ----
 let toastBox = null;
+let onErrClick = null, whereFn = null;
+export const setErrUi = (open, where) => { onErrClick = open; whereFn = where; };
+const toastWhere = () => { try { return whereFn ? whereFn() : ''; } catch (_) { return ''; } };
 export function toast(text, kind = '') {
   if (!toastBox) { toastBox = h('div.toasts', { role: 'status', 'aria-live': 'polite' }); document.body.append(toastBox); }
-  const t = h('div.toast' + (kind ? '.' + kind : ''), null, text);
-  toastBox.append(t);
-  setTimeout(() => t.remove(), kind === 'err' ? 7000 : 3200);
+  // 오류는 화면을 막지 않아요: 기록에 남기고, 짧은 알림만 잠깐 보여요. 알림을 누르면 오류 기록이 열려요
+  if (kind === 'err') logErr(toastWhere(), text, takeDetail(text));
+  const t = h('div.toast' + (kind ? '.' + kind : ''), kind === 'err' ? { role: 'button', tabindex: '0', title: '눌러서 오류 기록 보기', onclick: () => { t.remove(); if (onErrClick) onErrClick(); } } : null, text);
+  toastBox.append(t); while (toastBox.querySelectorAll('.toast.err').length > 3) toastBox.querySelector('.toast.err').remove();
+  setTimeout(() => t.remove(), kind === 'err' ? 5000 : 3200);
 }
 
 // ---- 대화 창 ----

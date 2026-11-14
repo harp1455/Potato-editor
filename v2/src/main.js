@@ -2,7 +2,8 @@ import { h, icon, fmtKeys } from './ui/dom.js';
 import { settings } from './core/settings.js';
 import { addCmd, cmds, cmd, run, handleKey, keysOf, keyName, setErrHandler } from './core/cmd.js';
 import { state, canvasOf, boot, onChange, onTick, emit, commit, undo, redo, canUndo, canRedo, saveNow, newProject, openProject, listProjects, deleteProject } from './core/store.js';
-import { showMenu, closeMenu, cmdItem, toast, dialog, confirmBox, palette, busy } from './ui/overlay.js';
+import { showMenu, closeMenu, cmdItem, toast, dialog, confirmBox, palette, busy, setErrUi } from './ui/overlay.js';
+import { errLog, errClear, errText, logErr, noteDetail } from './core/errlog.js';
 import { renderDock, updatePanels, togglePanel, hasPanel, resetLayout } from './ui/dock.js';
 import { PANELS } from './ui/panels.js';
 import { imageRoom, registerImageCmds, setMenuItem } from './rooms/image.js';
@@ -63,6 +64,7 @@ function registerCmds() {
   addCmd({ id: 'view.full', title: '전체 화면', menu: '보기', keys: 'F11', checked: () => !!document.fullscreenElement, run: async () => { const T = window.__TAURI__; try { if (T && T.window) { const w = T.window.getCurrentWindow(); await w.setFullscreen(!(await w.isFullscreen())); } else if (document.fullscreenElement) await document.exitFullscreen(); else await document.documentElement.requestFullscreen(); } catch (_) { toast('전체 화면으로 바꾸지 못했어요.', 'err'); } } });
   addCmd({ id: 'help.guide', title: '사용법', menu: '도움말', keys: 'F1', run: helpDialog });
   addCmd({ id: 'help.changes', title: '업데이트 기록', menu: '도움말', run: () => { const u = 'https://github.com/harp1455/Potato-editor/releases', T = window.__TAURI__; if (T && T.opener && T.opener.openUrl) T.opener.openUrl(u); else window.open(u, '_blank', 'noopener'); } });
+  addCmd({ id: 'help.errors', title: '오류 기록…', menu: '도움말', words: '로그 log 에러 거절', run: errDialog });
   addCmd({ id: 'help.plan', title: '2.0에서 달라지는 것', menu: '도움말', run: planDialog });
   addCmd({ id: 'help.update', title: '새 판 확인', menu: '도움말', run: () => checkUpdate(false) });
   addCmd({ id: 'link.watch', title: 'NAIS3 저장 폴더 지켜보기 (켜기·끄기)', menu: 'AI', group: 'link', words: '연동 nais 폴더 자동 가져오기', checked: () => linkState().on, run: () => (linkState().on ? stopWatch() : startWatch(!linkState().name)) });
@@ -156,6 +158,14 @@ function helpDialog() {
     ...sec('컷 작업실', [['도구', 'V 고르기, C 컷, B 말풍선, T 글자, L 집중선. Shift를 누르고 누르면 여러 개를 함께 골라요.'], ['대사', '컷 메뉴에서 번역, 다듬기, 대사 초안, 그림 속 글자 번역을 해요.']]),
     ...sec('영상 작업실', [['장면', '보관함에서 그림을 골라 장면으로 넣어요. 장면마다 길이, 겹쳐 바뀜, 화면 움직임을 정해요.'], ['자막·소리·얹는 그림', '오른쪽 칸에서 넣어요. 움직임 점으로 시간에 따라 바뀌게 할 수 있어요.'], ['내보내기', 'Ctrl+M. MP4, GIF, WebP로 저장해요.']]),
     ...sec('캐릭터 작업실', [['차례', '① 뼈대 맞추기 → ② 부위 나누기 → ③ 움직임 만들기. 다 되면 영상 작업실로 보내거나 파일로 내보내요.']])) });
+}
+// 오류 기록: 생긴 오류와 거절을 모아 보고, 파일로 저장하거나 복사해요
+function errDialog() {
+  const L = errLog();
+  const d = dialog({ title: '오류 기록', wide: true, buttons: [{ label: '기록 지우기', run: () => { errClear(); } }, { label: '복사', run: () => { navigator.clipboard.writeText(errText()).then(() => toast('오류 기록을 복사했어요.'), () => toast('복사하지 못했어요. 파일로 저장해 주세요.')); return false; } }, { label: '파일로 저장', primary: true, run: () => { download(new Blob([errText()], { type: 'text/plain' }), `감자편집기2 오류 기록 ${new Date().toISOString().slice(0, 10)}.txt`); return false; } }],
+    body: L.length ? h('div.vid-form', null, h('p.dlg-text', null, `오류와 거절 ${L.length}건이 남아 있어요. 파일로 저장하거나 복사해서 보내 주시면 원인을 찾기 쉬워요. API 키나 토큰은 기록하지 않아요.`),
+      h('div.err-list', null, L.slice(0, 200).map(r => h('div.err-row', null, h('span.plan-when', null, new Date(r.t).toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'medium' }) + (r.where ? ' · ' + r.where : '')), h('b', null, r.msg), r.detail ? h('code', null, r.detail) : null))))
+      : h('p.dlg-text', null, '기록된 오류가 없어요.') });
 }
 // 색 견본: 자주 쓰는 색을 모아 두면 모든 색 고르는 창에 견본으로 나와요
 function swatchList() {
@@ -277,6 +287,8 @@ function settingsDialog(tab = 'screen') {
     screen: () => [
       h('h3', null, '화면 방식'),
       radio('mode', settings.get('layoutMode'), [['rooms', '작업실 나누기', '이미지, 컷, 영상, 캐릭터 작업실을 오가요. 작업실마다 패널 배치를 따로 기억해요.'], ['single', '한 화면에 모두', '패널 배치 하나로 모든 일을 해요. 가운데 화면만 위쪽 단추로 바꿔요.']], v => settings.set('layoutMode', v)),
+      h('h3', null, '그림을 끌어다 놓으면'),
+      radio('drop', settings.get('dropNew') ? 'new' : 'layer', [['layer', '지금 그림판에 레이어로', '열려 있는 그림 위에 겹쳐 올려요. Shift를 누르고 놓으면 새 그림판으로 열려요.'], ['new', '새 그림판(탭)으로', '그림마다 탭을 새로 열어요. Shift를 누르고 놓으면 지금 그림판에 레이어로 올라가요.']], v => settings.set('dropNew', v === 'new')),
       h('h3', null, '밝기'),
       radio('theme', settings.get('theme'), [['dark', '어두운 화면', '그림의 색이 가장 정확하게 보여요.'], ['light', '밝은 화면', '밝은 곳에서 일하거나 흰 종이 위 그림을 볼 때 편해요.'], ['system', '컴퓨터 설정 따르기', '윈도우의 밝게·어둡게 설정을 따라가요.']], v => { settings.set('theme', v); applyTheme(); }),
       h('h3', null, '도움말'),
@@ -341,7 +353,11 @@ function settingsDialog(tab = 'screen') {
 async function start() {
   applyTheme(); matchMedia('(prefers-color-scheme: light)').addEventListener('change', applyTheme);
   swatchList();
-  setErrHandler(e => { console.error(e); toast(e.message || '문제가 생겼어요.', 'err'); });
+  setErrHandler(e => { console.error(e); noteDetail(e.code || 'error', e.message || '', (e.detail ? e.detail + ' / ' : '') + String(e.stack || '').split('\n').slice(0, 4).join(' | ')); toast(e.message || '문제가 생겼어요.', 'err'); });
+  setErrUi(errDialog, () => (ROOMS.find(r => r.id === settings.get('room')) || {}).title || '');
+  // 어디서도 잡지 못한 오류도 화면을 막지 않고 기록에만 남겨요
+  addEventListener('error', e => logErr('알 수 없는 오류', e.message, `${e.filename || ''}:${e.lineno || ''} ${e.error && e.error.stack ? String(e.error.stack).split('\n').slice(0, 4).join(' | ') : ''}`));
+  addEventListener('unhandledrejection', e => { const r = e.reason || {}; logErr('알 수 없는 오류', r.message || String(r), (r.code ? r.code + ' / ' : '') + (r.detail ? r.detail + ' / ' : '') + String(r.stack || '').split('\n').slice(0, 4).join(' | ')); });
   registerCmds(); build();
   await boot();
   renderChrome(); mountRoom(); refresh();
@@ -369,6 +385,7 @@ async function start() {
   import('./ui/geminitools.js').then(f => { window.__potato.gem = f; });
   import('./rooms/cut.js').then(f => { window.__potato.cut = f; });
   window.__potato.liq = { makeField, stroke, warp };
+  window.__potato.toastErr = m => toast(m, 'err');
   window.__potato.link = { linkState, startWatch, stopWatch, sendOut };
 }
 start();

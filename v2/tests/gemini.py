@@ -74,6 +74,15 @@ with sync_playwright() as pw:
         try { await __potato.api.generate('write', 'm', { contents: [] }); out.push('no'); } catch (e) { out.push(e.message); }
         window.fetch = f; return out; })()""")
     assert rr[0] == 'ok' and rr[1] is False and rr[2].startswith('cut:') and '막혔' not in rr[2] and 'WEIRD_NEW' in rr[3], rr
+    # 오류 기록: 오류와 거절은 화면을 막지 않고 기록에 남고(서버가 준 이유까지), 기록만 따로 볼 수 있어요
+    P(page, "localStorage.removeItem('potato2.errlog')")
+    P(page, """(async () => { const f = window.fetch; window.fetch = async () => new Response(JSON.stringify({ promptFeedback: { blockReason: 'PROHIBITED_CONTENT' } }), { status: 200 });
+        try { await __potato.api.generate('translate', 'gemini-3.8-flash', { contents: [] }); } catch (e) { __potato.toastErr(e.message); } window.fetch = f; })()""")
+    lg = P(page, "JSON.parse(localStorage.getItem('potato2.errlog') || '[]')"); assert len(lg) == 1 and '막혔어요' in lg[0]['msg'] and 'PROHIBITED_CONTENT' in lg[0]['detail'], lg
+    assert page.locator('.dlg:has-text("막혔어요")').count() == 0   # 오류가 창으로 떠서 막지 않아요
+    page.click('.toast.err'); page.wait_for_selector('.dlg >> text=오류 기록'); assert page.locator('.err-row').count() == 1
+    with page.expect_download() as dl: page.click('.dlg button:has-text("파일로 저장")')
+    tx = open(dl.value.path(), encoding='utf-8').read(); assert 'PROHIBITED_CONTENT' in tx and '감자 편집기 2 오류 기록' in tx; page.keyboard.press('Escape')
     # 금액 어림: 요금표에 있는 모델은 원과 달러로, 합계는 오늘·이번 달·전체로 보여요
     P(page, "localStorage.setItem('potato2.usage', JSON.stringify([{ t: Date.now(), kind: 'translate', model: 'gemini-3.8-flash', in: 1000000, out: 0, th: 0 }, { t: Date.now(), kind: 'nai generate', model: 'nai-diffusion-4-5-full', size: '832 × 1216', steps: 28 }]))")
     P(page, "__potato.run('help.usage')"); page.wait_for_selector('.dlg >> text=API 사용 기록')

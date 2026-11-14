@@ -1,6 +1,7 @@
 // 제미나이로 가는 요청은 전부 이 파일 하나를 지나요.
 // 여기서 (1) 안전 설정 5가지를 끄고 (2) 성인 창작 안내문을 다른 지시보다 앞에 붙여요.
 // 번역·더빙·영상 같은 기능은 이 통로만 부르면 되고, 따로 챙길 필요가 없어요.
+import { noteDetail } from '../core/errlog.js';
 import { settings } from '../core/settings.js';
 
 const API = 'https://generativelanguage.googleapis.com/v1beta';
@@ -61,7 +62,7 @@ export function logUse(kind, model, usage, extra) {
 export const usageClear = () => { try { localStorage.removeItem(USE); } catch (_) { /* 없음 */ } };
 
 export class ApiError extends Error {
-  constructor(code, message, detail) { super(message); this.code = code; this.detail = detail || ''; }
+  constructor(code, message, detail) { super(message); this.code = code; this.detail = detail || ''; noteDetail(code, message, detail); }
 }
 
 // 요청 모양을 만드는 곳. 시험에서 이 함수만 따로 확인해요.

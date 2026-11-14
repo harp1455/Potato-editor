@@ -123,6 +123,22 @@ with sync_playwright() as pw:
     nl = P(page, C0 + ".layers.length"); P(page, "__potato.sel.selRect('new', 30, 30, 120, 90)"); P(page, "__potato.run('sel.mosaic')"); page.wait_for_function(C0 + ".layers.length === %d" % (nl + 1)); assert P(page, C0 + ".layers.at(-1).name") == '모자이크'
     page.keyboard.press('Control+z'); wh = P(page, "[%s.w, %s.h]" % (C0, C0)); P(page, "__potato.sel.selRect('new', 30, 30, 120, 90)"); P(page, "__potato.run('sel.crop')"); assert P(page, "[%s.w, %s.h]" % (C0, C0)) == [120, 90]
     page.keyboard.press('Control+z'); assert P(page, "[%s.w, %s.h]" % (C0, C0)) == wh
+    # 그리는 도구(8.x에서 옮김): 붓으로 그으면 '그리기' 레이어가 생기고 그 자리에 색이 칠해져요. 지우개, 도형, 되돌리기
+    C0 = "__potato.state.project.canvases[0]"; nl = P(page, C0 + ".layers.length"); vb = page.locator('.viewport').first.bounding_box()
+    PX = "(async (x, y) => { const cv = %s, c = await __potato.image.flatten(cv, cv.layers.find(l => l.paint).id); return [...c.getContext('2d').getImageData(x, y, 1, 1).data]; })" % C0
+    D2S = "((x, y) => { const v = __potato.image.view; return [x * v.zoom + v.ox, y * v.zoom + v.oy]; })"
+    P(page, "__potato.run('view.fit')"); page.wait_for_timeout(200)
+    P(page, "__potato.settings.set('paint', { color: '#ff0000', size: 20, alpha: 100, shape: 'rect', fill: true })"); page.keyboard.press('p')
+    a = P(page, D2S + "(60, 60)"); b = P(page, D2S + "(160, 60)")
+    page.mouse.move(vb['x'] + a[0], vb['y'] + a[1]); page.mouse.down(); page.mouse.move(vb['x'] + b[0], vb['y'] + b[1], steps=5); page.mouse.up()
+    page.wait_for_function(C0 + ".layers.length === %d && %s.layers.some(l => l.paint)" % (nl + 1, C0)); page.wait_for_timeout(300)
+    px = P(page, PX + "(110, 60)"); assert px[0] > 240 and px[1] < 15 and px[3] == 255, px; assert P(page, PX + "(110, 120)")[3] == 0
+    m1 = P(page, C0 + ".layers.find(l => l.paint).mediaId"); page.keyboard.press('x'); page.mouse.move(vb['x'] + a[0], vb['y'] + a[1]); page.mouse.down(); page.mouse.move(vb['x'] + (a[0] + b[0]) / 2, vb['y'] + a[1], steps=4); page.mouse.up(); page.wait_for_function(C0 + ".layers.find(l => l.paint).mediaId !== '%s'" % m1); page.wait_for_timeout(200)
+    assert P(page, PX + "(70, 60)")[3] == 0 and P(page, PX + "(150, 60)")[3] == 255
+    page.keyboard.press('u'); c1 = P(page, D2S + "(40, 150)"); c2 = P(page, D2S + "(120, 200)"); page.mouse.move(vb['x'] + c1[0], vb['y'] + c1[1]); page.mouse.down(); m2 = P(page, C0 + ".layers.find(l => l.paint).mediaId"); page.mouse.move(vb['x'] + c2[0], vb['y'] + c2[1], steps=4); page.mouse.up(); page.wait_for_function(C0 + ".layers.find(l => l.paint).mediaId !== '%s'" % m2); page.wait_for_timeout(200)
+    assert P(page, PX + "(80, 175)")[0] > 240 and P(page, C0 + ".layers.length") == nl + 1; shot(page, '32e-paint')
+    for _ in range(3): page.keyboard.press('Control+z')
+    assert P(page, C0 + ".layers.length") == nl; page.keyboard.press('v')
     # 가림막: 고른 곳만 보이게 하면 바깥은 투명해지고, 없애면 돌아와요
     A = "(async (x, y) => { const cv = __potato.state.project.canvases[0], c = await __potato.image.flatten(cv, cv.layers[0].id); return c.getContext('2d').getImageData(x, y, 1, 1).data[3]; })"
     lid = P(page, "__potato.state.layerId"); P(page, "(() => { __potato.state.layerId = __potato.state.project.canvases[0].layers[0].id; __potato.sel.selRect('new', 20, 20, 60, 60); __potato.emit(); })()")

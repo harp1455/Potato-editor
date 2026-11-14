@@ -1,5 +1,6 @@
 // 컷 작업실 (첫 판): 페이지에 컷을 나누고 그림을 담고, 말풍선과 글자를 얹어요.
 // 요소 = 컷(panel) · 말풍선(bubble) · 글자(text). 모두 페이지 좌표의 x, y, w, h를 가져요.
+import { logErr } from '../core/errlog.js';
 import { h, icon, clamp, drag } from '../ui/dom.js';
 import { state, commit, emit, tick, uid, ensureBitmap } from '../core/store.js';
 import { settings } from '../core/settings.js';
@@ -157,10 +158,12 @@ function translateDialog() {
     if (!els.length && !T.img) { toast('번역할 대사가 없어요.', 'err'); return; }
     const b = busy('번역하는 중이에요.'), langName = (LANGS.find(l => l[0] === T.lang) || [])[1] || T.lang;
     try {
-      let found = 0;
-      if (T.img) { const list = T.all ? pages() : [pg]; for (let i = 0; i < list.length; i++) { b.set(`그림 속 글자를 찾는 중이에요. ${i + 1} / ${list.length}쪽`); found += (await translateImage(list[i], T.lang)).length; } }   // 먼저 그림(원래 대사가 보이는 상태)을 읽어요
-      if (els.length) { b.set(`대사 ${els.length}줄을 번역하는 중이에요.`); const out = await translateTexts(els.map(e => e.text), T.lang, T.tone); els.forEach((e, i) => { e.text = out[i]; }); }
-      commit(`${langName}로 번역`); b.done(`대사 ${els.length}줄을 번역했어요.` + (T.img ? ` 그림 속 글자는 ${found}곳을 찾아 덮었어요.` : ''));
+      // 쪽마다 따로 보내요: 한 쪽이 거절되거나 실패해도 멈추지 않고 오류 기록에 남긴 뒤 다음 쪽으로 가요
+      let found = 0, done = 0, fails = 0; const list = T.all ? pages() : [pg], miss = (p, e, what) => { fails++; logErr('대사 번역', `${p.name} ${what}: ${e.message || '실패'}`, (e.code || '') + (e.detail ? ' / ' + e.detail : '')); };
+      if (T.img) for (let i = 0; i < list.length; i++) { b.set(`그림 속 글자를 찾는 중이에요. ${i + 1} / ${list.length}쪽`); try { found += (await translateImage(list[i], T.lang)).length; } catch (e) { miss(list[i], e, '그림 속 글자'); } }   // 먼저 그림(원래 대사가 보이는 상태)을 읽어요
+      for (let i = 0; i < list.length; i++) { const le = list[i].els.filter(e => e.type !== 'panel' && String(e.text || '').trim() && els.includes(e)); if (!le.length) continue; b.set(`대사를 번역하는 중이에요. ${i + 1} / ${list.length}쪽`); try { const out = await translateTexts(le.map(e => e.text), T.lang, T.tone); le.forEach((e, k) => { e.text = out[k]; }); done += le.length; } catch (e) { miss(list[i], e, '대사'); } }
+      if (done || found) commit(`${langName}로 번역`);
+      b.done(`대사 ${done}줄을 번역했어요.` + (T.img ? ` 그림 속 글자는 ${found}곳을 찾아 덮었어요.` : '') + (fails ? ` ${fails}건은 하지 못해 오류 기록에 남겼어요 (도움말 > 오류 기록).` : ''), fails && !done && !found ? 'err' : '');
     } catch (e) { b.done(e.message || '번역하지 못했어요.', 'err'); }
   })(); } }] });
 }

@@ -1,4 +1,5 @@
 // 이미지 작업실: 그림판에 레이어를 올리고, 옮기고, 고르고, 고쳐요.
+import { PAINT_TOOLS, SHAPES, paintDown, paintOpt, setPaint, drawPaintDraft } from './paint.js';
 import { h, icon, clamp, drag } from '../ui/dom.js';
 import { state, commit, emit, tick, canvasOf, layerOf, newCanvas, addLayer, addMedia, uid, ensureBitmap } from '../core/store.js';
 import { settings } from '../core/settings.js';
@@ -19,6 +20,7 @@ const TOOLS = [
   { id: 'wand', title: '비슷한 색 고르기', key: 'W', icon: 'wand', sel: 1, hint: '누른 곳과 비슷한 색이 이어진 곳을 골라요. 위의 허용 범위로 넓이를 정해요.' },
   { id: 'magic', title: '마법 붓', key: 'B', icon: 'magic', sel: 1, hint: '펜처럼 그으면 그 둘레의 비슷한 곳을 선(경계)까지 골라요. Shift를 누르면 더하고, Alt를 누르면 빼요.' },
   { id: 'sam', title: 'AI로 고르기', key: 'A', icon: 'aiSel', sel: 1, hint: '고르고 싶은 것을 누르면 AI가 외곽선을 따요. Shift를 누르고 누르면 같은 것에 점을 더하고, Alt를 누르고 누르면 그 자리는 빼요. 끌면 그 상자 안에서 찾아요.' },
+  ...PAINT_TOOLS,
   { id: 'hand', title: '화면 옮기기', key: 'H', icon: 'hand', hint: '끌어서 화면을 옮겨요. 다른 도구를 쓰는 중에도 Space를 누르고 끌면 돼요.' },
   { id: 'zoom', title: '확대', key: 'Z', icon: 'zoom', hint: '눌러서 확대, Alt를 누르고 눌러서 축소해요. 마우스 휠로도 돼요.' },
 ];
@@ -193,6 +195,7 @@ function drawSel(dpr) {
   ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(ring, 0, 0); ctx.restore();
 }
 function drawDraft(g) {
+  if (view.draft && view.draft.kind === 'shape') return drawPaintDraft(g, view.draft);
   const d = view.draft; if (!d) return;
   g.save(); g.lineWidth = 1 / view.zoom; g.strokeStyle = '#eaf4ff'; g.setLineDash([4 / view.zoom, 3 / view.zoom]);
   const path = () => { g.beginPath(); d.pts.forEach((p, i) => i ? g.lineTo(p.x, p.y) : g.moveTo(p.x, p.y)); };
@@ -227,12 +230,13 @@ export function draw() {
 // ---- 파일 ----
 // 그림판 쪽으로 넣기: 그림판이 없으면 첫 그림 크기로 만들고, toCanvas면 레이어로도 올려요
 export async function importFiles(files, o) { return importList([...files].filter(isImage).map(file => ({ file, dir: '' })), o); }
-export async function importList(items, { toCanvas = false } = {}) {
+export async function importList(items, { toCanvas = false, asNew = false } = {}) {
   if (!items.length) { toast('그림 파일(PNG, JPG, WebP 등)만 넣을 수 있어요.', 'err'); return; }
   const { made, failed } = await importItems(items);
   failed.forEach(n => toast(`'${n}'은 열 수 없는 그림이에요.`, 'err'));
   if (!made.length) return;
-  if (!canvasOf()) { const m = made[0]; addLayer(newCanvas(m.name.replace(/\.[a-z0-9]+$/i, ''), m.w, m.h), m); if (toCanvas) made.slice(1, 12).forEach(m => addLayer(canvasOf(), m)); }
+  if (asNew) made.slice(0, 12).forEach(m => addLayer(newCanvas(m.name.replace(/\.[a-z0-9]+$/i, ''), m.w, m.h), m));   // 그림마다 새 그림판(탭)으로
+  else if (!canvasOf()) { const m = made[0]; addLayer(newCanvas(m.name.replace(/\.[a-z0-9]+$/i, ''), m.w, m.h), m); if (toCanvas) made.slice(1, 12).forEach(m => addLayer(canvasOf(), m)); }
   else if (toCanvas) made.slice(0, 12).forEach(m => addLayer(canvasOf(), m));
   commit(made.length > 1 ? `그림 ${made.length}장 넣기` : '그림 넣기');
 }
@@ -382,6 +386,7 @@ export const imageRoom = {
           selMagic(op, await flatten(c), d.pts, size, opt('spread', 35));
         });
       }
+      if (PAINT_TOOLS.some(t => t.id === tool)) return paintDown(e, c, p, tool, { view, at, draw, drag, layerFromBlob });
       const cur = layerOf();
       const corner = cur && !cur.locked ? cornerHit(cur, p) : null;
       if (corner) {
@@ -411,13 +416,20 @@ export const imageRoom = {
       const ids = sel.any ? ['sel.toLayer', 'sel.erase', 'sel.invert', 'sel.none', '-', 'view.fit', 'file.export'] : ['layer.dup', 'layer.up', 'layer.down', '-', 'layer.delete', '-', 'sel.all', 'view.fit', 'file.export'];
       showMenu(ids.map(id => id === '-' ? '-' : menuItem(id)), e.clientX, e.clientY);
     });
+    // 탭 줄에 놓으면 언제나 새 그림판으로
+    tabs.addEventListener('dragover', e => { e.preventDefault(); tabs.classList.add('drop'); }); tabs.addEventListener('dragleave', () => tabs.classList.remove('drop'));
+    tabs.addEventListener('drop', e => { e.preventDefault(); e.stopPropagation(); tabs.classList.remove('drop'); const mid = e.dataTransfer.getData('application/x-potato-media');
+      if (mid) { let ids = [mid]; try { ids = JSON.parse(e.dataTransfer.getData('application/x-potato-medias')) || ids; } catch (_) { /* 한 장만 */ } return ids.slice(0, 12).forEach(openMedia); }
+      if (e.dataTransfer.files.length) fromDrop(e.dataTransfer).then(items => importList(items, { asNew: true })); });
     wrap.addEventListener('dragover', e => { e.preventDefault(); wrap.classList.add('drop'); });
     wrap.addEventListener('dragleave', () => wrap.classList.remove('drop'));
     wrap.addEventListener('drop', e => {
       e.preventDefault(); wrap.classList.remove('drop');
       const mid = e.dataTransfer.getData('application/x-potato-media');
-      if (mid) { let ids = [mid]; try { ids = JSON.parse(e.dataTransfer.getData('application/x-potato-medias')) || ids; } catch (_) { /* 한 장만 */ } return ids.slice(0, 12).forEach(placeMedia); }
-      if (e.dataTransfer.files.length) fromDrop(e.dataTransfer).then(items => importList(items, { toCanvas: true }));
+      // 설정의 '끌어다 놓으면'에 따라 지금 그림판의 레이어로, 또는 새 그림판(탭)으로. Shift를 누르고 놓으면 그 반대로
+      const asNew = !!settings.get('dropNew') !== e.shiftKey;
+      if (mid) { let ids = [mid]; try { ids = JSON.parse(e.dataTransfer.getData('application/x-potato-medias')) || ids; } catch (_) { /* 한 장만 */ } return ids.slice(0, 12).forEach(id => (asNew ? openMedia(id) : placeMedia(id))); }
+      if (e.dataTransfer.files.length) fromDrop(e.dataTransfer).then(items => importList(items, asNew ? { asNew: true } : { toCanvas: true }));
     });
 
     const range = (label, key, min, max, def, unit) => { const out = h('span.opt-val', null, opt(key, def) + unit); return h('label.opt', null, h('span', null, label), h('input.range', { type: 'range', min, max, value: opt(key, def), 'aria-label': label, oninput: e => { out.textContent = e.target.value + unit; }, onchange: e => setOpt(key, +e.target.value) }), out); };
@@ -428,6 +440,7 @@ export const imageRoom = {
       tabs.replaceChildren(...p.canvases.map(d => h('div.doc-tab' + (d.id === p.activeCanvas ? '.on' : ''), { role: 'tab', 'aria-selected': String(d.id === p.activeCanvas) },
         h('button.doc-tab-name', { onclick: () => { p.activeCanvas = d.id; p.sel = null; emit(); } }, d.name),
         h('button.icon-btn.small', { title: '그림판 지우기', 'aria-label': `${d.name} 지우기`, onclick: () => closeCanvas(d) }, icon('close', 12)))));
+      tabs.append(h('button.doc-tab-add', { title: '그림을 새 그림판(탭)으로 열어요. 그림을 이 줄에 끌어다 놓아도 새 탭으로 열려요.', 'aria-label': '새 탭으로 그림 열기', onclick: () => { const i = h('input', { type: 'file', accept: 'image/*', multiple: true }); i.onchange = () => importFiles(i.files, { asNew: true }); i.click(); } }, icon('plus', 12)));
       tabs.hidden = !p.canvases.length;
       // 도구 옵션 줄: 고르는 도구일 때만. 값을 끄는 중에 다시 그려지지 않게 내용이 바뀔 때만 새로 만들어요
       const key = !c ? '' : t.id + '|' + sel.any;   // 그림판이 있으면 늘 보여요 (도구를 바꿀 때 그림이 위아래로 밀리지 않게)
@@ -439,6 +452,11 @@ export const imageRoom = {
           t.id === 'wand' && h('label.check', null, h('input', { type: 'checkbox', checked: opt('contig', true), onchange: e => setOpt('contig', e.target.checked) }), '이어진 곳만'),
           t.id === 'magic' && range('붓 굵기', 'size', 6, 120, 28, 'px'),
           t.id === 'magic' && range('번짐', 'spread', 0, 100, 35, ''),
+          ...(PAINT_TOOLS.some(x => x.id === t.id) && t.id !== 'text' ? (() => { const o = paintOpt(), rg = (label, k, min, max, unit) => { const out = h('span.opt-val', null, o[k] + unit); return h('label.opt', null, h('span', null, label), h('input.range', { type: 'range', min, max, value: o[k], 'aria-label': label, oninput: e => { setPaint(k, +e.target.value); out.textContent = e.target.value + unit; } }), out); };
+            return [t.id === 'shape' && h('select.text', { 'aria-label': '도형 모양', style: 'width:auto', onchange: e => { setPaint('shape', e.target.value); emit(); } }, SHAPES.map(([v, tt]) => h('option', { value: v, selected: o.shape === v }, tt))),
+              t.id !== 'eraser' && h('label.opt', null, h('span', null, '색'), h('input', { type: 'color', value: o.color, 'aria-label': '그리는 색', onchange: e => setPaint('color', e.target.value) })),
+              rg('굵기', 'size', 1, 200, 'px'), t.id !== 'eraser' && rg('진하기', 'alpha', 5, 100, '%'),
+              t.id === 'shape' && h('label.check', null, h('input', { type: 'checkbox', checked: !!o.fill, onchange: e => setPaint('fill', e.target.checked) }), '속 채우기')]; })() : []),
           h('span.grow'),
           sel.any && h('button.btn.small', { onclick: () => run('sel.toLayer') }, '새 레이어로'),
           sel.any && h('button.btn.small', { onclick: () => run('sel.erase') }, '지우기'),
@@ -467,6 +485,8 @@ export let samPick = null;   // 'AI로 고르기'로 찍은 점들과 상자
 let menuItem = id => ({ label: id, run() {} });
 export const setMenuItem = f => { menuItem = f; };
 
+// 보관함 그림을 새 그림판(탭)으로 열어요
+export function openMedia(mid) { const m = state.project.media.find(m => m.id === mid); if (!m) return; addLayer(newCanvas(m.name.replace(/\.[a-z0-9]+$/i, ''), m.w, m.h), m); commit('새 그림판으로 열기'); }
 export function placeMedia(mid) {
   const m = state.project.media.find(m => m.id === mid); if (!m) return;
   let c = canvasOf();
@@ -510,6 +530,7 @@ export function registerImageCmds() {
   addCmd({ id: 'view.100', title: '실제 크기 (100%)', menu: '보기', keys: 'Ctrl+1', enabled: hasCanvas, run: () => zoomAt(1 / view.zoom) });
   addCmd({ id: 'view.in', title: '확대', menu: '보기', keys: 'Ctrl+=', enabled: hasCanvas, run: () => zoomAt(1.25) });
   addCmd({ id: 'view.out', title: '축소', menu: '보기', keys: 'Ctrl+-', enabled: hasCanvas, run: () => zoomAt(0.8) });
+  addCmd({ id: 'file.openNew', title: '그림을 새 그림판(탭)으로 열기…', menu: '파일', words: '새 탭 캔버스', run: () => { const i = h('input', { type: 'file', accept: 'image/*', multiple: true }); i.onchange = () => importFiles(i.files, { asNew: true }); i.click(); } });
   addCmd({ id: 'layer.flipX', title: '레이어 좌우로 뒤집기', menu: '레이어', group: 'flip', words: '반전 flip', enabled: hasLayer, run: () => { const l = layerOf(); l.flipX = !l.flipX; commit('좌우로 뒤집기'); } });
   addCmd({ id: 'layer.flipY', title: '레이어 위아래로 뒤집기', menu: '레이어', group: 'flip', words: '반전 flip', enabled: hasLayer, run: () => { const l = layerOf(); l.flipY = !l.flipY; commit('위아래로 뒤집기'); } });
   addCmd({ id: 'layer.rot90', title: '레이어 90도 돌리기', menu: '레이어', group: 'flip', enabled: hasLayer, run: () => { const l = layerOf(); l.rot = ((l.rot || 0) + 90) % 360; commit('90도 돌리기'); } });

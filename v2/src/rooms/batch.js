@@ -1,4 +1,5 @@
 // 일괄 처리 작업실: 보관함의 그림 여러 장에 같은 처리를 하고, 폴더 모양 그대로 저장해요. 보관함의 그림은 바뀌지 않아요.
+import { logErr } from '../core/errlog.js';
 import { h } from '../ui/dom.js';
 import { state, folders, folderPath, mediaBlob } from '../core/store.js';
 import { settings } from '../core/settings.js';
@@ -24,11 +25,12 @@ async function start() {
   if (!list.length) { toast('처리할 그림이 없어요.', 'err'); return; }
   const need = [B.bg && 'isnet', B.up && 'sr6', ...(B.cz ? ['deep', 'deepn', censorCfg().model === 'precise' ? 'segM' : 'segN', 'samE', 'samD'] : [])].filter(Boolean);
   if (need.length && !await ensurePacks(need)) return;
-  const pixel = B.cz || B.bg || B.up || B.fit, out = []; let hits = 0;
+  const pixel = B.cz || B.bg || B.up || B.fit, out = []; let hits = 0, fails = 0;
   try {
     await runJob(`일괄 처리 (${list.length}장)`, async (job, say) => {
       for (let i = 0; i < list.length; i++) {
         check(job); const m = list[i]; say(`${i + 1} / ${list.length}: ${m.name}`, i / list.length);
+        try {
         let blob = await mediaBlob(m.id); if (!blob) continue;
         let type = B.fmt === 'same' ? (EXT[blob.type] ? blob.type : 'image/png') : B.fmt, name = m.name;
         if (pixel || (B.fmt !== 'same' && B.fmt !== blob.type)) {
@@ -42,13 +44,14 @@ async function start() {
           name = name.replace(/\.[a-z0-9]+$/i, '') + '.' + EXT[type];
         } else if (B.strip && m.meta) blob = await stripMeta(blob);
         const dir = folderPath(m.folder); out.push({ name: (dir ? dir + '/' : '') + name, blob });
+        } catch (e) { if (job.stop || e.message === 'stop') throw e; fails++; logErr('일괄 처리', `${m.name}: ${e.message || '실패'}`, e.detail || ''); }   // 한 장이 안 돼도 멈추지 않고 다음 그림으로
       }
       say('저장하는 중', 1);
     });
   } catch (e) { toast('일괄 처리를 끝내지 못했어요. ' + (e.message || ''), 'err'); return; }
   if (!out.length) return;
   const r = await saveFiles(out, state.project.name + ' 일괄 처리.zip');
-  if (r) toast((r === 'dir' ? `그림 ${out.length}장을 고른 폴더에 저장했어요.` : `그림 ${out.length}장을 ZIP으로 묶어 저장했어요.`) + (B.cz ? ` 자동 흰칠은 ${hits}장에 들어갔어요.` : ''));
+  if (r) toast((r === 'dir' ? `그림 ${out.length}장을 고른 폴더에 저장했어요.` : `그림 ${out.length}장을 ZIP으로 묶어 저장했어요.`) + (B.cz ? ` 자동 흰칠은 ${hits}장에 들어갔어요.` : '') + (fails ? ` ${fails}장은 하지 못해 오류 기록에 남겼어요.` : ''));
 }
 
 export const batchRoom = {
