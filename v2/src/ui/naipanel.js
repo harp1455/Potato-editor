@@ -8,7 +8,7 @@ import { NAI_MODELS, NAI_SAMPLERS, NAI_SIZES, NAI_UC, fitSize, naiGenerate, naiA
 import { run } from '../core/cmd.js';
 import { toast } from './overlay.js';
 
-const DEF = { model: 'nai-diffusion-4-5-full', prompt: '', negative: '', size: 0, steps: 28, scale: 5, sampler: 'k_euler_ancestral', seed: 0, quality: true, uc: 'heavy', cfgRescale: 0, variety: false, strength: 0.5, noise: 0, inStrength: 1, more: false };
+const DEF = { model: 'nai-diffusion-4-5-full', prompt: '', negative: '', chars: '', size: 0, steps: 28, scale: 5, sampler: 'k_euler_ancestral', seed: 0, quality: true, uc: 'heavy', cfgRescale: 0, variety: false, strength: 0.5, noise: 0, inStrength: 1, more: false };
 const F = { ...DEF, ...(settings.get('nai') || {}) };
 let saveT = 0;
 const keep = () => { clearTimeout(saveT); saveT = setTimeout(() => settings.set('nai', { ...F }), 400); };
@@ -34,7 +34,7 @@ function cropFor(c) {
   return (x1 - x) * (y1 - y) > c.w * c.h * 0.7 ? { x: 0, y: 0, w: c.w, h: c.h } : { x, y, w: x1 - x, h: y1 - y };
 }
 function cropOf(src, r) { const t = document.createElement('canvas'); t.width = r.w; t.height = r.h; t.getContext('2d').drawImage(src, -r.x, -r.y); return t; }
-const opts = () => { const [w, h] = NAI_SIZES[F.size] || NAI_SIZES[0]; return { model: F.model, prompt: F.prompt, negative: F.negative, width: w, height: h, steps: +F.steps, scale: +F.scale, sampler: F.sampler, seed: +F.seed || 0, quality: F.quality, uc: F.uc, cfgRescale: +F.cfgRescale, variety: F.variety }; };
+const opts = () => { const [w, h] = NAI_SIZES[F.size] || NAI_SIZES[0]; return { model: F.model, prompt: F.prompt, negative: F.negative, chars: F.chars, width: w, height: h, steps: +F.steps, scale: +F.scale, sampler: F.sampler, seed: +F.seed || 0, quality: F.quality, uc: F.uc, cfgRescale: +F.cfgRescale, variety: F.variety }; };
 
 async function go(kind) {
   if (job.on) return;
@@ -100,6 +100,7 @@ export const naiPanel = {
     if (!ready) el.append(h('p.empty', null, settings.get('adult') ? 'NovelAI 토큰을 넣으면 편집기 안에서 바로 그림을 만들고 고칠 수 있어요.' : '성인 확인을 마치고 NovelAI 토큰을 넣으면 쓸 수 있어요.'), h('button.btn', { onclick: () => run('app.settings') }, '설정 열기'));
     el.append(...[
       h('label.stack', null, h('span.field-name', null, '프롬프트'), h('textarea.text.area', { rows: 5, placeholder: '1boy, solo, looking at viewer, …', 'aria-label': '프롬프트', ...bind('prompt') })),
+      h('label.stack', null, h('span.field-name', null, '인물별 설명 (한 줄에 한 명)'), h('textarea.text.area', { rows: 2, 'aria-label': '인물별 설명', placeholder: '여러 명을 그릴 때만 적어요. 예: girl, long hair, red dress', ...bind('chars') })),
       h('label.stack', null, h('span.field-name', null, '빼고 싶은 것'), h('textarea.text.area', { rows: 2, 'aria-label': '빼고 싶은 것', ...bind('negative') })),
       pick('모델', 'model', NAI_MODELS),
       pick('크기', 'size', NAI_SIZES.map(([w, hh, t], i) => [i, `${t} ${w} × ${hh}`])),

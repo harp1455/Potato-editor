@@ -14,6 +14,7 @@ import { registerGeminiCmds } from './ui/geminitools.js';
 import { characterRoom, registerCharCmds } from './rooms/character.js';
 import { naiAccount } from './api/nai.js';
 import { registerAiCmds, packsPane } from './ui/aitools.js';
+import { registerNaiTools } from './ui/naitools.js';
 import { preamble, check, generate, buildBody, buildInteraction, speak, animate, SAFETY_CATEGORIES, usageLog, usageClear } from './api/gemini.js';
 
 const VERSION = typeof __VERSION__ === 'string' ? __VERSION__ : 'dev';
@@ -31,6 +32,7 @@ function registerCmds() {
   registerImageCmds();
   registerBinCmds();
   registerAiCmds(() => settingsDialog('packs'));
+  registerNaiTools();
   registerCharCmds();
   registerGeminiCmds();
   registerVideoCmds();
@@ -203,6 +205,8 @@ function settingsDialog(tab = 'screen') {
     screen: () => [
       h('h3', null, '화면 방식'),
       radio('mode', settings.get('layoutMode'), [['rooms', '작업실 나누기', '이미지, 컷, 영상, 캐릭터 작업실을 오가요. 작업실마다 패널 배치를 따로 기억해요.'], ['single', '한 화면에 모두', '패널 배치 하나로 모든 일을 해요. 가운데 화면만 위쪽 단추로 바꿔요.']], v => settings.set('layoutMode', v)),
+      h('h3', null, '밝기'),
+      radio('theme', settings.get('theme'), [['dark', '어두운 화면', '그림의 색이 가장 정확하게 보여요.'], ['light', '밝은 화면', '밝은 곳에서 일하거나 흰 종이 위 그림을 볼 때 편해요.']], v => { settings.set('theme', v); document.documentElement.dataset.theme = v; }),
       h('h3', null, '도움말'),
       h('label.check', null, h('input', { type: 'checkbox', checked: settings.get('hints'), onchange: e => settings.set('hints', e.target.checked) }), '아래 상태 줄에 지금 도구의 쓰는 법 보여 주기'),
       h('h3', null, '패널'),
@@ -263,6 +267,7 @@ function settingsDialog(tab = 'screen') {
 
 // ---------- 시작 ----------
 async function start() {
+  document.documentElement.dataset.theme = settings.get('theme') === 'light' ? 'light' : 'dark';
   setErrHandler(e => { console.error(e); toast(e.message || '문제가 생겼어요.', 'err'); });
   registerCmds(); build();
   await boot();

@@ -130,6 +130,11 @@ with sync_playwright() as pw:
     assert dl.value.suggested_filename.endswith('.png')
     shot(page, '12-reloaded')
     page.set_viewport_size({'width': 1024, 'height': 640}); shot(page, '13-small')
+    # 밝은 화면: 설정에서 고르면 바로 바뀌고 다시 켜도 그대로
+    page.set_viewport_size({'width': 1280, 'height': 800})
+    P(page, "__potato.settings.set('theme', 'light'); document.documentElement.dataset.theme = 'light'"); shot(page, '14-light')
+    assert P(page, "getComputedStyle(document.body).color") == 'rgb(31, 31, 31)'
+    page.reload(); page.wait_for_function("window.__potato && __potato.state.project.canvases.length === 1"); assert P(page, "document.documentElement.dataset.theme") == 'light'
     assert not errs, errs
     br.close()
 print('통과')

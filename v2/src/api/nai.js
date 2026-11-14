@@ -55,6 +55,13 @@ export function buildNai(o, src = null) {
   if (v5) { p.tag_hint_qt = o.quality ? 1 : 0; p.tag_hint_uc_preset = UC_HINT[o.uc] ?? 0; }
   if (infill) Object.assign(p, { image: src.image, mask: src.mask, noise: 0, request_type: 'NativeInfillingRequest', inpaintImg2ImgStrength: src.strength ?? 1 });
   else if (src) Object.assign(p, { image: src.image, strength: src.strength ?? 0.5, noise: src.noise ?? 0, color_correct: true });
+  // 인물별 설명: 한 줄에 한 명 (여섯 명까지). 자리는 정하지 않고 가운데로 보내요
+  const chars = String(o.chars || '').split('\n').map(t => t.trim()).filter(Boolean).slice(0, 6).map(t => ({ prompt: t, uc: '', center: { x: 0.5, y: 0.5 } }));
+  if (chars.length) {
+    p.characterPrompts = chars;
+    p.v4_prompt.caption.char_captions = chars.map(c => ({ char_caption: c.prompt, centers: [c.center] }));
+    p.v4_negative_prompt.caption.char_captions = chars.map(c => ({ char_caption: '', centers: [c.center] }));
+  }
   return { action: infill ? 'infill' : src ? 'img2img' : 'generate', input: prompt, model: infill && !o.model.includes('inpainting') ? o.model + '-inpainting' : o.model, parameters: p };
 }
 
@@ -86,4 +93,19 @@ export async function naiGenerate(o, src, signal) {
   const png = await unzipFirst(await res.arrayBuffer());
   logUse('nai ' + body.action, body.model, null, { size: body.parameters.width + ' × ' + body.parameters.height, steps: body.parameters.steps });
   return { blob: new Blob([png], { type: 'image/png' }), seed: body.parameters.seed };
+}
+
+// 디렉터 도구: 그림 한 장을 받아 선화·스케치·색 입히기·표정 바꾸기·군더더기 지우기를 해 줘요
+export const NAI_TOOLS = [['lineart', '선화로 바꾸기'], ['sketch', '스케치로 바꾸기'], ['colorize', '색 입히기'], ['emotion', '표정 바꾸기'], ['declutter', '글자와 효과 지우기']];
+export const NAI_EMOTIONS = [['neutral', '무표정'], ['happy', '기쁨'], ['sad', '슬픔'], ['angry', '화남'], ['scared', '겁먹음'], ['surprised', '놀람'], ['tired', '지침'], ['excited', '신남'], ['nervous', '긴장'], ['thinking', '생각 중'], ['confused', '어리둥절'], ['shy', '수줍음'], ['disgusted', '싫음'], ['smug', '우쭐'], ['bored', '지루함'], ['laughing', '웃음'], ['irritated', '짜증'], ['aroused', '달아오름'], ['embarrassed', '부끄러움'], ['worried', '걱정'], ['love', '사랑'], ['determined', '결심'], ['hurt', '다침'], ['playful', '장난기']];
+export function buildAugment(o) {
+  const b = { image: o.image, req_type: o.tool, width: o.width, height: o.height };
+  if (o.tool === 'colorize' || o.tool === 'emotion') { b.defry = Math.max(0, Math.min(5, o.weaken | 0)); b.prompt = o.tool === 'emotion' ? `${o.emotion || 'neutral'};;${o.prompt || ''}` : (o.prompt || ''); }
+  return b;
+}
+export async function naiAugment(o, signal) {
+  const res = await naiFetch('/ai/augment-image', { method: 'POST', body: JSON.stringify(buildAugment(o)), signal });
+  const png = await unzipFirst(await res.arrayBuffer());
+  logUse('nai ' + o.tool, 'director', null, { size: o.width + ' × ' + o.height });
+  return new Blob([png], { type: 'image/png' });
 }

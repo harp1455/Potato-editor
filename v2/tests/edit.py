@@ -96,11 +96,13 @@ with sync_playwright() as pw:
         return new Response(new Uint8Array(z), { status: 200 }); }; })(%s)""" % json.dumps(list(zb.getvalue())))
     page.click('.zone-tab >> text=NovelAI')
     page.fill('textarea[aria-label="프롬프트"]', '1boy, solo, smile'); page.fill('textarea[aria-label="빼고 싶은 것"]', 'hat')
+    page.fill('textarea[aria-label="인물별 설명"]', 'girl, red dress\nboy, glasses')
     page.click('text=그림 만들기'); page.wait_for_function("__sent.length === 1 && __potato.state.project.canvases[0].layers.length === 3")
     s = P(page, "__sent[0]"); b = s['b']; pr = b['parameters']
     assert s['u'] == 'https://image.novelai.net/ai/generate-image' and s['auth'] == 'Bearer pst-test'
     assert b['action'] == 'generate' and b['model'] == 'nai-diffusion-4-5-full' and b['input'] == '1boy, solo, smile, very aesthetic, masterpiece, no text'
     assert (pr['width'], pr['height'], pr['steps'], pr['sampler']) == (832, 1216, 28, 'k_euler_ancestral') and pr['seed'] > 0
+    assert [c['char_caption'] for c in pr['v4_prompt']['caption']['char_captions']] == ['girl, red dress', 'boy, glasses'] and len(pr['characterPrompts']) == 2 and pr['v4_negative_prompt']['caption']['char_captions'][1]['centers'] == [{'x': 0.5, 'y': 0.5}]
     assert pr['v4_prompt']['caption']['base_caption'] == b['input'] and pr['negative_prompt'].startswith('nsfw, lowres') and pr['negative_prompt'].endswith(', hat')
     page.wait_for_selector('text=남은 Anlas 9,500'); assert page.locator('.zone-body >> text=false').count() == 0
     assert page.locator('.fold >> text=NovelAI').count() == 1
@@ -115,6 +117,16 @@ with sync_playwright() as pw:
     top = P(page, "__potato.state.project.canvases[0].layers.at(-1)")
     assert top['name'] == '다시 그린 곳' and P(page, PIX + "(160, 130)")[:3] == [40, 120, 220]
     shot(page, '33-nai')
+    # 디렉터 도구: 표정 바꾸기는 '표정;;덧붙일 말'과 원본 지키기 값을, 선화는 그림과 크기만 보내요
+    n = P(page, "__potato.state.project.canvases[0].layers.length")
+    P(page, "__potato.run('nai.emotion')"); page.select_option('select[aria-label="표정"]', 'shy'); page.fill('input[aria-label="덧붙일 말"]', 'blush')
+    page.click('.dlg button:has-text("보내기")'); page.wait_for_function("__sent.length === 3 && __potato.state.project.canvases[0].layers.length === %d" % (n + 1))
+    s = P(page, "__sent[2]"); b = s['b']
+    assert s['u'] == 'https://image.novelai.net/ai/augment-image' and b['req_type'] == 'emotion' and b['prompt'] == 'shy;;blush' and b['defry'] == 0 and b['width'] > 0 and len(b['image']) > 100, b.keys()
+    assert P(page, "__potato.state.project.canvases[0].layers.at(-1).name").endswith('표정 바꾸기')
+    P(page, "__potato.run('nai.lineart')"); page.wait_for_function("__sent.length === 4 && __potato.state.project.canvases[0].layers.length === %d" % (n + 2))
+    b = P(page, "__sent[3].b"); assert b['req_type'] == 'lineart' and 'prompt' not in b and 'defry' not in b
+    shot(page, '34-nai-tools')
     # 오류는 쉬운 말로
     P(page, "window.fetch = async () => new Response(JSON.stringify({ message: 'x' }), { status: 402 })")
     page.click('button:has-text("전체 다시 그리기")'); page.wait_for_selector('.toast.err >> text=Anlas')
