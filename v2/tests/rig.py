@@ -77,6 +77,15 @@ with sync_playwright() as pw:
     page.wait_for_selector('.toast >> text=NovelAI로 다시 그렸어요', timeout=60000)
     b = P(page, "__nai[0]"); assert b['action'] == 'infill' and b['model'].endswith('-inpainting') and b['parameters']['width'] % 64 == 0 and b['input'].startswith('shrine'), b['action']
 
+    # 2.0에서 더한 것 ③: 눈썹·입꼬리 표정 값. 조절 칸이 있으면 밀어 보고, 그림이 바뀌는지 봐요
+    page.click('#modalRoot [data-rgm="pose"]'); page.wait_for_timeout(800)
+    HASH = "(() => { const c = [...document.querySelectorAll('#modalRoot .rg-modal canvas')].sort((a, b) => b.width * b.height - a.width * a.height)[0]; const t = document.createElement('canvas'); t.width = 200; t.height = 200; const g = t.getContext('2d'); g.drawImage(c, 0, 0, 200, 200); const d = g.getImageData(0, 0, 200, 200).data; let s = 7; for (let i = 0; i < d.length; i += 4) s = (s * 31 + d[i] + d[i + 1] * 3) % 1000003; return s; })()"
+    for key in ['brow', 'smile']:
+        if page.locator('#modalRoot input[data-rgw="%s"]' % key).count():
+            h0 = P(page, HASH); P(page, "(() => { const i = document.querySelector('#modalRoot input[data-rgw=\"%s\"]'); i.value = 100; i.dispatchEvent(new Event('input', { bubbles: true })); i.dispatchEvent(new Event('change', { bubbles: true })); })()" % key)
+            page.wait_for_timeout(700); h1 = P(page, HASH); print(key, '표정 값으로 그림이 바뀜:', h0 != h1); assert h0 != h1
+        else: print(key, '조절 칸 없음 (눈이나 입을 못 찾은 그림)')
+    shot(page, '53d-face')
     # 닫으면 보관되고, 작업실에 '하던 작업이 있어요'
     page.click('#rgClose'); page.wait_for_selector('#modalRoot .rg-modal', state='detached', timeout=60000)
     P(page, "__potato.emit()"); page.wait_for_selector('.char-item >> text=이어서 움직이기', timeout=20000)
