@@ -57,6 +57,12 @@ with sync_playwright() as pw:
     page.mouse.move(X(e1['x'] + 30), Y(e1['y'] + e1['h'] - 30)); page.mouse.down(); page.mouse.move(X(e1['x'] + 70), Y(e1['y'] + e1['h'] - 30), steps=3); page.mouse.up()
     a0 = P(page, ELS + "[0].x"); a1 = P(page, ELS + "[1].x"); assert a0 - e0['x'] == a1 - e1['x'] and a0 != e0['x'], (a0, a1)
     page.keyboard.press('Control+z'); assert P(page, ELS + "[0].x") == e0['x']; page.keyboard.press('Escape')
+    # 한눈에 보기: 페이지를 늘어놓고 순서를 바꿔요. 모양 묶음: 저장한 모양을 다른 말풍선에 입혀요
+    P(page, "__potato.run('cut.newPage')"); P(page, "__potato.run('cut.overview')"); page.wait_for_selector('.cut-over-item >> nth=1'); ids = P(page, "__potato.state.project.pages.map(p => p.id)")
+    page.click('.cut-over-item >> nth=1 >> button[title="앞으로 옮기기"]'); assert P(page, "__potato.state.project.pages.map(p => p.id)") == ids[::-1][:2] + ids[2:]
+    shot(page, '86-overview'); page.click('.cut-over-pic >> nth=1'); page.keyboard.press('Control+z'); page.keyboard.press('Control+z')
+    P(page, "__potato.settings.set('cutStyles', [{ name: '굵은 빨강', type: 'bubble', props: { color: '#cc0000', bw: 9 } }]); __potato.emit()")
+    P(page, "(() => { __potato.state.project.activePage = __potato.state.project.pages[0].id; __potato.emit(); })()")
     # 효과음: 크게, 기울여서 들어가요
     n1 = P(page, ELS + ".length"); P(page, "__potato.run('cut.sfx')"); sf = P(page, ELS + ".at(-1)"); assert sf['rot'] == -12 and sf['size'] > 80 and page.locator('.vid-side input[aria-label="회전"]').count() == 1
     shot(page, '85-sfx'); page.keyboard.press('Control+z'); assert P(page, ELS + ".length") == n1

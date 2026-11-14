@@ -8,7 +8,7 @@ import { sel, selFor, selMask, selBounds } from '../core/select.js';
 import { fillHole, legacyAi, aiLine } from '../legacy/shim.js';
 import { settings } from '../core/settings.js';
 import { h as H } from './dom.js';
-import { flatten, samPick, layerFromBlob } from '../rooms/image.js';
+import { flatten, samPick, layerFromBlob, layerPic } from '../rooms/image.js';
 import { dialog, toast, busy, confirmBox } from './overlay.js';
 
 const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
@@ -94,11 +94,11 @@ export function registerAiCmds(openPacks) {
     await layerFromBlob(c, await png(img), '지운 자리', { x: x0, y: y0, hidden: true }); commit('AI로 지우기');
   }) });
   addCmd({ id: 'ai.bgCut', title: '배경 지우기', menu: 'AI', words: '누끼 투명', enabled: hasLayer, run: () => job('배경 지우기', ['isnet'], async (j, say) => {
-    const l = layerOf(), bmp = await ensureBitmap(l.mediaId);
+    const l = layerOf(), bmp = await layerPic(l);
     await swapImage(l, cut(bmp, await charMask(bmp, j, say)), '배경 지움'); commit('배경 지우기');
   }) });
   addCmd({ id: 'ai.bgSplit', title: '인물과 배경을 레이어로 나누기', menu: 'AI', words: '누끼 분리 캐릭터', enabled: hasLayer, run: () => job('인물과 배경 나누기', ['isnet'], async (j, say) => {
-    const c = canvasOf(), l = layerOf(), bmp = await ensureBitmap(l.mediaId), mask = await charMask(bmp, j, say), name = l.name;
+    const c = canvasOf(), l = layerOf(), bmp = await layerPic(l), mask = await charMask(bmp, j, say), name = l.name;
     const front = { ...l, ...(l.adj ? { adj: { ...l.adj } } : {}), id: uid('l'), name: name + ' 인물' };
     await swapImage(front, cut(bmp, mask), '인물'); await swapImage(l, cut(bmp, mask, true), '배경'); l.name = name + ' 배경';
     c.layers.splice(c.layers.indexOf(l) + 1, 0, front);
@@ -106,7 +106,7 @@ export function registerAiCmds(openPacks) {
   }) });
   for (const [k, model, label] of [[2, 'sr6', '화질 2배로 키우기'], [4, 'sr6', '화질 4배로 키우기'], [2, 'sr4', '화질 2배로 키우기 (빠르게)']]) {
     addCmd({ id: `ai.up${k}${model === 'sr4' ? 'f' : ''}`, title: label, menu: 'AI', group: 'sr', words: '업스케일 해상도 선명', enabled: hasLayer, run: () => job(label, [model], async (j, say) => {
-      const l = layerOf(), bmp = await ensureBitmap(l.mediaId);
+      const l = layerOf(), bmp = await layerPic(l);
       await swapImage(l, await upscale(bmp, k, model, j, say), `${k}배`, { hidden: false, rescale: k }); commit(label);
     }) });
   }
@@ -114,17 +114,17 @@ export function registerAiCmds(openPacks) {
   // 결과를 '그 레이어와 같은 자리'에 새 레이어로 올려요 (원본을 안 바꾸니 끄고 켜며 견줄 수 있어요)
   const overlay = async (l, canvas, name) => { const c = canvasOf(), n = await layerFromBlob(c, await png(canvas), name, { hidden: true }); Object.assign(n, { x: l.x, y: l.y, scale: l.scale * (mediaOf(l).w / canvas.width), rot: l.rot }); const i = c.layers.indexOf(n); c.layers.splice(i, 1); c.layers.splice(c.layers.indexOf(l) + 1, 0, n); return n; };
   addCmd({ id: 'ai.censor', title: '자동 흰칠', menu: 'AI', group: 'cz', keys: 'Ctrl+Shift+W', words: '가리기 모자이크 검열 성기', enabled: hasLayer, run: () => { const k = censorCfg(); return job('자동 흰칠', ['deep', 'deepn', k.model === 'precise' ? 'segM' : 'segN', 'samE', 'samD'], async (j, say) => {
-    const l = layerOf(), bmp = await ensureBitmap(l.mediaId), r = await censorMask(bmp, j, say);
+    const l = layerOf(), bmp = await layerPic(l), r = await censorMask(bmp, j, say);
     if (!r.found) { toast('가릴 곳을 찾지 못했어요. 설정에서 민감도를 올려 볼 수 있어요.'); return; }
     await overlay(l, r.canvas, l.name + ' 흰칠'); commit('자동 흰칠');
   }); } });
   addCmd({ id: 'ai.censorCfg', title: '자동 흰칠 설정…', menu: 'AI', group: 'cz', run: censorDialog });
   addCmd({ id: 'ai.line', title: '선화 추출', menu: 'AI', group: 'fx', words: '라인 스케치 lineart', enabled: hasLayer, run: () => job('선화 추출', ['lineF'], async (j, say) => {
-    const l = layerOf(), bmp = await ensureBitmap(l.mediaId); say('선을 따는 중', 0.3); aiLine.model = 'F'; aiLine.gain = 1;
+    const l = layerOf(), bmp = await layerPic(l); say('선을 따는 중', 0.3); aiLine.model = 'F'; aiLine.gain = 1;
     await overlay(l, await legacyAi().aiLineArt({ im: bmp, W: bmp.width, H: bmp.height }, j), l.name + ' 선화'); commit('선화 추출');
   }) });
   for (const [amt, label] of [[30, '배경 흐리게 (약하게)'], [60, '배경 흐리게 (보통)'], [95, '배경 흐리게 (강하게)']]) addCmd({ id: 'ai.dof' + amt, title: label, menu: 'AI', group: 'fx', words: '아웃포커스 깊이 심도 depth', enabled: hasLayer, run: () => job(label, ['depth'], async (j, say) => {
-    const l = layerOf(), bmp = await ensureBitmap(l.mediaId), k = Math.min(1, 2048 / Math.max(bmp.width, bmp.height)), W = Math.round(bmp.width * k), Hh = Math.round(bmp.height * k), A = legacyAi();
+    const l = layerOf(), bmp = await layerPic(l), k = Math.min(1, 2048 / Math.max(bmp.width, bmp.height)), W = Math.round(bmp.width * k), Hh = Math.round(bmp.height * k), A = legacyAi();
     const src = mk(W, Hh); src.getContext('2d').drawImage(bmp, 0, 0, W, Hh); say('깊이를 재는 중', 0.3);
     const D = await A.dpDepth(src, W, Hh, null, j), cut0 = A.dpOtsu(D); let s2 = 0, n2 = 0; for (let i = 0; i < D.length; i++) if (D[i] > cut0) { s2 += D[i]; n2++; }
     say('흐리는 중', 0.8); await swapImage(l, A.dpDof(src, W, Hh, D, { focus: n2 ? s2 / n2 : 0.7, band: 0.06, amt, subj: null }), '배경 흐림', { rescale: k }); commit(label);

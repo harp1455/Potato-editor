@@ -15,6 +15,7 @@ import { characterRoom, registerCharCmds } from './rooms/character.js';
 import { naiAccount } from './api/nai.js';
 import { registerAiCmds, packsPane } from './ui/aitools.js';
 import { registerNaiTools } from './ui/naitools.js';
+import { download } from './core/files.js';
 import { costOf, money, totals, krw } from './core/cost.js';
 import { registerLiquify, makeField, stroke, warp } from './ui/liquify.js';
 import { preamble, check, generate, buildBody, buildInteraction, speak, animate, SAFETY_CATEGORIES, usageLog, usageClear } from './api/gemini.js';
@@ -138,15 +139,19 @@ function refresh() {
 
 // ---------- 창들 ----------
 async function projectsDialog() {
-  const list = h('div.proj-list');
-  const d = dialog({ title: '작업 목록', wide: true, body: list, buttons: [{ label: '닫기' }, { label: '새 작업', primary: true, run: () => { run('file.new'); } }] });
+  const list = h('div.proj-list'), find = h('input.text', { type: 'search', placeholder: '작업 이름으로 찾기', 'aria-label': '작업 찾기', oninput: () => draw() });
+  const backup = async ids => { const b = busy('백업 파일을 만드는 중이에요.'); try { const { backupZip } = await import('./core/backup.js'), r = await backupZip(ids, (a, n) => b.set(`백업 파일을 만드는 중이에요. ${a} / ${n}`)); download(r.blob, `감자편집기2 백업 ${new Date().toISOString().slice(0, 10)}${ids ? ' ' + (state.project.name || '') : ''}.zip`); b.done(`작업 ${r.count}개를 백업 파일로 저장했어요.`); } catch (e) { b.done('백업하지 못했어요. ' + (e.message || ''), 'err'); } };
+  const restore = () => { const i = h('input', { type: 'file', accept: '.zip' }); i.onchange = async () => { if (!i.files[0]) return; const b = busy('백업을 들여오는 중이에요.'); try { const { restoreZip } = await import('./core/backup.js'), r = await restoreZip(i.files[0]); b.done(`작업 ${r.added}개를 들여왔어요.${r.skipped ? ` 이미 있는 ${r.skipped}개는 그대로 뒀어요.` : ''}`); draw(); } catch (e) { b.done(e.message || '들여오지 못했어요.', 'err'); } }; i.click(); };
+  const d = dialog({ title: '작업 목록', wide: true, body: h('div.vid-form', null, find, list,
+    h('div.btn-row', null, h('button.btn.small', { onclick: () => backup([state.project.id]), title: '지금 작업과 그 안의 그림을 파일 하나로 저장해요' }, '지금 작업 백업'), h('button.btn.small', { onclick: () => backup(null), title: '모든 작업을 파일 하나로 저장해요. 그림이 많으면 파일이 커요.' }, '모든 작업 백업'), h('button.btn.small', { onclick: restore }, '백업 들여오기'))),
+    buttons: [{ label: '닫기' }, { label: '새 작업', primary: true, run: () => { run('file.new'); } }] });
   const draw = async () => {
-    const ps = await listProjects();
+    const q = find.value.trim().toLowerCase(), all = await listProjects(), ps = q ? all.filter(p => p.name.toLowerCase().includes(q)) : all;
     list.replaceChildren(...ps.map(p => h('div.proj' + (p.id === state.project.id ? '.on' : ''), null,
       h('button.proj-open', { onclick: async () => { await saveNow(); await openProject(p.id); d.close(); } },
         h('b', null, p.name), h('span', null, `그림 ${p.media}장, 그림판 ${p.canvases}개`), h('span', null, new Date(p.at).toLocaleString('ko-KR', { dateStyle: 'medium', timeStyle: 'short' }))),
       p.id === state.project.id ? h('span.proj-now', null, '지금 작업') : h('button.icon-btn', { title: '이 작업 지우기', 'aria-label': `${p.name} 지우기`, onclick: async () => { if (await confirmBox('작업 지우기', `'${p.name}' 작업과 그 안의 그림을 모두 지워요. 되돌릴 수 없어요.`, '지우기', true)) { await deleteProject(p.id); draw(); } } }, icon('trash')))));
-    if (!ps.length) list.append(h('p.empty', null, '저장된 작업이 아직 없어요.'));
+    if (!ps.length) list.append(h('p.empty', null, all.length ? '그 이름의 작업이 없어요.' : '저장된 작업이 아직 없어요.'));
   };
   draw();
 }

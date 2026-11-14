@@ -4,7 +4,7 @@ import { state, commit, canvasOf, layerOf, ensureBitmap, addMedia } from '../cor
 import { addCmd } from '../core/cmd.js';
 import { settings } from '../core/settings.js';
 import { NAI_TOOLS, NAI_EMOTIONS, naiAugment, naiUpscale, upscaleCost, NAI_UP_MAX } from '../api/nai.js';
-import { layerFromBlob } from '../rooms/image.js';
+import { layerFromBlob, layerPic } from '../rooms/image.js';
 import { dialog, toast, busy, confirmBox } from './overlay.js';
 
 const MAX = 1536 * 1024;   // 이보다 크면 줄여서 보내요 (Anlas가 크기에 따라 들어요)
@@ -14,7 +14,7 @@ async function send(tool, extra = {}) {
   const c = canvasOf(), l = layerOf(); if (!c || !l) return;
   const label = NAI_TOOLS.find(t => t[0] === tool)[1], stop = new AbortController(), b = busy(`NovelAI: ${label}`);
   try {
-    const bmp = await ensureBitmap(l.mediaId), k = Math.min(1, Math.sqrt(MAX / (bmp.width * bmp.height)));
+    const bmp = await layerPic(l), k = Math.min(1, Math.sqrt(MAX / (bmp.width * bmp.height)));
     const w = Math.max(64, Math.round(bmp.width * k)), hh = Math.max(64, Math.round(bmp.height * k));
     const t = document.createElement('canvas'); t.width = w; t.height = hh; t.getContext('2d').drawImage(bmp, 0, 0, w, hh);
     const blob = await naiAugment({ tool, image: await b64(t), width: w, height: hh, ...extra }, stop.signal);
@@ -41,7 +41,7 @@ function ask(tool) {
 // 화질 2배: 레이어의 그림을 2배 큰 그림으로 바꿔 끼워요 (보이는 크기는 그대로, 원본은 보관함에 남아요)
 async function up2() {
   const l = layerOf(); if (!l) return;
-  const bmp = await ensureBitmap(l.mediaId), cost = upscaleCost(bmp.width, bmp.height);
+  const bmp = await layerPic(l), cost = upscaleCost(bmp.width, bmp.height);
   if (!cost) { toast(`NovelAI 화질 키우기는 ${NAI_UP_MAX.toLocaleString()}픽셀까지만 받아요 (예: 2048 × 1536). 이 그림은 ${bmp.width} × ${bmp.height}이에요. AI 메뉴의 '화질 2배로 키우기'는 크기 제한이 없어요.`, 'err'); return; }
   if (!await confirmBox('NovelAI로 화질 2배 키우기', `${bmp.width} × ${bmp.height} 그림을 ${bmp.width * 2} × ${bmp.height * 2}로 키워요. Anlas가 ${cost}쯤 들어요. 실제로 드는 양은 NovelAI가 정해요.`, '키우기')) return;
   const b = busy('NovelAI: 화질 키우는 중');

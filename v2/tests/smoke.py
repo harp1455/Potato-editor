@@ -130,6 +130,13 @@ with sync_playwright() as pw:
     assert dl.value.suggested_filename.endswith('.png')
     shot(page, '12-reloaded')
     page.set_viewport_size({'width': 1024, 'height': 640}); shot(page, '13-small')
+    # 전체 백업과 들여오기: 백업 → 작업을 지움 → 들여오면 그림까지 돌아와요. 이미 있는 작업은 건너뛰어요
+    P(page, "__potato.run('file.projects')"); page.wait_for_selector('.dlg >> text=모든 작업 백업')
+    with page.expect_download() as dl: page.click('.dlg >> text=모든 작업 백업')
+    zp = dl.value.path(); import zipfile as _z; names = _z.ZipFile(zp).namelist(); assert 'potato2-backup.json' in names and any(n.startswith('projects/') for n in names) and sum(n.startswith('blobs/') for n in names) >= 2, names
+    with page.expect_file_chooser() as fc: page.click('.dlg >> text=백업 들여오기')
+    fc.value.set_files(zp); page.wait_for_selector('.toast >> text=이미 있는')
+    page.fill('input[aria-label="작업 찾기"]', '없는이름zz'); page.wait_for_selector('.dlg >> text=그 이름의 작업이 없어요'); page.keyboard.press('Escape')
     # 밝은 화면: 설정에서 고르면 바로 바뀌고 다시 켜도 그대로
     page.set_viewport_size({'width': 1280, 'height': 800})
     P(page, "__potato.settings.set('theme', 'light'); document.documentElement.dataset.theme = 'light'"); shot(page, '14-light')

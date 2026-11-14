@@ -151,3 +151,19 @@ export async function unzipFirst(buf) {
   if (method !== 8) throw new Error('풀 수 없는 ZIP이에요');
   return new Uint8Array(await new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer());
 }
+
+// ZIP 속 파일을 모두 풀어요 → [{ name, data(Uint8Array) }]
+export async function unzipAll(buf) {
+  const u = new Uint8Array(buf), dv = new DataView(u.buffer, u.byteOffset, u.byteLength), dec = new TextDecoder();
+  let e = u.length - 22; while (e >= 0 && dv.getUint32(e, true) !== 0x06054b50) e--;
+  if (e < 0) throw new Error('ZIP이 아니에요');
+  const n = dv.getUint16(e + 10, true), out = []; let c = dv.getUint32(e + 16, true);
+  for (let i = 0; i < n; i++) {
+    if (dv.getUint32(c, true) !== 0x02014b50) break;
+    const method = dv.getUint16(c + 10, true), size = dv.getUint32(c + 20, true), nl = dv.getUint16(c + 28, true), xl = dv.getUint16(c + 30, true), cl = dv.getUint16(c + 32, true), local = dv.getUint32(c + 42, true);
+    const name = dec.decode(u.subarray(c + 46, c + 46 + nl)), start = local + 30 + dv.getUint16(local + 26, true) + dv.getUint16(local + 28, true), raw = u.subarray(start, start + size);
+    if (!name.endsWith('/')) out.push({ name, data: method === 0 ? raw.slice() : new Uint8Array(await new Response(new Blob([raw]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer()) });
+    c += 46 + nl + xl + cl;
+  }
+  return out;
+}
