@@ -63,7 +63,7 @@ with sync_playwright() as pw:
     page.evaluate("__potato.run('help.iopaint')"); page.wait_for_function("document.querySelectorAll('.disk-pick option').length === 2")
     assert page.evaluate("[...document.querySelectorAll('.disk-pick option')].map(o => o.value)") == ['C', 'E']
     page.select_option('.disk-pick select', 'E'); t = page.locator('.iop-help').inner_text(); print([l for l in t.split('\n') if 'model-dir' in l or 'Python311' in l])
-    assert '--model-dir="E:\\감자편집기\\iopaint-models"' in t and 'E:\\감자편집기\\Python311' in t and '--no-cache-dir' in t
+    assert '--model-dir="E:\\PotatoEditor\\iopaint-models"' in t and 'E:\\PotatoEditor\\Python311' in t and '--no-cache-dir' in t
     page.evaluate("window.__pick = 'E:\\\\AI 도구'"); page.click('.disk-pick >> text=폴더 고르기'); page.wait_for_timeout(200)
     assert '--model-dir="E:\\AI 도구\\iopaint-models"' in page.locator('.iop-help').inner_text()
     if SHOTS: page.locator('.dlg').screenshot(path=os.path.join(SHOTS, 'packdir-2.png'))

@@ -317,15 +317,15 @@ async function drivesHere() {   // 설치판은 실제로 있는 디스크만, H
   const T = window.__TAURI__; if (!(T && T.fs)) return null;
   const out = []; for (const L of LETTERS) { try { if (await T.fs.exists(L + ':\\')) out.push(L); } catch (_) { /* 없음 */ } } return out.length ? out : null;
 }
-const toolBase = () => settings.get('toolDir') || ((settings.get('packDir') || 'C:').slice(0, 2) + '\\감자편집기');
+const toolBase = () => settings.get('toolDir') || ((settings.get('packDir') || 'C:').slice(0, 2) + '\\PotatoEditor');
 function diskChooser(onChange) {
   const T = window.__TAURI__, set = v => { settings.set('toolDir', v); onChange(v); show.textContent = v; };
   const show = H('code.disk-path', null, toolBase());
   const sel = H('select.text', { 'aria-label': '저장할 디스크' }, ...LETTERS.slice(0, 6).map(L => H('option', { value: L, selected: toolBase()[0] === L }, L + ' 드라이브')));
   sel.addEventListener('change', () => set(sel.value + ':' + toolBase().slice(2)));
   drivesHere().then(ds => { if (!ds) return; sel.replaceChildren(...ds.map(L => H('option', { value: L, selected: toolBase()[0] === L }, L + ' 드라이브'))); if (!ds.includes(toolBase()[0])) set(ds[0] + ':' + toolBase().slice(2)); });
-  const pick = T && T.dialog && H('button.btn.small', { onclick: async () => { const d = await T.dialog.open({ directory: true, title: '따로 설치하는 것을 둘 폴더' }); if (d) { set(String(d)); sel.value = String(d)[0]; } } }, '폴더 고르기');
-  return H('div.disk-pick', null, H('label.field.disk-row', null, H('span', null, '저장할 곳'), sel, pick), H('p.set-note', null, '아래 명령에 들어가는 폴더: ', show), H('p.set-note', null, 'C 드라이브가 모자라면 다른 디스크를 골라 주세요.' + (T ? '' : ' HTML판은 이 PC에 어떤 디스크가 있는지 알 수 없어서, 실제로 있는 드라이브를 골라 주세요.')));
+  const pick = T && T.dialog && H('button.btn.small', { onclick: async () => { const d = await T.dialog.open({ directory: true, title: '따로 설치하는 것을 둘 폴더' }); if (!d) return; if (/[^\x00-\x7f]/.test(String(d))) toast('한글이 들어간 폴더예요. 파이썬 설치가 실패할 수 있어서 영어 이름 폴더를 권해요.'); set(String(d)); sel.value = String(d)[0]; } }, '폴더 고르기');
+  return H('div.disk-pick', null, H('label.field.disk-row', null, H('span', null, '저장할 곳'), sel, pick), H('p.set-note', null, '아래 명령에 들어가는 폴더: ', show), H('p.set-note', null, '폴더 이름은 영어와 숫자로만 지어 주세요. 한글이 들어간 폴더에 파이썬을 깔면 설치가 실패하는 일이 많아요. C 드라이브가 모자라면 다른 디스크를 골라 주세요.' + (T ? '' : ' HTML판은 이 PC에 어떤 디스크가 있는지 알 수 없어서, 실제로 있는 드라이브를 골라 주세요.')));
 }
 const iopCmd = b => `iopaint start --model=Sanster/anything-4.0-inpainting --device=cuda --low-mem --no-half --disable-nsfw-checker --port=8080 --model-dir="${b}\\iopaint-models"`;
 const PIP_TORCH = 'pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cu121';
