@@ -134,6 +134,11 @@ function masked(l, bmp) {
   return c;
 }
 // 레이어의 '보이는' 그림: 가림막이 있으면 가린 그림을 돌려줘요 (AI 도구가 가린 곳을 건드리지 않게)
+// 고른 곳을 레이어 그림의 자리로 옮긴 마스크 (레이어 그림과 같은 크기)
+export async function selInLayer(l) {
+  const bmp = await ensureBitmap(l.mediaId), s = layerSize(l), c = document.createElement('canvas'); c.width = bmp.width; c.height = bmp.height;
+  const g = c.getContext('2d'); g.translate(c.width / 2, c.height / 2); g.scale(c.width / s.w, c.height / s.h); g.rotate(-l.rot * Math.PI / 180); g.translate(-(l.x + s.w / 2), -(l.y + s.h / 2)); g.drawImage(sel.cv, 0, 0); return c;
+}
 export async function layerPic(l) { const bmp = await ensureBitmap(l.mediaId); if (!l.maskId) return bmp; await ensureBitmap(l.maskId); return masked(l, bmp); }
 async function maskFromSel(invert) {
   const l = layerOf(), bmp = await ensureBitmap(l.mediaId), s = layerSize(l), c = document.createElement('canvas'); c.width = bmp.width; c.height = bmp.height;

@@ -374,3 +374,19 @@ label.batch-row { cursor: pointer; } .batch-row input[type=checkbox] { accent-co
 @media (max-width: 900px) { .aiv { grid-template-columns: 1fr; } }
 
 .aiv-pre { max-width: 100%; height: auto; display: block; background: #000; border: 1px solid var(--line); justify-self: start; }
+
+/* 사람별로 나누기 창 */
+.psplit { display: flex; flex-direction: column; gap: 10px; }
+.split-intro, .split-count { margin: 0; color: var(--faint); line-height: 1.5; }
+.split-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.split-chip { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 1px solid var(--line); border-radius: 4px; background: transparent; color: inherit; cursor: pointer; }
+.split-chip.on { border-color: var(--potato); background: var(--hover); }
+.split-chip i { width: 12px; height: 12px; border-radius: 2px; display: inline-block; }
+.split-chip i.bg { background: repeating-linear-gradient(45deg, #555 0 3px, #2a2a2a 3px 6px); }
+.split-view { align-self: center; max-width: 100%; border: 1px solid var(--line); cursor: crosshair; touch-action: none; }
+.split-view.wait { cursor: progress; opacity: .7; }
+.dlg:has(.psplit) { width: 920px; }
+.iop-code { display: flex; gap: 8px; align-items: center; background: var(--well); border: 1px solid var(--line); border-radius: 4px; padding: 6px 8px; }
+.iop-code code { flex: 1; font-size: 12px; word-break: break-all; user-select: all; }
+.iop-help p { margin: 0 0 6px; line-height: 1.55; }
+.iop-state { color: var(--faint); font-size: 12px; }

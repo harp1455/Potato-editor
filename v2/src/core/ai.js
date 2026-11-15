@@ -210,6 +210,88 @@ export async function peopleMasks(src, job, say) {
   return res.length < 2 ? [] : res.sort((a, b) => a.x - b.x);   // 왼쪽 사람부터
 }
 
+// 애니 탐지(deepghs, YOLO): 사람·머리·손의 자리를 상자로 찾아요. 클로즈업이나 엉킨 그림에서도 머리·손은 꽤 잘 찾아요
+export const DETECT = { person: { key: 'detP', thr: 0.25 }, head: { key: 'detH', thr: 0.35 }, hand: { key: 'detN', thr: 0.33 } };
+export async function detectBoxes(src, kind, job) {
+  const D = DETECT[kind]; await aiLoad(D.key); job && check(job);
+  const W = src.width, H = src.height, r = Math.min(1, 640 / W, 640 / H), nw = Math.ceil(W * r / 32) * 32, nh = Math.ceil(H * r / 32) * 32;
+  const c = mk(nw, nh), g = c.getContext('2d', { willReadFrequently: true }); g.imageSmoothingQuality = 'high'; g.drawImage(src, 0, 0, nw, nh);
+  const d = g.getImageData(0, 0, nw, nh).data, n = nw * nh, x = new Float32Array(3 * n);
+  for (let i = 0; i < n; i++) { x[i] = d[i * 4] / 255; x[n + i] = d[i * 4 + 1] / 255; x[2 * n + i] = d[i * 4 + 2] / 255; }
+  const r2 = await aiCall({ t: 'run2', key: D.key, feeds: { images: { data: x, dims: [1, 3, nh, nw] } }, outs: ['output0'] }, [x.buffer]); job && check(job);
+  const o = r2.out.output0, dm = o.dims, v = o.data, sx = W / nw, sy = H / nh, cand = [];
+  if (dm[2] === 6) { for (let i = 0; i < dm[1]; i++) { const s = v[i * 6 + 4]; if (s > D.thr) cand.push({ box: [v[i * 6] * sx, v[i * 6 + 1] * sy, v[i * 6 + 2] * sx, v[i * 6 + 3] * sy], score: s }); } }   // 끝까지 다 해 주는 모델 (x0 y0 x1 y1 점수 종류)
+  else { const A = dm[2], C = dm[1]; for (let i = 0; i < A; i++) { let s = 0; for (let k = 4; k < C; k++) s = Math.max(s, v[k * A + i]); if (s <= D.thr) continue; const cx = v[i], cy = v[A + i], w = v[2 * A + i], hh = v[3 * A + i]; cand.push({ box: [(cx - w / 2) * sx, (cy - hh / 2) * sy, (cx + w / 2) * sx, (cy + hh / 2) * sy], score: s }); } }
+  cand.sort((a, b) => b.score - a.score);
+  const iou = (a, b) => { const iw = Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0])), ih = Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1])), it = iw * ih; return it / ((a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - it + 1e-6); };
+  const keep = []; for (const c2 of cand) { if (keep.every(k => iou(k.box, c2.box) < 0.5)) keep.push(c2); if (keep.length >= 12) break; }
+  return keep.map(k => ({ ...k, box: [Math.max(0, k.box[0]), Math.max(0, k.box[1]), Math.min(W, k.box[2]), Math.min(H, k.box[3])] }));
+}
+
+// 사람별로 나누기 (반자동): 머리·손·사람 상자와 고르게 뿌린 점으로 SAM 조각을 만들고, 겹치면 작은 조각이 이겨요.
+// 돌려주는 것: { W, H, alpha(인물 윤곽), lab(점마다 조각 번호, -1은 배경), pieces[{ area, cx, cy }], owner[조각마다 사람 번호], people }
+export async function splitPieces(src, job, say) {
+  const W0 = src.width, H0 = src.height, k = Math.min(1, 1400 / Math.max(W0, H0)), W = Math.round(W0 * k), H = Math.round(H0 * k), N = W * H;
+  const small = mk(W, H); small.getContext('2d').drawImage(src, 0, 0, W, H);
+  say && say('인물 윤곽을 따는 중', 0.05); const cm = await charMask(small, job), alpha = new Uint8Array(N);
+  { const d = cm.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, W, H).data; for (let i = 0; i < N; i++) alpha[i] = d[i * 4 + 3]; }
+  say && say('사람·머리·손을 찾는 중', 0.15);
+  const P = await detectBoxes(small, 'person', job), Hd = await detectBoxes(small, 'head', job), Hn = await detectBoxes(small, 'hand', job);
+  // SAM 결과의 점박이를 지워요: 가로세로로 고르게 흐린 뒤 반 넘게 찬 곳만 남겨요
+  const R = Math.max(2, Math.round(Math.max(W, H) / 300)), tmp = new Float32Array(N);
+  const smooth = u => { for (let y = 0; y < H; y++) { let acc = 0; const o = y * W; for (let x = -R; x < W; x++) { if (x + R < W) acc += u[o + x + R]; if (x - R - 1 >= 0) acc -= u[o + x - R - 1]; if (x >= 0) tmp[o + x] = acc / (Math.min(W - 1, x + R) - Math.max(0, x - R) + 1); } }
+    let a = 0; for (let x = 0; x < W; x++) { let acc = 0; for (let y = -R; y < H; y++) { if (y + R < H) acc += tmp[(y + R) * W + x]; if (y - R - 1 >= 0) acc -= tmp[(y - R - 1) * W + x]; if (y >= 0) { const v = acc / (Math.min(H - 1, y + R) - Math.max(0, y - R) + 1) >= 0.5 && alpha[y * W + x] > 64 ? 1 : 0; u[y * W + x] = v; a += v; } } } return a; };
+  const key = 'split:' + Math.random(), maskOf = async (pts, box) => { const m = await samMask(small, key, pts, box, job), d = m.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, W, H).data, u = new Uint8Array(N); for (let i = 0; i < N; i++) if (d[i * 4 + 3] > 127) u[i] = 1; const a = smooth(u); return { u, a }; };
+  const raw = []; let done = 0;
+  const prompts = [...Hd.map(d => [[], d.box]), ...Hn.map(d => [[], d.box])];
+  // 고르게 뿌린 점: 인물 윤곽 안에서 7×6 칸마다 하나
+  for (let gy = 0; gy < 6; gy++) for (let gx = 0; gx < 7; gx++) { const x = Math.round((gx + 0.5) * W / 7), y = Math.round((gy + 0.5) * H / 6); if (alpha[y * W + x] > 128) prompts.push([[[x, y, 1]], null]); }
+  for (const [pts, box] of prompts) { const m = await maskOf(pts, box); if (m.a > N * 0.002 && m.a < N * 0.85) raw.push(m); say && say(`조각을 만드는 중 (${++done}/${prompts.length})`, 0.2 + 0.6 * done / prompts.length); }
+  // 사람마다 몸 전체 짐작 (상자로 물어서). 조각 주인을 처음 정할 때만 써요
+  const bodies = []; for (const p of P.slice(0, 4)) { const m = await maskOf([], p.box); if (m.a > N * 0.01) bodies.push({ ...m, score: p.score }); }
+  say && say('조각을 정리하는 중', 0.85);
+  const lab = new Int32Array(N).fill(-1); raw.sort((a, b) => b.a - a.a);
+  raw.forEach((m, id) => { for (let i = 0; i < N; i++) if (m.u[i]) lab[i] = id; });
+  // 아무 조각에도 안 든 인물 자리: 이어진 덩어리마다 새 조각
+  let next = raw.length; const q = new Int32Array(N);
+  for (let s = 0; s < N; s++) { if (lab[s] !== -1 || alpha[s] <= 64) continue; let h = 0, t = 0; q[t++] = s; lab[s] = next;
+    while (h < t) { const i = q[h++], x = i % W; for (const j of [i - 1, i + 1, i - W, i + W]) { if (j < 0 || j >= N || (j === i - 1 && x === 0) || (j === i + 1 && x === W - 1)) continue; if (lab[j] === -1 && alpha[j] > 64) { lab[j] = next; q[t++] = j; } } }
+    next++; }
+  // 한 조각이 여러 덩어리로 흩어져 있으면 덩어리마다 따로 번호를 줘요 (작은 덩어리는 아래에서 이웃에 붙어요)
+  { const nl = new Int32Array(N).fill(-1); let c = 0;
+    for (let s = 0; s < N; s++) { if (lab[s] < 0 || nl[s] >= 0) continue; const L = lab[s]; let h = 0, t = 0; q[t++] = s; nl[s] = c;
+      while (h < t) { const i = q[h++], x = i % W; for (const j of [i - 1, i + 1, i - W, i + W]) { if (j < 0 || j >= N || (j === i - 1 && x === 0) || (j === i + 1 && x === W - 1)) continue; if (nl[j] < 0 && lab[j] === L) { nl[j] = c; q[t++] = j; } } }
+      c++; }
+    for (let i = 0; i < N; i++) lab[i] = nl[i]; next = c; }
+  // 너무 작은 조각은 가장 많이 맞닿은 이웃에 붙여요
+  const area = new Int32Array(next); for (let i = 0; i < N; i++) if (lab[i] >= 0) area[lab[i]]++;
+  for (let pass = 0; pass < 6; pass++) { const nb = new Map();
+    for (let i = 0; i < N; i++) { const a = lab[i]; if (a < 0 || area[a] >= N * 0.0015) continue; const x = i % W; for (const j of [i - 1, i + 1, i - W, i + W]) { if (j < 0 || j >= N || (j === i - 1 && x === 0) || (j === i + 1 && x === W - 1)) continue; const b = lab[j]; if (b >= 0 && b !== a) { const m = nb.get(a) || new Map(); m.set(b, (m.get(b) || 0) + 1); nb.set(a, m); } } }
+    if (!nb.size) break; const to = new Map(); for (const [a, m] of nb) to.set(a, [...m].sort((x, y) => y[1] - x[1])[0][0]);
+    for (let i = 0; i < N; i++) { const a = lab[i]; if (to.has(a)) { lab[i] = to.get(a); } } area.fill(0); for (let i = 0; i < N; i++) if (lab[i] >= 0) area[lab[i]]++; }
+  // 번호를 0부터 다시 매겨요
+  const map = new Int32Array(next).fill(-1); let n = 0; for (let a = 0; a < next; a++) if (area[a] > 0) map[a] = n++;
+  const pieces = Array.from({ length: n }, () => ({ area: 0, cx: 0, cy: 0 }));
+  for (let i = 0; i < N; i++) if (lab[i] >= 0) { const p = pieces[lab[i] = map[lab[i]]]; p.area++; p.cx += i % W; p.cy += (i / W) | 0; }
+  for (const p of pieces) { p.cx /= p.area; p.cy /= p.area; }
+  // 처음 주인: 몸 짐작이 둘 이상이면 조각이 가장 많이 들어간 사람(작은 몸 짐작부터 봐요). 아니면 모두 사람 1
+  const owner = new Int16Array(n), people = Math.max(2, Math.min(4, bodies.length));
+  if (bodies.length >= 2) {
+    for (const b of bodies) { let sx = 0; for (let i = 0; i < N; i++) if (b.u[i]) sx += i % W; b.cx = sx / b.a; }
+    bodies.sort((a, b) => a.cx - b.cx);   // 왼쪽 사람이 사람 1
+    const order = bodies.map((b, i) => i).sort((x, y) => bodies[x].a - bodies[y].a), ov = pieces.map(() => new Float32Array(bodies.length));
+    for (let i = 0; i < N; i++) { const a = lab[i]; if (a < 0) continue; for (let b = 0; b < bodies.length; b++) if (bodies[b].u[i]) ov[a][b]++; }
+    pieces.forEach((p, a) => { let pick = -1; for (const b of order) if (ov[a][b] / p.area >= 0.6) { pick = b; break; } if (pick < 0) { let bv = 0.2; ov[a].forEach((v, b) => { if (v / p.area > bv) { bv = v / p.area; pick = b; } }); } owner[a] = Math.max(0, pick); });
+  }
+  return { W, H, W0, H0, alpha, lab, pieces, owner, people, key, small, found: { person: P.length, head: Hd.length, hand: Hn.length } };
+}
+// 누른 점에서 새 조각을 따서 기존 조각에서 떼어 내요 (사람 나누기 창에서 '조각 더 나누기')
+export async function splitCarve(S, x, y, job) {
+  const m = await samMask(S.small, S.key, [[x, y, 1]], null, job), d = m.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, S.W, S.H).data, id = S.pieces.length; let a = 0, cx = 0, cy = 0;
+  for (let i = 0; i < S.W * S.H; i++) if (d[i * 4 + 3] > 127 && S.alpha[i] > 64) { if (S.lab[i] >= 0) S.pieces[S.lab[i]].area--; S.lab[i] = id; a++; cx += i % S.W; cy += (i / S.W) | 0; }
+  if (!a) return -1; S.pieces.push({ area: a, cx: cx / a, cy: cy / a }); const o = new Int16Array(S.pieces.length); o.set(S.owner); S.owner = o; return id;
+}
+
 export async function samMask(src, key, pts, box, job, say) {
   say && say('모델을 불러오는 중'); await aiLoad('samE'); await aiLoad('samD'); job && check(job);
   const W = src.width, H = src.height, s = 1024 / Math.max(W, H), tw = Math.max(1, Math.round(W * s)), th = Math.max(1, Math.round(H * s));

@@ -60,6 +60,11 @@
    "label": "인물 나누기 팩",
    "desc": "한 그림에 여러 명이 있을 때 사람마다 따로 레이어로 나눠요 (애니 그림 전용 모델). AI > 인물별로 레이어 나누기에서 써요",
    "size": 222361002
+  },
+  "detect": {
+   "label": "애니 탐지 팩",
+   "desc": "애니 그림에서 사람, 머리, 손의 자리를 찾아요 (deepghs). 사람별로 나누기에서 조각을 만들 때 써요",
+   "size": 113262415
   }
  },
  "files": [
@@ -238,6 +243,30 @@
    "size": 222361002,
    "raw": 238650909,
    "sha256": "78b91bfbfbf0d9bbebfde26867ffab48e786c7afa35366d508a2eb8b5fec1092"
+  },
+  {
+   "id": "czM_detP",
+   "file": "anime-person-detect.onnx.gz",
+   "pack": "detect",
+   "size": 37753582,
+   "raw": 44583231,
+   "sha256": "313d88c086cf191877c3a7a700fdce6d33f472c96fe5d5d1de13af31311443fa"
+  },
+  {
+   "id": "czM_detH",
+   "file": "anime-head-detect.onnx.gz",
+   "pack": "detect",
+   "size": 37770176,
+   "raw": 44585386,
+   "sha256": "6eec8f80185a99a64bdf2f683fc3d8339063652b76e6a5ea1238473938680661"
+  },
+  {
+   "id": "czM_detN",
+   "file": "anime-hand-detect.onnx.gz",
+   "pack": "detect",
+   "size": 37738657,
+   "raw": 44583229,
+   "sha256": "ecfc596d18d4482d42931b80d006b0ff71d68f1109feab2f5f801e8a2b282967"
   }
  ]
 }

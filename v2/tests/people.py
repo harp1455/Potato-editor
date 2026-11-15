@@ -27,7 +27,7 @@ with sync_playwright() as pw:
     page.goto('http://127.0.0.1:%d/index.html' % srv.server_address[1]); page.click('text=나중에 하기')
     with page.expect_file_chooser() as fc: page.click('.empty-room >> text=그림 열기')
     fc.value.set_files(src); page.wait_for_function("__potato.state.project.canvases.length === 1 && __potato.state.bitmaps.size === 1")
-    page.evaluate("__potato.run('ai.people')"); page.wait_for_selector('.dlg >> text=AI 팩 받기'); page.click('.dlg-foot >> text=받기')
+    page.evaluate("__potato.run('ai.peopleAuto')"); page.wait_for_selector('.dlg >> text=AI 팩 받기'); page.click('.dlg-foot >> text=받기')
     done = page.locator('.toast', has_text='나눴어요').or_(page.locator('.toast', has_text='찾지 못했어요')); done.first.wait_for(timeout=TIME); print(done.first.inner_text())
     names = page.evaluate(C0 + ".layers.map(l => l.name)"); print(names)
     if len(sys.argv) > 3: page.wait_for_timeout(500); page.screenshot(path=sys.argv[3])

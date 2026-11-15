@@ -3,12 +3,15 @@ import { h } from './dom.js';
 import { state, commit, canvasOf, layerOf, addMedia, ensureBitmap, uid } from '../core/store.js';
 import { addCmd, run } from '../core/cmd.js';
 import { MAN, PACK_PAGE, canDownload, missingFiles, packGet, packAdd, packState, packDel, idsOfPack, mb } from '../core/packs.js';
-import { runJob, charMask, upscale, samMask, jobs, aiReset, fileIdOf, peopleMasks } from '../core/ai.js';
+import { runJob, charMask, upscale, samMask, jobs, aiReset, fileIdOf, peopleMasks, splitPieces } from '../core/ai.js';
+import { openSplit } from './peoplesplit.js';
+import PARTS_SERVER from '../../tools/potato_parts_server.py';
+import { download } from '../core/files.js';
 import { sel, selFor, selMask, selBounds } from '../core/select.js';
 import { fillHole, legacyAi, aiLine } from '../legacy/shim.js';
 import { settings } from '../core/settings.js';
 import { h as H } from './dom.js';
-import { flatten, samPick, layerFromBlob, layerPic } from '../rooms/image.js';
+import { flatten, samPick, layerFromBlob, layerPic, selInLayer } from '../rooms/image.js';
 import { dialog, toast, busy, confirmBox } from './overlay.js';
 
 const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
@@ -97,7 +100,16 @@ export function registerAiCmds(openPacks) {
     const l = layerOf(), bmp = await layerPic(l);
     await swapImage(l, cut(bmp, await charMask(bmp, j, say)), '배경 지움'); commit('배경 지우기');
   }) });
-  addCmd({ id: 'ai.people', title: '인물별로 레이어 나누기', menu: 'AI', words: '사람 캐릭터 분리 두 명 여러 명 인스턴스', enabled: hasLayer, run: () => job('인물별로 나누기', ['isnet', 'people'], async (j, say) => {
+  addCmd({ id: 'ai.people', title: '사람별로 나누기 (조각 골라서)…', menu: 'AI', words: '사람 캐릭터 분리 두 명 여러 명 인물 겹친', enabled: hasLayer, run: () => job('사람별로 나누기', ['isnet', 'samE', 'samD', 'detP', 'detH', 'detN'], async (j, say) => {
+    const c = canvasOf(), l = layerOf(), bmp = await layerPic(l), name = l.name, S = await splitPieces(bmp, j, say);
+    if (!S.pieces.length) { toast('인물을 찾지 못했어요.'); return; }
+    openSplit(S, '사람별로 나누기', async masks => {
+      const all = document.createElement('canvas'); all.width = S.W; all.height = S.H; const ag = all.getContext('2d'); let at = c.layers.indexOf(l);
+      for (const [i, m] of masks.entries()) { ag.drawImage(m, 0, 0); const n = { ...l, ...(l.adj ? { adj: { ...l.adj } } : {}), id: uid('l'), name: `${name} 사람 ${i + 1}` }; await swapImage(n, cut(bmp, m), '사람'); c.layers.splice(++at, 0, n); }
+      await swapImage(l, cut(bmp, all, true), '배경'); l.name = name + ' 배경'; commit('사람별로 나누기'); toast(`사람 ${masks.length}명을 따로 레이어로 나눴어요.`);
+    });
+  }) });
+  addCmd({ id: 'ai.peopleAuto', title: '인물별로 레이어 나누기 (전신 그림, 자동)', menu: 'AI', words: '사람 캐릭터 분리 두 명 여러 명 인스턴스', enabled: hasLayer, run: () => job('인물별로 나누기', ['isnet', 'people'], async (j, say) => {
     const c = canvasOf(), l = layerOf(), bmp = await layerPic(l), name = l.name, ppl = await peopleMasks(bmp, j, say);
     if (ppl.length < 2) { toast('인물을 두 명 이상 찾지 못했어요. 몸 전체가 보이는 그림에서 잘 되고, 얼굴이나 몸 일부만 크게 나온 그림은 못 찾는 일이 많아요.'); return; }
     const all = document.createElement('canvas'); all.width = bmp.width; all.height = bmp.height; const ag = all.getContext('2d'); let at = c.layers.indexOf(l);
@@ -120,6 +132,10 @@ export function registerAiCmds(openPacks) {
   // ---- 8.x에서 가져온 계산을 쓰는 도구들 ----
   // 결과를 '그 레이어와 같은 자리'에 새 레이어로 올려요 (원본을 안 바꾸니 끄고 켜며 견줄 수 있어요)
   const overlay = async (l, canvas, name) => { const c = canvasOf(), n = await layerFromBlob(c, await png(canvas), name, { hidden: true }); Object.assign(n, { x: l.x, y: l.y, scale: l.scale * (mediaOf(l).w / canvas.width), rot: l.rot }); const i = c.layers.indexOf(n); c.layers.splice(i, 1); c.layers.splice(c.layers.indexOf(l) + 1, 0, n); return n; };
+  addCmd({ id: 'ai.iopaint', title: '고른 곳을 IOPaint로 그려 넣기…', menu: 'AI', group: 'erase', words: '채우기 가려진 곳 이어 그리기 인페인트 stable diffusion sd brushnet powerpaint iopaint', enabled: () => !!canvasOf() && sel.any, run: () => iopaintDialog() });
+  addCmd({ id: 'ai.parts', title: '부위별로 레이어 나누기 (부위 서버)…', menu: 'AI', words: '머리카락 얼굴 팔 다리 옷 부위 나누기 see-through 리깅', enabled: hasLayer, run: () => partsDialog() });
+  addCmd({ id: 'help.parts', title: '부위 서버 켜는 법', menu: '도움말', words: 'see-through 부위 설치', run: () => partsHelp() });
+  addCmd({ id: 'help.iopaint', title: 'IOPaint 켜는 법', menu: '도움말', words: '채우기 그려 넣기 설치', run: () => iopHelp() });
   addCmd({ id: 'ai.censor', title: '자동 흰칠', menu: 'AI', group: 'cz', keys: 'Ctrl+Shift+W', words: '가리기 모자이크 검열 성기', enabled: hasLayer, run: () => { const k = censorCfg(); return job('자동 흰칠', ['deep', 'deepn', k.model === 'precise' ? 'segM' : 'segN', 'samE', 'samD'], async (j, say) => {
     const l = layerOf(), bmp = await layerPic(l), r = await censorMask(bmp, j, say);
     if (!r.found) { toast('가릴 곳을 찾지 못했어요. 설정에서 민감도를 올려 볼 수 있어요.'); return; }
@@ -218,4 +234,156 @@ function censorDialog() {
     H('label.field', null, H('span.field-name.w', null, '색'), H('input', { type: 'color', value: k.color, 'aria-label': '가리는 색', onchange: e => set('color', e.target.value) })));
   draw();
   dialog({ title: '자동 흰칠 설정', body: box, buttons: [{ label: '닫기', primary: true }] });
+}
+
+// IOPaint 잇기: 사용자 PC에서 따로 켠 IOPaint(무료, 그림 채우기 프로그램)에 고른 곳을 보내 그려 넣어요.
+// 애니 체크포인트(SD1.5)를 쓰면 가려졌던 팔, 다리 같은 것을 새로 그릴 수 있어요. 그림은 이 PC 밖으로 나가지 않아요
+const iopCfg = () => ({ ...settings.defaults.iop, ...(settings.get('iop') || {}) });
+const b64 = c => new Promise(r => c.toBlob(b => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(b); }, 'image/png'));
+async function iopFetch(path, opt = {}, ms = 8000, base = iopCfg().url, who = 'IOPaint') {
+  const u = base.replace(/\/+$/, '') + path, ac = new AbortController(), t = setTimeout(() => ac.abort(), ms);
+  // 설치판은 앱의 연결 기능으로 보내요 (웹 화면에서 이 PC 안 주소로 바로 보내는 것을 막는 경우가 있어서). 안 되면 보통 방식으로
+  const T = window.__TAURI__, go = async () => { if (T && T.http && T.http.fetch) { try { return await T.http.fetch(u, { ...opt, signal: ac.signal }); } catch (e) { if (e.name === 'AbortError') throw e; } } return fetch(u, { ...opt, signal: ac.signal }); };
+  try { const r = await go(); if (!r.ok) { let msg = 'HTTP ' + r.status; try { const j = await r.json(); msg += ' ' + (j.detail || j.errors || JSON.stringify(j)).toString().slice(0, 200); } catch { } throw new Error(msg); } return r; }
+  catch (e) { if (e.name === 'AbortError') throw new Error(`${who}가 제때 답하지 않았어요.`); if (e instanceof TypeError) throw new Error(`${who}에 연결하지 못했어요. 켜져 있는지, 주소가 맞는지 봐 주세요.`); throw e; }
+  finally { clearTimeout(t); }
+}
+export const iopModel = async () => (await (await iopFetch('/api/v1/model')).json());
+async function iopaintDialog() {
+  const C = iopCfg(), c = canvasOf(), l = layerOf();
+  const url = H('input.text', { value: C.url, 'aria-label': 'IOPaint 주소' }), state2 = H('span.iop-state', null, '확인하는 중');
+  const prompt = H('textarea.text.area', { rows: 2, placeholder: '그려 넣을 것을 영어로. 예: muscular arm, bare shoulder', 'aria-label': '그려 넣을 것', value: C.prompt });
+  const neg = H('input.text', { value: C.neg, 'aria-label': '빼고 싶은 것' });
+  const steps = H('input.text.num', { type: 'number', min: 5, max: 60, value: C.steps, 'aria-label': '단계 수' });
+  const mode = H('select.text', { 'aria-label': '보낼 그림' }, H('option', { value: 'layer', selected: C.mode === 'layer' }, '고른 레이어만 (가려졌던 곳을 레이어에 채워 넣기)'), H('option', { value: 'view', selected: C.mode === 'view' }, '보이는 그대로 (새 레이어로 얹기)'));
+  let model = null;
+  const check = async () => { settings.set('iop', { ...iopCfg(), url: url.value.trim() }); state2.textContent = '확인하는 중'; try { model = await iopModel(); state2.textContent = `연결됨: ${model.name}${model.model_type ? ` (${model.model_type})` : ''}`; } catch (e) { model = null; state2.textContent = e.message; } };
+  url.addEventListener('change', check); check();
+  dialog({ title: 'IOPaint로 그려 넣기', wide: true, body: H('div.form', null,
+    H('p.set-note', null, '이 PC에 IOPaint를 켜 두면, 고른 곳을 거기로 보내 그려 넣어요. 그림은 이 PC 밖으로 나가지 않아요. 가려졌던 팔이나 다리를 이어 그리려면 애니 모델(예: Sanster/anything-4.0-inpainting)로 켜 주세요. 켜는 법은 도움말 > IOPaint 켜는 법에 있어요.'),
+    H('label.field', null, H('span', null, '주소'), url, state2),
+    H('label.field', null, H('span', null, '보낼 그림'), mode),
+    H('label.field', null, H('span', null, '그려 넣을 것'), prompt),
+    H('label.field', null, H('span', null, '빼고 싶은 것'), neg),
+    H('label.field', null, H('span', null, '단계 수'), steps, H('small', null, '많을수록 꼼꼼하지만 오래 걸려요. 4GB 그래픽카드면 20~30이 알맞아요.'))),
+    buttons: [{ label: '취소' }, { label: '그려 넣기', primary: true, run: () => {
+      const cfg = { ...iopCfg(), url: url.value.trim(), prompt: prompt.value.trim(), neg: neg.value.trim(), steps: Math.max(5, Math.min(60, +steps.value || 25)), mode: mode.value };
+      settings.set('iop', cfg);
+      if (cfg.mode === 'layer' && (!l || l.locked)) { toast('채워 넣을 레이어를 먼저 골라 주세요.'); return false; }
+      runIop(c, l, cfg).catch(e => toast('IOPaint로 그려 넣기: ' + (e.message || '실패했어요'), 'err'));
+    } }] });
+}
+async function runIop(c, l, cfg) {
+  await runJob('IOPaint로 그려 넣기', async (j, say) => {
+    say('그림을 준비하는 중', 0.05);
+    let src, M;
+    if (cfg.mode === 'layer') { src = await layerPic(l); M = await selInLayer(l); }
+    else { src = await flatten(c); M = sel.cv; }
+    const W0 = src.width, H0 = src.height, md = (() => { const t = mk(W0, H0), g = t.getContext('2d', { willReadFrequently: true }); g.drawImage(M, 0, 0, W0, H0); return g.getImageData(0, 0, W0, H0).data; })();
+    let x0 = W0, y0 = H0, x1 = -1, y1 = -1;
+    for (let y = 0; y < H0; y++) for (let x = 0; x < W0; x++) if (md[(y * W0 + x) * 4 + 3] > 20) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+    if (x1 < 0) throw new Error(cfg.mode === 'layer' ? '고른 곳이 이 레이어와 겹치지 않아요.' : '고른 곳이 없어요.');
+    // 둘레를 넉넉히 함께 보내야 어울리게 그려요 (8의 배수로 맞춰요)
+    const pad = Math.max(64, Math.round(Math.max(x1 - x0, y1 - y0) * 0.75)); x0 = Math.max(0, x0 - pad); y0 = Math.max(0, y0 - pad); x1 = Math.min(W0, x1 + pad); y1 = Math.min(H0, y1 + pad);
+    const W = Math.max(8, Math.floor((x1 - x0) / 8) * 8), H = Math.max(8, Math.floor((y1 - y0) / 8) * 8);
+    const img = mk(W, H), g = img.getContext('2d'); g.fillStyle = '#808080'; g.fillRect(0, 0, W, H); g.drawImage(src, -x0, -y0);   // 투명한 곳은 회색으로 (그 자리도 함께 그려요)
+    const m = mk(W, H), mg = m.getContext('2d', { willReadFrequently: true }); mg.drawImage(M, 0, 0, M.width, M.height, -x0 * M.width / W0, -y0 * M.height / H0, M.width * W0 / M.width, M.height * H0 / M.height);
+    const mdd = mg.getImageData(0, 0, W, H); for (let i = 0; i < W * H; i++) { const v = mdd.data[i * 4 + 3] > 20 ? 255 : 0; mdd.data[i * 4] = mdd.data[i * 4 + 1] = mdd.data[i * 4 + 2] = v; mdd.data[i * 4 + 3] = 255; } mg.putImageData(mdd, 0, 0);
+    let isSd = false; try { const mi = await iopModel(); isSd = mi.model_type && mi.model_type !== 'inpaint'; } catch (e) { throw e; }
+    say(isSd ? 'IOPaint가 그리는 중 (4GB 그래픽카드면 1~3분쯤 걸려요)' : 'IOPaint가 메우는 중', 0.2);
+    const body = { image: await b64(img), mask: await b64(m), prompt: cfg.prompt, negative_prompt: cfg.neg, sd_steps: cfg.steps, sd_strength: cfg.strength, sd_seed: -1, sd_mask_blur: 8, sd_keep_unmasked_area: true, sd_match_histograms: false, hd_strategy: 'Crop', hd_strategy_crop_margin: 128, hd_strategy_crop_trigger_size: 800, hd_strategy_resize_limit: 1280 };
+    const r = await iopFetch('/api/v1/inpaint', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, 30 * 60 * 1000);
+    if (j.stop) return;
+    const out = await createImageBitmap(await r.blob()); say('받은 그림을 넣는 중', 0.9);
+    // 고른 곳만 가져와요 (가장자리는 살짝 부드럽게)
+    const piece = mk(W, H), pg = piece.getContext('2d'); pg.drawImage(out, 0, 0, W, H); pg.globalCompositeOperation = 'destination-in'; pg.filter = 'blur(2px)'; pg.drawImage(m, 0, 0); pg.filter = 'none';
+    { const t = mk(W, H), tg = t.getContext('2d', { willReadFrequently: true }); tg.drawImage(m, 0, 0); const d = tg.getImageData(0, 0, W, H); for (let i = 0; i < W * H; i++) d.data[i * 4 + 3] = d.data[i * 4]; tg.putImageData(d, 0, 0); pg.globalCompositeOperation = 'destination-in'; pg.filter = 'blur(2px)'; pg.drawImage(t, 0, 0); pg.filter = 'none'; }
+    if (cfg.mode === 'layer') {
+      const full = mk(W0, H0), fg = full.getContext('2d'); fg.drawImage(src, 0, 0); fg.drawImage(piece, x0, y0);
+      await swapImage(l, full, '채움', { hidden: true }); commit('IOPaint로 채우기');
+    } else { await layerFromBlob(c, await png(piece), '그려 넣은 자리', { x: x0, y: y0, hidden: true }); commit('IOPaint로 그려 넣기'); }
+  });
+}
+
+const IOP_CMD = 'iopaint start --model=Sanster/anything-4.0-inpainting --device=cuda --low-mem --no-half --disable-nsfw-checker --port=8080';
+export function iopHelp() {
+  const copy = t => H('button.btn.small', { onclick: async () => { try { await navigator.clipboard.writeText(t); toast('복사했어요.'); } catch { toast('복사하지 못했어요. 직접 골라서 복사해 주세요.'); } } }, '복사');
+  const code = t => H('div.iop-code', null, H('code', null, t), copy(t));
+  dialog({ title: 'IOPaint 켜는 법', wide: true, body: H('div.form.iop-help', null,
+    H('p', null, 'IOPaint는 무료 그림 채우기 프로그램이에요. 이 PC에서 켜 두면 감자 편집기의 AI > 고른 곳을 IOPaint로 그려 넣기가 그림을 거기로 보내요. 처음 한 번만 설치하면 돼요.'),
+    H('b', null, '1. 파이썬 설치'),
+    H('p', null, 'python.org에서 Python 3.11을 받아 설치해요. 설치 첫 화면에서 "Add python.exe to PATH"를 꼭 체크해 주세요.'),
+    H('b', null, '2. IOPaint 설치'),
+    H('p', null, '시작 메뉴에서 "cmd"를 찾아 명령 프롬프트를 열고, 아래 두 줄을 차례로 붙여 넣어요. 몇 GB를 받아서 10분쯤 걸려요.'),
+    code('pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121'), code('pip install iopaint'),
+    H('b', null, '3. 켜기 (쓸 때마다)'),
+    H('p', null, '명령 프롬프트에 아래 줄을 붙여 넣어요. 처음 켤 때 애니 채우기 모델(약 2GB)을 받아요. 창은 쓰는 동안 열어 두세요.'),
+    code(IOP_CMD),
+    H('p.set-note', null, '--disable-nsfw-checker를 빼면 성인 그림의 결과가 까맣게 나와요. --no-half는 GTX 16 계열에서 그림이 까맣게 나오는 것을 막아요. "out of memory"가 나오면 끝에 --cpu-offload를 붙여 다시 켜 주세요. 느려지지만 4GB에서도 돌아가요.'),
+    H('p.set-note', null, '그래픽카드에서 실제로 돌려 보지는 못했어요. 안 되면 명령 프롬프트에 나온 마지막 몇 줄을 알려 주세요.')),
+    buttons: [{ label: '닫기', primary: true }] });
+}
+
+// 부위 서버 잇기: 이 PC에서 켠 부위 서버(See-through 19부위 모델)에 레이어 그림을 보내고, 부위마다 레이어로 나눠요
+const PART_KO = ['머리카락', '모자', '얼굴', '눈', '안경', '귀', '귀걸이', '코', '입', '목', '목 장식', '윗옷과 몸통', '팔과 손', '아랫도리', '다리', '신발', '꼬리', '날개', '물건'];
+const FACE_IN = new Set([3, 4, 5, 6, 7, 8]);   // 눈, 안경, 귀, 귀걸이, 코, 입 → 얼굴에 합치기
+const partsCfg = () => ({ ...settings.defaults.parts, ...(settings.get('parts') || {}) });
+const partsFetch = (path, opt, ms) => iopFetch(path, opt, ms, partsCfg().url, '부위 서버');
+function partsDialog() {
+  const C = partsCfg(), l = layerOf(), url = H('input.text', { value: C.url, 'aria-label': '부위 서버 주소' }), st = H('span.iop-state', null, '확인하는 중');
+  const merge = H('input', { type: 'checkbox', checked: C.mergeFace });
+  const check = async () => { settings.set('parts', { ...partsCfg(), url: url.value.trim() }); st.textContent = '확인하는 중'; try { const i = await (await partsFetch('/info')).json(); st.textContent = `연결됨: ${i.device === 'cuda' ? '그래픽카드' : 'CPU'}로 돌아가요`; } catch (e) { st.textContent = e.message; } };
+  url.addEventListener('change', check); check();
+  dialog({ title: '부위별로 레이어 나누기', body: H('div.form', null,
+    H('p.set-note', null, '고른 레이어를 이 PC의 부위 서버로 보내 머리카락, 얼굴, 윗옷과 몸통, 팔과 손, 다리 같은 부위로 나눠요. 두 사람이 겹친 그림은 먼저 사람별로 나누고 한 사람씩 하면 더 잘 돼요. 켜는 법은 도움말 > 부위 서버 켜는 법에 있어요.'),
+    H('label.field', null, H('span', null, '주소'), url, st),
+    H('label.check', null, merge, '눈, 코, 입, 귀는 얼굴에 합치기')),
+    buttons: [{ label: '취소' }, { label: '나누기', primary: true, run: () => {
+      settings.set('parts', { ...partsCfg(), url: url.value.trim(), mergeFace: merge.checked });
+      runParts(canvasOf(), l, merge.checked).catch(e => toast('부위별로 나누기: ' + (e.message || '실패했어요'), 'err'));
+    } }] });
+}
+async function runParts(c, l, mergeFace) {
+  await runJob('부위별로 나누기', async (j, say) => {
+    const bmp = await layerPic(l), name = l.name, W = bmp.width, H0 = bmp.height, k = Math.min(1, 1600 / Math.max(W, H0));
+    const send = mk(Math.round(W * k), Math.round(H0 * k)), sg = send.getContext('2d'); sg.fillStyle = '#ffffff'; sg.fillRect(0, 0, send.width, send.height); sg.drawImage(bmp, 0, 0, send.width, send.height);   // 투명한 곳은 흰 바탕으로
+    say('부위 서버가 나누는 중 (그래픽카드면 수십 초, CPU면 몇 분 걸려요)', 0.2);
+    const r = await (await partsFetch('/parts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image: await b64(send) }) }, 30 * 60 * 1000)).json();
+    if (r.error) throw new Error(r.error); if (j.stop) return;
+    const labImg = await createImageBitmap(await (await fetch(r.labels)).blob()), lc = mk(W, H0), lg = lc.getContext('2d', { willReadFrequently: true });
+    lg.imageSmoothingEnabled = false; lg.drawImage(labImg, 0, 0, W, H0); const ld = lg.getImageData(0, 0, W, H0).data;
+    const ac = mk(W, H0), ag = ac.getContext('2d', { willReadFrequently: true }); ag.drawImage(bmp, 0, 0); const ad = ag.getImageData(0, 0, W, H0).data;
+    const N = W * H0, groups = new Map();
+    for (let i = 0; i < N; i++) { if (ad[i * 4 + 3] < 8) continue; let p = ld[i * 4] - 1; if (p >= 0 && mergeFace && FACE_IN.has(p)) p = 2; groups.set(p, (groups.get(p) || 0) + 1); }
+    const keep = [...groups].filter(([p, n]) => p >= 0 && n > N * 0.002).map(([p]) => p).sort((a, b) => a - b);
+    if (!keep.length) { toast('나눌 부위를 찾지 못했어요.'); return; }
+    say('레이어를 만드는 중', 0.9); let at = c.layers.indexOf(l); const made = [];
+    for (const p of [...keep, -1]) {
+      const m = mk(W, H0), mg = m.getContext('2d'), md = mg.createImageData(W, H0); let any = 0;
+      for (let i = 0; i < N; i++) { let q = ld[i * 4] - 1; if (q >= 0 && mergeFace && FACE_IN.has(q)) q = 2; if (p === -1 ? (q < 0 || !keep.includes(q)) : q === p) { md.data[i * 4 + 3] = 255; any++; } }
+      if (!any) continue; mg.putImageData(md, 0, 0);
+      const n = { ...l, ...(l.adj ? { adj: { ...l.adj } } : {}), id: uid('l'), name: `${name} ${p === -1 ? '나머지' : PART_KO[p]}` }; await swapImage(n, cut(bmp, m), p === -1 ? '나머지' : PART_KO[p]); made.push(n);
+    }
+    // 그리는 순서: 다리·아랫도리가 아래, 머리카락이 위 (대략)
+    const ORDER = [17, 16, 14, 15, 13, 11, 9, 10, 12, 2, 5, 6, 3, 4, 7, 8, 1, 0, 18];
+    made.sort((a, b) => ORDER.indexOf(PART_KO.findIndex(t => a.name.endsWith(t))) - ORDER.indexOf(PART_KO.findIndex(t => b.name.endsWith(t))));
+    c.layers.splice(at, 1, ...made); commit('부위별로 나누기'); toast(`부위 ${made.length}개로 나눴어요. 원래 레이어는 되돌리기로 돌아와요.`);
+  });
+}
+export function partsHelp() {
+  const copy = t => H('button.btn.small', { onclick: async () => { try { await navigator.clipboard.writeText(t); toast('복사했어요.'); } catch { toast('복사하지 못했어요. 직접 골라서 복사해 주세요.'); } } }, '복사');
+  const code = t => H('div.iop-code', null, H('code', null, t), copy(t));
+  dialog({ title: '부위 서버 켜는 법', wide: true, body: H('div.form.iop-help', null,
+    H('p', null, '부위 서버는 See-through의 부위 나누기 모델을 이 PC에서 돌리는 작은 프로그램이에요. 모델이 커서(약 1.3GB) 편집기 안에서는 못 돌리고, 따로 켜서 이어요. 그림은 이 PC 밖으로 나가지 않아요.'),
+    H('b', null, '1. 준비'),
+    H('p', null, 'IOPaint 켜는 법의 1, 2번(파이썬과 torch 설치)을 먼저 해 주세요. 그다음 명령 프롬프트에 아래 줄을 붙여 넣어요.'),
+    code('pip install einops pillow numpy'),
+    H('b', null, '2. 서버 파일 받기'),
+    H('p', null, H('button.btn.small', { onclick: () => download(new Blob([PARTS_SERVER], { type: 'text/x-python' }), 'potato_parts_server.py') }, 'potato_parts_server.py 받기'), ' 받은 파일을 알기 쉬운 폴더(예: 바탕화면의 감자 폴더)에 두세요.'),
+    H('b', null, '3. 켜기 (쓸 때마다)'),
+    H('p', null, '명령 프롬프트에서 그 폴더로 가서(cd 폴더 위치) 아래 줄을 붙여 넣어요. 처음 켤 때 모델을 받아요.'),
+    code('python potato_parts_server.py'),
+    H('p.set-note', null, '"준비됐어요"가 나오면 쓸 수 있어요. 그래픽카드 메모리가 모자라다고 나오면 python potato_parts_server.py --cpu로 켜 주세요. CPU로는 한 장에 몇 분 걸려요.'),
+    H('p.set-note', null, '이 모델은 옷 입은 캐릭터로 배운 모델이라, 맨살인 팔은 "팔과 손", 다리는 "다리"로 나오고 몸통은 "윗옷과 몸통"으로 나와요. 시험해 보니 빨간 옷을 머리카락으로 착각하는 일도 있었어요.')),
+    buttons: [{ label: '닫기', primary: true }] });
 }
