@@ -2,7 +2,7 @@
 import { h } from './dom.js';
 import { state, commit, canvasOf, layerOf, addMedia, ensureBitmap, uid } from '../core/store.js';
 import { addCmd, run } from '../core/cmd.js';
-import { MAN, PACK_PAGE, canDownload, missingFiles, packGet, packAdd, packState, packDel, idsOfPack, mb } from '../core/packs.js';
+import { MAN, PACK_PAGE, canDownload, missingFiles, packGet, packAdd, packState, packDel, idsOfPack, mb, packDirOf, movePacks } from '../core/packs.js';
 import { runJob, charMask, upscale, samMask, jobs, aiReset, fileIdOf, peopleMasks, splitPieces } from '../core/ai.js';
 import { openSplit } from './peoplesplit.js';
 import PARTS_SERVER from '../../tools/potato_parts_server.py';
@@ -193,6 +193,12 @@ export async function packsPane(redraw) {
     h('p.set-note', null, dl ? 'AI 도구가 쓰는 모델 묶음이에요. 필요한 것만 받아 두면 돼요. 그림은 이 컴퓨터 안에서만 처리해요.' : 'AI 도구가 쓰는 모델 묶음이에요. HTML판은 팩을 스스로 받을 수 없어서, 내려받은 파일을 넣어 줘야 해요. 그림은 이 컴퓨터 안에서만 처리해요.'),
     h('div.btn-row', null, h('a.btn', { href: PACK_PAGE, target: '_blank', rel: 'noopener' }, '팩 받는 곳 열기'),
       h('button.btn', { onclick: async () => { const fs = await pickPackFiles(); if (!fs.length) return; const b = busy('파일을 확인하는 중이에요.'); const r = await packAdd(fs); b.done(r.added.length ? `팩 파일 ${r.added.length}개를 넣었어요.` : '맞는 팩 파일이 없어요.', r.added.length ? '' : 'err'); redraw(); } }, '받은 파일 넣기')),
+    window.__TAURI__ && window.__TAURI__.dialog && h('b', null, 'AI 팩 저장 폴더'),
+    window.__TAURI__ && window.__TAURI__.dialog && h('div.disk-pick', null,
+      h('p.set-note', null, packDirOf() ? h('code.disk-path', null, packDirOf()) : '기본 자리 (C 드라이브의 사용자 폴더 안)', ' 팩은 모두 합치면 1GB가 넘어요. 바꾸면 이미 받은 팩도 새 폴더로 옮겨요.'),
+      h('div.btn-row', null,
+        h('button.btn', { onclick: async () => { const T = window.__TAURI__, d = await T.dialog.open({ directory: true, title: 'AI 팩을 둘 폴더' }); if (!d) return; const to = await T.path.join(String(d), '감자편집기 AI 팩'); if (to === packDirOf()) return; await moveTo(to); redraw(); } }, '다른 폴더 고르기'),
+        packDirOf() && h('button.btn', { onclick: async () => { await moveTo(''); redraw(); } }, '기본 자리로'))),
     h('b', null, '윤곽 모델'),
     h('div.choice', { role: 'radiogroup' }, [['fast', '빠르게', '작은 모델이에요. 금방 끝나고 기본 팩만 있으면 돼요.'], ['big', '정밀하게', '큰 모델이에요. 옷, 팔, 다리 같은 부위를 훨씬 잘 나눠요. 정밀 윤곽 팩(약 300MB)이 필요하고, 그림을 처음 읽을 때 더 걸려요.']].map(([v, t, d]) => h('label.choice-item' + (settings.get('samModel') === v ? '.on' : ''), null, h('input', { type: 'radio', name: 'samm', checked: settings.get('samModel') === v, onchange: () => { settings.set('samModel', v); aiReset(); redraw(); } }), h('span', null, h('b', null, t), h('small', null, d))))),
     h('p.set-note', null, 'AI로 고르기, 캐릭터 움직이기의 부위 나누기, 자동 흰칠이 이 모델로 윤곽을 따요.'),
@@ -305,20 +311,40 @@ async function runIop(c, l, cfg) {
   });
 }
 
-const IOP_CMD = 'iopaint start --model=Sanster/anything-4.0-inpainting --device=cuda --low-mem --no-half --disable-nsfw-checker --port=8080';
+// 따로 설치하는 것(파이썬, IOPaint 모델, 부위 서버)을 둘 디스크와 폴더. 두 도움말이 함께 써요
+const LETTERS = 'CDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+async function drivesHere() {   // 설치판은 실제로 있는 디스크만, HTML판은 알 수 없어서 흔한 글자들
+  const T = window.__TAURI__; if (!(T && T.fs)) return null;
+  const out = []; for (const L of LETTERS) { try { if (await T.fs.exists(L + ':\\')) out.push(L); } catch (_) { /* 없음 */ } } return out.length ? out : null;
+}
+const toolBase = () => settings.get('toolDir') || ((settings.get('packDir') || 'C:').slice(0, 2) + '\\감자편집기');
+function diskChooser(onChange) {
+  const T = window.__TAURI__, set = v => { settings.set('toolDir', v); onChange(v); show.textContent = v; };
+  const show = H('code.disk-path', null, toolBase());
+  const sel = H('select.text', { 'aria-label': '저장할 디스크' }, ...LETTERS.slice(0, 6).map(L => H('option', { value: L, selected: toolBase()[0] === L }, L + ' 드라이브')));
+  sel.addEventListener('change', () => set(sel.value + ':' + toolBase().slice(2)));
+  drivesHere().then(ds => { if (!ds) return; sel.replaceChildren(...ds.map(L => H('option', { value: L, selected: toolBase()[0] === L }, L + ' 드라이브'))); if (!ds.includes(toolBase()[0])) set(ds[0] + ':' + toolBase().slice(2)); });
+  const pick = T && T.dialog && H('button.btn.small', { onclick: async () => { const d = await T.dialog.open({ directory: true, title: '따로 설치하는 것을 둘 폴더' }); if (d) { set(String(d)); sel.value = String(d)[0]; } } }, '폴더 고르기');
+  return H('div.disk-pick', null, H('label.field.disk-row', null, H('span', null, '저장할 곳'), sel, pick), H('p.set-note', null, '아래 명령에 들어가는 폴더: ', show), H('p.set-note', null, 'C 드라이브가 모자라면 다른 디스크를 골라 주세요.' + (T ? '' : ' HTML판은 이 PC에 어떤 디스크가 있는지 알 수 없어서, 실제로 있는 드라이브를 골라 주세요.')));
+}
+const iopCmd = b => `iopaint start --model=Sanster/anything-4.0-inpainting --device=cuda --low-mem --no-half --disable-nsfw-checker --port=8080 --model-dir="${b}\\iopaint-models"`;
+const PIP_TORCH = 'pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cu121';
+const copyBtn = t => H('button.btn.small', { onclick: async () => { try { await navigator.clipboard.writeText(typeof t === 'function' ? t() : t); toast('복사했어요.'); } catch { toast('복사하지 못했어요. 직접 골라서 복사해 주세요.'); } } }, '복사');
+const codeBox = t => { const c = H('code', null, typeof t === 'function' ? t() : t); return { el: H('div.iop-code', null, c, copyBtn(t)), redo: () => { c.textContent = typeof t === 'function' ? t() : t; } }; };
 export function iopHelp() {
-  const copy = t => H('button.btn.small', { onclick: async () => { try { await navigator.clipboard.writeText(t); toast('복사했어요.'); } catch { toast('복사하지 못했어요. 직접 골라서 복사해 주세요.'); } } }, '복사');
-  const code = t => H('div.iop-code', null, H('code', null, t), copy(t));
+  const py = H('p', null), boxes = [codeBox(PIP_TORCH), codeBox('pip install --no-cache-dir iopaint'), codeBox(() => iopCmd(toolBase()))];
+  const redo = () => { py.textContent = `python.org에서 Python 3.11을 받아 설치해요. 첫 화면에서 "Add python.exe to PATH"를 꼭 체크하고, "Customize installation" → 다음 → 설치 폴더(Customize install location)를 ${toolBase()}\\Python311로 바꿔 주세요.`; boxes.forEach(b => b.redo()); };
+  redo();
   dialog({ title: 'IOPaint 켜는 법', wide: true, body: H('div.form.iop-help', null,
     H('p', null, 'IOPaint는 무료 그림 채우기 프로그램이에요. 이 PC에서 켜 두면 감자 편집기의 AI > 고른 곳을 IOPaint로 그려 넣기가 그림을 거기로 보내요. 처음 한 번만 설치하면 돼요.'),
-    H('b', null, '1. 파이썬 설치'),
-    H('p', null, 'python.org에서 Python 3.11을 받아 설치해요. 설치 첫 화면에서 "Add python.exe to PATH"를 꼭 체크해 주세요.'),
+    diskChooser(redo),
+    H('b', null, '1. 파이썬 설치'), py,
     H('b', null, '2. IOPaint 설치'),
-    H('p', null, '시작 메뉴에서 "cmd"를 찾아 명령 프롬프트를 열고, 아래 두 줄을 차례로 붙여 넣어요. 몇 GB를 받아서 10분쯤 걸려요.'),
-    code('pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121'), code('pip install iopaint'),
+    H('p', null, '시작 메뉴에서 "cmd"를 찾아 명령 프롬프트를 열고, 아래 두 줄을 차례로 붙여 넣어요. 몇 GB를 받아서 10분쯤 걸려요. --no-cache-dir은 받은 파일 사본을 C 드라이브에 남기지 않게 해요.'),
+    boxes[0].el, boxes[1].el,
     H('b', null, '3. 켜기 (쓸 때마다)'),
-    H('p', null, '명령 프롬프트에 아래 줄을 붙여 넣어요. 처음 켤 때 애니 채우기 모델(약 2GB)을 받아요. 창은 쓰는 동안 열어 두세요.'),
-    code(IOP_CMD),
+    H('p', null, '명령 프롬프트에 아래 줄을 붙여 넣어요. 처음 켤 때 애니 채우기 모델(약 2GB)을 위에서 고른 곳에 받아요. 창은 쓰는 동안 열어 두세요.'),
+    boxes[2].el,
     H('p.set-note', null, '--disable-nsfw-checker를 빼면 성인 그림의 결과가 까맣게 나와요. --no-half는 GTX 16 계열에서 그림이 까맣게 나오는 것을 막아요. "out of memory"가 나오면 끝에 --cpu-offload를 붙여 다시 켜 주세요. 느려지지만 4GB에서도 돌아가요.'),
     H('p.set-note', null, '그래픽카드에서 실제로 돌려 보지는 못했어요. 안 되면 명령 프롬프트에 나온 마지막 몇 줄을 알려 주세요.')),
     buttons: [{ label: '닫기', primary: true }] });
@@ -371,19 +397,27 @@ async function runParts(c, l, mergeFace) {
   });
 }
 export function partsHelp() {
-  const copy = t => H('button.btn.small', { onclick: async () => { try { await navigator.clipboard.writeText(t); toast('복사했어요.'); } catch { toast('복사하지 못했어요. 직접 골라서 복사해 주세요.'); } } }, '복사');
-  const code = t => H('div.iop-code', null, H('code', null, t), copy(t));
+  const where = H('p', null), boxes = [codeBox('pip install --no-cache-dir einops pillow numpy'), codeBox(() => `cd /d "${toolBase()}"`), codeBox('python potato_parts_server.py')];
+  const redo = () => { where.textContent = `받은 파일을 ${toolBase()} 폴더에 넣어 주세요. 모델(약 1.3GB)은 그 옆의 potato-parts 폴더에 받아요.`; boxes.forEach(b => b.redo()); };
+  redo();
   dialog({ title: '부위 서버 켜는 법', wide: true, body: H('div.form.iop-help', null,
     H('p', null, '부위 서버는 See-through의 부위 나누기 모델을 이 PC에서 돌리는 작은 프로그램이에요. 모델이 커서(약 1.3GB) 편집기 안에서는 못 돌리고, 따로 켜서 이어요. 그림은 이 PC 밖으로 나가지 않아요.'),
+    diskChooser(redo),
     H('b', null, '1. 준비'),
     H('p', null, 'IOPaint 켜는 법의 1, 2번(파이썬과 torch 설치)을 먼저 해 주세요. 그다음 명령 프롬프트에 아래 줄을 붙여 넣어요.'),
-    code('pip install einops pillow numpy'),
+    boxes[0].el,
     H('b', null, '2. 서버 파일 받기'),
-    H('p', null, H('button.btn.small', { onclick: () => download(new Blob([PARTS_SERVER], { type: 'text/x-python' }), 'potato_parts_server.py') }, 'potato_parts_server.py 받기'), ' 받은 파일을 알기 쉬운 폴더(예: 바탕화면의 감자 폴더)에 두세요.'),
+    H('p', null, H('button.btn.small', { onclick: () => download(new Blob([PARTS_SERVER], { type: 'text/x-python' }), 'potato_parts_server.py') }, 'potato_parts_server.py 받기')), where,
     H('b', null, '3. 켜기 (쓸 때마다)'),
-    H('p', null, '명령 프롬프트에서 그 폴더로 가서(cd 폴더 위치) 아래 줄을 붙여 넣어요. 처음 켤 때 모델을 받아요.'),
-    code('python potato_parts_server.py'),
+    H('p', null, '명령 프롬프트에 아래 두 줄을 차례로 붙여 넣어요. 처음 켤 때 모델을 받아요.'),
+    boxes[1].el, boxes[2].el,
     H('p.set-note', null, '"준비됐어요"가 나오면 쓸 수 있어요. 그래픽카드 메모리가 모자라다고 나오면 python potato_parts_server.py --cpu로 켜 주세요. CPU로는 한 장에 몇 분 걸려요.'),
     H('p.set-note', null, '이 모델은 옷 입은 캐릭터로 배운 모델이라, 맨살인 팔은 "팔과 손", 다리는 "다리"로 나오고 몸통은 "윗옷과 몸통"으로 나와요. 시험해 보니 빨간 옷을 머리카락으로 착각하는 일도 있었어요.')),
     buttons: [{ label: '닫기', primary: true }] });
+}
+
+// AI 팩 저장 폴더 옮기기 (진행은 AI 작업 줄에 보여요)
+async function moveTo(to) {
+  try { await runJob('AI 팩 옮기기', async (j, say) => { say('옮기는 중', 0.02); const n = await movePacks(to, (d, t) => say(`옮기는 중 (${mb(d)} / ${mb(t)})`, t ? d / t : 1)); toast(n ? `팩 파일 ${n}개를 옮겼어요. 이제 ${to || '기본 자리'}에 저장해요.` : `이제 AI 팩을 ${to || '기본 자리'}에 저장해요.`); }); }
+  catch (e) { toast('AI 팩을 옮기지 못했어요. ' + (e.message || e), 'err'); }
 }

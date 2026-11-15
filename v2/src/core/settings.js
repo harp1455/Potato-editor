@@ -8,6 +8,7 @@ const DEFAULTS = {
   theme: 'dark',
   iop: { url: 'http://127.0.0.1:8080', prompt: '', neg: 'lowres, bad anatomy, bad hands, worst quality', steps: 25, strength: 1, mode: 'layer' },   // IOPaint(사용자 PC에서 따로 켠 채우기 프로그램)
   parts: { url: 'http://127.0.0.1:8091', mergeFace: true },   // 부위 서버(이 PC에서 따로 켠 See-through 부위 모델)
+  packDir: '',             // 설치판 AI 팩 저장 폴더 (비우면 앱 데이터 폴더)
   samModel: 'fast',         // 윤곽 모델: fast(작은 모델) | big(큰 모델, 정밀 윤곽 팩)
   adult: false,             // 성인 확인을 마쳤는지
   adultAt: '',

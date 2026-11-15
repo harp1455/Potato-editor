@@ -19,6 +19,18 @@
     "fs:allow-stat",
     "fs:allow-read-dir",
     "fs:allow-read-file",
+    "fs:allow-copy-file",
+    {
+      "identifier": "fs:scope",
+      "allow": [
+        {
+          "path": "**"
+        },
+        {
+          "path": "$HOME/**"
+        }
+      ]
+    },
     "dialog:default",
     "upload:default",
     "process:default",

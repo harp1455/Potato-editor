@@ -390,3 +390,7 @@ label.batch-row { cursor: pointer; } .batch-row input[type=checkbox] { accent-co
 .iop-code code { flex: 1; font-size: 12px; word-break: break-all; user-select: all; }
 .iop-help p { margin: 0 0 6px; line-height: 1.55; }
 .iop-state { color: var(--faint); font-size: 12px; }
+.disk-pick { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 10px; }
+.disk-path { font-size: 12px; word-break: break-all; }
+.disk-row > span { white-space: nowrap; }
+.disk-pick .set-note { margin: 0; }

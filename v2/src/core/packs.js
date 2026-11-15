@@ -2,6 +2,7 @@
 //   설치판 → 깃허브에서 바로 받아 앱 데이터 폴더에 보관
 //   HTML판 → 브라우저는 깃허브 파일을 직접 못 받아서(막혀 있음), 내려받은 팩 파일을 편집기에 넣어 주면 브라우저 저장 공간에 보관
 import { idb } from './store.js';
+import { settings } from './settings.js';
 
 export const PACK_TAG = 'packs-7';
 export const PACK_PAGE = 'https://github.com/harp1455/Potato-editor/releases/tag/' + PACK_TAG;
@@ -12,24 +13,27 @@ export const canDownload = () => !!tauri() || /^https?:/.test(location.protocol)
 export const mb = n => (n / 1e6).toFixed(n < 1e7 ? 1 : 0) + 'MB';
 const sha = async u8 => [...new Uint8Array(await crypto.subtle.digest('SHA-256', u8))].map(b => b.toString(16).padStart(2, '0')).join('');
 
+// 설치판: 설정의 'AI 팩 저장 폴더'(packDir)가 있으면 그 폴더, 없으면 앱 데이터 폴더(C 드라이브의 사용자 폴더) 안의 packs/files
+export const packDirOf = () => settings.get('packDir') || '';
 const store = (() => {
   const T = tauri();
   if (T) {
-    const B = { baseDir: T.fs.BaseDirectory.AppData }, dir = 'packs/files';
+    const at = async f => { const d = packDirOf(); return d ? { p: f ? await T.path.join(d, f) : d, o: {} } : { p: f ? 'packs/files/' + f : 'packs/files', o: { baseDir: T.fs.BaseDirectory.AppData } }; };
+    const abs = async f => { const d = packDirOf(); return d ? T.path.join(d, f) : T.path.join(await T.path.appDataDir(), 'packs', 'files', f); };
+    const mkdir = async () => { const r = await at(''); await T.fs.mkdir(r.p, { recursive: true, ...r.o }); };
+    const rm = async f => { const r = await at(f); try { await T.fs.remove(r.p, r.o); } catch (_) { /* 없으면 그만 */ } };
     return {
-      async size(f) { try { if (!(await T.fs.exists(dir + '/' + f, B))) return -1; return (await T.fs.stat(dir + '/' + f, B)).size; } catch (_) { return -1; } },
-      async read(f) { return new Uint8Array(await T.fs.readFile(dir + '/' + f, B)); },
-      async write(f, u8) { await T.fs.mkdir(dir, { recursive: true, ...B }); await T.fs.writeFile(dir + '/' + f, u8, B); },
+      async size(f) { try { const r = await at(f); if (!(await T.fs.exists(r.p, r.o))) return -1; return (await T.fs.stat(r.p, r.o)).size; } catch (_) { return -1; } },
+      async read(f) { const r = await at(f); return new Uint8Array(await T.fs.readFile(r.p, r.o)); },
+      async write(f, u8) { await mkdir(); const r = await at(f); await T.fs.writeFile(r.p, u8, r.o); },
       async fetch(f, onBytes) {
-        await T.fs.mkdir(dir, { recursive: true, ...B });
-        const part = f + '.part', abs = await T.path.join(await T.path.appDataDir(), 'packs', 'files', part);
-        try { await T.fs.remove(dir + '/' + part, B); } catch (_) { /* 없으면 그만 */ }
+        await mkdir(); const part = f + '.part'; await rm(part);
         let got = 0;
-        await T.upload.download(PACK_URL + f, abs, p => { got = p.progressTotal || got + (p.progress || 0); onBytes(got); });
-        const u8 = new Uint8Array(await T.fs.readFile(dir + '/' + part, B));
-        return { u8, keep: async () => { try { await T.fs.remove(dir + '/' + f, B); } catch (_) { /* 없으면 그만 */ } await T.fs.rename(dir + '/' + part, dir + '/' + f, { oldPathBaseDir: B.baseDir, newPathBaseDir: B.baseDir }); }, drop: async () => { try { await T.fs.remove(dir + '/' + part, B); } catch (_) { /* 없으면 그만 */ } } };
+        await T.upload.download(PACK_URL + f, await abs(part), p => { got = p.progressTotal || got + (p.progress || 0); onBytes(got); });
+        const rp = await at(part), u8 = new Uint8Array(await T.fs.readFile(rp.p, rp.o));
+        return { u8, keep: async () => { await rm(f); const a = await at(part), b = await at(f); await T.fs.rename(a.p, b.p, a.o.baseDir ? { oldPathBaseDir: a.o.baseDir, newPathBaseDir: b.o.baseDir } : {}); }, drop: () => rm(part) };
       },
-      async remove(f) { try { await T.fs.remove(dir + '/' + f, B); } catch (_) { /* 없으면 그만 */ } },
+      remove: rm,
     };
   }
   const key = f => 'pack:' + f, sizes = new Map();
@@ -90,4 +94,27 @@ export async function packBytes(id) {
   if (!f || await store.size(f.file) !== f.size) throw new Error('nopack:' + (f ? f.pack : id));
   const gz = await store.read(f.file);
   return new Response(new Blob([gz]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
+}
+
+// AI 팩 저장 폴더 바꾸기 (설치판). 이미 받은 팩 파일은 새 폴더로 옮겨요(복사 → 확인 → 지우기). to가 ''이면 기본 자리로
+export async function movePacks(to, onProg) {
+  const T = tauri(); if (!T) throw new Error('설치판에서만 바꿀 수 있어요.');
+  const from = packDirOf(), D = T.fs.BaseDirectory.AppData;
+  const src = async f => from ? { p: await T.path.join(from, f), o: {} } : { p: 'packs/files/' + f, o: { baseDir: D } };
+  const dst = async f => to ? { p: await T.path.join(to, f), o: {} } : { p: 'packs/files/' + f, o: { baseDir: D } };
+  const d0 = await dst(''); await T.fs.mkdir(to || 'packs/files', to ? { recursive: true } : { recursive: true, baseDir: D });
+  // 새 폴더에 쓸 수 있는지 먼저 봐요
+  const probe = await dst('.potato-write-test'); await T.fs.writeFile(probe.p, new Uint8Array([1]), probe.o); await T.fs.remove(probe.p, probe.o);
+  const have = []; for (const f of MAN.files) { const s = await src(f.file); try { if (await T.fs.exists(s.p, s.o) && (await T.fs.stat(s.p, s.o)).size === f.size) have.push(f); } catch (_) { /* 없음 */ } }
+  const total = have.reduce((a, f) => a + f.size, 0); let done = 0;
+  for (const f of have) {
+    const s = await src(f.file), t = await dst(f.file);
+    let ok = false; try { ok = await T.fs.exists(t.p, t.o) && (await T.fs.stat(t.p, t.o)).size === f.size; } catch (_) { /* 없음 */ }
+    if (!ok) await T.fs.copyFile(s.p, t.p, { fromPathBaseDir: s.o.baseDir, toPathBaseDir: t.o.baseDir });
+    if ((await T.fs.stat(t.p, t.o)).size !== f.size) throw new Error(f.file + '을 옮기지 못했어요.');
+    done += f.size; onProg && onProg(done, total);
+  }
+  settings.set('packDir', to);
+  for (const f of have) { const s = await src(f.file); try { await T.fs.remove(s.p, s.o); } catch (_) { /* 못 지워도 그만 */ } }
+  void d0; return have.length;
 }
