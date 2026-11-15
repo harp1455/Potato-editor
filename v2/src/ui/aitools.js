@@ -327,7 +327,7 @@ function diskChooser(onChange) {
   const pick = T && T.dialog && H('button.btn.small', { onclick: async () => { const d = await T.dialog.open({ directory: true, title: '따로 설치하는 것을 둘 폴더' }); if (!d) return; if (/[^\x00-\x7f]/.test(String(d))) toast('한글이 들어간 폴더예요. 파이썬 설치가 실패할 수 있어서 영어 이름 폴더를 권해요.'); set(String(d)); sel.value = String(d)[0]; } }, '폴더 고르기');
   return H('div.disk-pick', null, H('label.field.disk-row', null, H('span', null, '저장할 곳'), sel, pick), H('p.set-note', null, '아래 명령에 들어가는 폴더: ', show), H('p.set-note', null, '폴더 이름은 영어와 숫자로만 지어 주세요. 한글이 들어간 폴더에 파이썬을 깔면 설치가 실패하는 일이 많아요. C 드라이브가 모자라면 다른 디스크를 골라 주세요.' + (T ? '' : ' HTML판은 이 PC에 어떤 디스크가 있는지 알 수 없어서, 실제로 있는 드라이브를 골라 주세요.')));
 }
-const iopCmd = b => `iopaint start --model=Sanster/anything-4.0-inpainting --device=cuda --low-mem --no-half --disable-nsfw-checker --port=8080 --model-dir="${b}\\iopaint-models"`;
+const iopCmd = b => `iopaint start --model=Sanster/anything-4.0-inpainting --device=cuda --low-mem --no-half --cpu-offload --disable-nsfw-checker --port=8080 --model-dir="${b}\\iopaint-models"`;
 const PIP_TORCH = 'pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cu121';
 const copyBtn = t => H('button.btn.small', { onclick: async () => { try { await navigator.clipboard.writeText(typeof t === 'function' ? t() : t); toast('복사했어요.'); } catch { toast('복사하지 못했어요. 직접 골라서 복사해 주세요.'); } } }, '복사');
 const codeBox = t => { const c = H('code', null, typeof t === 'function' ? t() : t); return { el: H('div.iop-code', null, c, copyBtn(t)), redo: () => { c.textContent = typeof t === 'function' ? t() : t; } }; };
@@ -345,7 +345,7 @@ export function iopHelp() {
     H('b', null, '3. 켜기 (쓸 때마다)'),
     H('p', null, '명령 프롬프트에 아래 줄을 붙여 넣어요. 처음 켤 때 애니 채우기 모델(약 2GB)을 위에서 고른 곳에 받아요. 창은 쓰는 동안 열어 두세요.'),
     boxes[2].el,
-    H('p.set-note', null, '--disable-nsfw-checker를 빼면 성인 그림의 결과가 까맣게 나와요. --no-half는 GTX 16 계열에서 그림이 까맣게 나오는 것을 막아요. "out of memory"가 나오면 끝에 --cpu-offload를 붙여 다시 켜 주세요. 느려지지만 4GB에서도 돌아가요.'),
+    H('p.set-note', null, '--disable-nsfw-checker를 빼면 성인 그림의 결과가 까맣게 나와요. --no-half는 GTX 16 계열에서 그림이 까맣게 나오는 것을 막지만 그래픽카드 메모리를 두 배로 써서, 4GB에서는 --cpu-offload(모델 일부를 컴퓨터 메모리에 두기)를 함께 써야 해요. 느리면 --no-half와 --cpu-offload를 둘 다 빼고 켜 보세요. 결과가 까맣게 나오면 다시 넣어 주세요.'),
     H('p.set-note', null, '그래픽카드에서 실제로 돌려 보지는 못했어요. 안 되면 명령 프롬프트에 나온 마지막 몇 줄을 알려 주세요.')),
     buttons: [{ label: '닫기', primary: true }] });
 }
