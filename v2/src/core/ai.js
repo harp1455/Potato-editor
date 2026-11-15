@@ -167,6 +167,49 @@ export async function upscale(src, scale, model, job, say) {
 
 // AI로 고르기: 그림을 윤곽 AI(MobileSAM)에 한 번 읽혀 두고(key가 같으면 다시 안 읽음), 점·상자로 물어봐요.
 //   pts = [[x, y, 1(이것) | 0(아님)]…], box = [x0, y0, x1, y1] (그림 좌표) → 가림막 캔버스(그림 크기)
+// 인물별로 나누기: 애니 인물 찾기 모델(CartoonSegmentation의 RTMDet, MIT)이 사람마다 대강의 자리를 찾고,
+// 인물 윤곽(isnet) 안의 점마다 가장 그럴듯한 사람에게 나눠 줘요. 두 명 이상 못 찾으면 빈 목록
+export async function peopleMasks(src, job, say) {
+  say && say('모델을 불러오는 중'); await aiLoad('people'); job && check(job);
+  const W = src.width, H = src.height, S = 640, s = S / Math.max(W, H), tw = Math.max(1, Math.round(W * s)), th = Math.max(1, Math.round(H * s));
+  const c = mk(S, S), g = c.getContext('2d', { willReadFrequently: true }); g.fillStyle = 'rgb(114,114,114)'; g.fillRect(0, 0, S, S); g.imageSmoothingQuality = 'high'; g.drawImage(src, 0, 0, tw, th);
+  const d = g.getImageData(0, 0, S, S).data, x = new Float32Array(3 * S * S), n = S * S;
+  for (let i = 0; i < n; i++) { x[i] = (d[i * 4 + 2] - 103.53) / 57.375; x[n + i] = (d[i * 4 + 1] - 116.28) / 57.12; x[2 * n + i] = (d[i * 4] - 123.675) / 58.395; }
+  say && say(`인물을 세는 중 (${aiDevice() || 'AI'})`, 0.3);
+  const r = await aiCall({ t: 'run2', key: 'people', feeds: { image: { data: x, dims: [1, 3, S, S] } }, outs: ['scores', 'boxes', 'kernels', 'mask_feat'] }, [x.buffer]); job && check(job);
+  const sc = r.out.scores.data, bx = r.out.boxes.data, kr = r.out.kernels.data, mf = r.out.mask_feat.data, P = [];
+  for (const st of [8, 16, 32]) { const m = S / st; for (let y = 0; y < m; y++) for (let xx = 0; xx < m; xx++) P.push([xx * st, y * st, st]); }
+  const cand = []; for (let i = 0; i < P.length; i++) if (sc[i] > 0.2) cand.push(i);   // 이보다 자신 없는 것은 엉뚱하게 나누는 일이 많았어요 cand.sort((a, b) => sc[b] - sc[a]);
+  const boxOf = i => [P[i][0] - bx[i * 4], P[i][1] - bx[i * 4 + 1], P[i][0] + bx[i * 4 + 2], P[i][1] + bx[i * 4 + 3]];
+  const iou = (a, b) => { const iw = Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0])), ih = Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1])), it = iw * ih; return it / ((a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - it + 1e-6); };
+  let keep = []; for (const i of cand.slice(0, 60)) { const b = boxOf(i); if (keep.every(k => iou(b, k.box) < 0.6)) keep.push({ i, box: b, score: sc[i] }); if (keep.length >= 6) break; }
+  // 사람마다 80×80 대강 그림: 그 사람만의 작은 거름막 3겹(10→8→8→1)을 특징 그림에 씌워요
+  const G = 80, gh = Math.ceil(th / 8), gw = Math.ceil(tw / 8);
+  for (const k of keep) {
+    const o = k.i * 169, [px, py, st] = P[k.i], lo = k.lo = new Float32Array(G * G), h1 = new Float32Array(8), h2 = new Float32Array(8); let area = 0;
+    for (let y = 0; y < G; y++) for (let xx = 0; xx < G; xx++) { const q = y * G + xx, rx = (px - xx * 8) / (st * 8), ry = (py - y * 8) / (st * 8);
+      for (let a = 0; a < 8; a++) { let v = kr[o + 152 + a] + kr[o + a * 10] * rx + kr[o + a * 10 + 1] * ry; for (let b = 0; b < 8; b++) v += kr[o + a * 10 + 2 + b] * mf[b * G * G + q]; h1[a] = v > 0 ? v : 0; }
+      for (let a = 0; a < 8; a++) { let v = kr[o + 160 + a]; for (let b = 0; b < 8; b++) v += kr[o + 80 + a * 8 + b] * h1[b]; h2[a] = v > 0 ? v : 0; }
+      let v = kr[o + 168]; for (let b = 0; b < 8; b++) v += kr[o + 144 + b] * h2[b]; lo[q] = v; if (v > 0 && y < gh && xx < gw) area++; }
+    k.area = area;
+  }
+  keep = keep.filter(k => k.area > 6);
+  // 두 사람을 한 덩어리로 본 것은, 그 안을 나눠 가진 둘이 따로 있으면 빼요
+  const inside = (a, b) => { let it = 0; for (let q = 0; q < G * G; q++) if (a.lo[q] > 0 && b.lo[q] > 0) it++; return it; };
+  keep = keep.filter(A => { const subs = keep.filter(B => B !== A && B.area >= A.area * 0.15 && B.area < A.area * 0.85 && inside(A, B) / B.area >= 0.75); if (subs.length < 2) return true; let cov = 0; for (let q = 0; q < G * G; q++) if (A.lo[q] > 0 && subs.some(B => B.lo[q] > 0)) cov++; return cov / A.area < 0.6; });
+  keep = keep.filter((A, ai) => keep.every((B, bi) => bi >= ai || inside(A, B) / Math.min(A.area, B.area) < 0.7));   // 거의 같은 자리를 두 번 센 것
+  if (keep.length < 2) return [];
+  const ch = await charMask(src, job, say), cd = ch.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, W, H).data;
+  const outs = keep.map(() => new ImageData(W, H)), cnt = keep.map(() => 0);
+  for (let y = 0; y < H; y++) { const fy = Math.min(G - 1, Math.max(0, (y + 0.5) * s / 8 - 0.5)), y0 = fy | 0, y1 = Math.min(G - 1, y0 + 1), wy = fy - y0;
+    for (let xx = 0; xx < W; xx++) { const a = cd[(y * W + xx) * 4 + 3]; if (!a) continue;
+      const fx = Math.min(G - 1, Math.max(0, (xx + 0.5) * s / 8 - 0.5)), x0 = fx | 0, x1 = Math.min(G - 1, x0 + 1), wx = fx - x0; let best = 0, bv = -1e9;
+      for (let k = 0; k < keep.length; k++) { const lo = keep[k].lo, v = (lo[y0 * G + x0] * (1 - wx) + lo[y0 * G + x1] * wx) * (1 - wy) + (lo[y1 * G + x0] * (1 - wx) + lo[y1 * G + x1] * wx) * wy; if (v > bv) { bv = v; best = k; } }
+      const o = (y * W + xx) * 4, t = outs[best].data; t[o] = t[o + 1] = t[o + 2] = 255; t[o + 3] = a; cnt[best]++; } }
+  const res = []; keep.forEach((k, i) => { if (cnt[i] < W * H * 0.003) return; const m = mk(W, H); m.getContext('2d').putImageData(outs[i], 0, 0); res.push({ mask: m, score: k.score, x: (k.box[0] + k.box[2]) / 2 / s }); });
+  return res.length < 2 ? [] : res.sort((a, b) => a.x - b.x);   // 왼쪽 사람부터
+}
+
 export async function samMask(src, key, pts, box, job, say) {
   say && say('모델을 불러오는 중'); await aiLoad('samE'); await aiLoad('samD'); job && check(job);
   const W = src.width, H = src.height, s = 1024 / Math.max(W, H), tw = Math.max(1, Math.round(W * s)), th = Math.max(1, Math.round(H * s));

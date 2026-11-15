@@ -3,7 +3,7 @@ import { h } from './dom.js';
 import { state, commit, canvasOf, layerOf, addMedia, ensureBitmap, uid } from '../core/store.js';
 import { addCmd, run } from '../core/cmd.js';
 import { MAN, PACK_PAGE, canDownload, missingFiles, packGet, packAdd, packState, packDel, idsOfPack, mb } from '../core/packs.js';
-import { runJob, charMask, upscale, samMask, jobs, aiReset, fileIdOf } from '../core/ai.js';
+import { runJob, charMask, upscale, samMask, jobs, aiReset, fileIdOf, peopleMasks } from '../core/ai.js';
 import { sel, selFor, selMask, selBounds } from '../core/select.js';
 import { fillHole, legacyAi, aiLine } from '../legacy/shim.js';
 import { settings } from '../core/settings.js';
@@ -96,6 +96,13 @@ export function registerAiCmds(openPacks) {
   addCmd({ id: 'ai.bgCut', title: '배경 지우기', menu: 'AI', words: '누끼 투명', enabled: hasLayer, run: () => job('배경 지우기', ['isnet'], async (j, say) => {
     const l = layerOf(), bmp = await layerPic(l);
     await swapImage(l, cut(bmp, await charMask(bmp, j, say)), '배경 지움'); commit('배경 지우기');
+  }) });
+  addCmd({ id: 'ai.people', title: '인물별로 레이어 나누기', menu: 'AI', words: '사람 캐릭터 분리 두 명 여러 명 인스턴스', enabled: hasLayer, run: () => job('인물별로 나누기', ['isnet', 'people'], async (j, say) => {
+    const c = canvasOf(), l = layerOf(), bmp = await layerPic(l), name = l.name, ppl = await peopleMasks(bmp, j, say);
+    if (ppl.length < 2) { toast('인물을 두 명 이상 찾지 못했어요. 몸 전체가 보이는 그림에서 잘 되고, 얼굴이나 몸 일부만 크게 나온 그림은 못 찾는 일이 많아요.'); return; }
+    const all = document.createElement('canvas'); all.width = bmp.width; all.height = bmp.height; const ag = all.getContext('2d'); let at = c.layers.indexOf(l);
+    for (const [i, p] of ppl.entries()) { ag.drawImage(p.mask, 0, 0); const n = { ...l, ...(l.adj ? { adj: { ...l.adj } } : {}), id: uid('l'), name: `${name} 인물 ${i + 1}` }; await swapImage(n, cut(bmp, p.mask), '인물'); c.layers.splice(++at, 0, n); }
+    await swapImage(l, cut(bmp, all, true), '배경'); l.name = name + ' 배경'; commit('인물별로 나누기'); toast(`인물 ${ppl.length}명을 따로 레이어로 나눴어요. 왼쪽 사람부터 차례예요.`);
   }) });
   addCmd({ id: 'ai.bgSplit', title: '인물과 배경을 레이어로 나누기', menu: 'AI', words: '누끼 분리 캐릭터', enabled: hasLayer, run: () => job('인물과 배경 나누기', ['isnet'], async (j, say) => {
     const c = canvasOf(), l = layerOf(), bmp = await layerPic(l), mask = await charMask(bmp, j, say), name = l.name;
