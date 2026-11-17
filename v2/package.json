@@ -1,6 +1,6 @@
 {
   "name": "potato-editor-v2",
-  "version": "2.0.0-alpha.26",
+  "version": "2.0.0-alpha.27",
   "description": "감자 편집기 2.0",
   "scripts": {
     "build": "node build.mjs",
@@ -11,5 +11,8 @@
     "esbuild": "^0.28.2"
   },
   "private": true,
-  "type": "module"
+  "type": "module",
+  "dependencies": {
+    "mediabunny": "1.66.0"
+  }
 }

@@ -27,6 +27,7 @@
 - informative-drawings (선화 모델, ControlNet 'lineart' 주석기) : MIT License, Copyright (c) 2022 Caroline Chan (https://github.com/carolineec/informative-drawings)
     ONNX 변환: deepghs/imgutils-models, MIT License. 바꾼 점: 가중치를 16비트로 줄여 저장  ※ 설치판 AI 선화 추출 팩
 - mp4-muxer 5.2.2 : Copyright (c) 2023 Vanilagy, MIT License (https://github.com/Vanilagy/mp4-muxer)  ※ 움짤 MP4 저장
+- Mediabunny 1.66.0 : Copyright (c) 2026-present Vanilagy and contributors, Mozilla Public License 2.0 (https://github.com/Vanilagy/mediabunny, 전문 https://mozilla.org/MPL/2.0/)  ※ 영상 자막 번역의 '자막 입힌 영상 저장'. 고치지 않고 그대로 넣었어요
 - Animate.css 4.1.1 : Copyright (c) 2020 Daniel Eden, MIT License (https://github.com/animate-css/animate.css)  ※ 움짤 글자 움직임
     바꾼 점: @keyframes를 숫자 데이터로 옮겨 캔버스에서 계산
 - gl-transitions : Copyright (c) 2017-present gl-transitions contributors, MIT License (https://github.com/gl-transitions/gl-transitions)

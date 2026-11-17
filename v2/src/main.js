@@ -12,6 +12,7 @@ import { registerBinCmds } from './ui/bin.js';
 import { batchRoom } from './rooms/batch.js';
 import { videoRoom, registerVideoCmds } from './rooms/video.js';
 import { registerGeminiCmds } from './ui/geminitools.js';
+import { registerVsubCmds } from './ui/vsub.js';
 import { characterRoom, registerCharCmds } from './rooms/character.js';
 import { naiAccount } from './api/nai.js';
 import { registerAiCmds, packsPane } from './ui/aitools.js';
@@ -41,6 +42,7 @@ function registerCmds() {
   registerLiquify();
   registerCharCmds();
   registerGeminiCmds();
+  registerVsubCmds();
   registerVideoCmds();
   registerCutCmds();
   addCmd({ id: 'file.import8', title: '8.x 작업 파일 가져오기…', menu: '파일', group: 'import', words: '예전 작업 옮기기 json', run: () => {

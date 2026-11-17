@@ -394,3 +394,47 @@ label.batch-row { cursor: pointer; } .batch-row input[type=checkbox] { accent-co
 .disk-path { font-size: 12px; word-break: break-all; }
 .disk-row > span { white-space: nowrap; }
 .disk-pick .set-note { margin: 0; }
+
+/* 영상 자막 번역 */
+#vsStudio { position: fixed; inset: 0; z-index: 45; display: grid; grid-template-rows: 44px 1fr; background: var(--well); color: var(--text); min-width: 0; }
+#vsStudio[hidden], #vsStudio [hidden] { display: none; }
+#vsStudio .gs-top { display: flex; align-items: center; gap: 12px; padding: 0 12px; background: var(--panel); border-bottom: 1px solid var(--line); }
+#vsStudio .gs-top b { font-size: 14px; }
+#vsStudio .flex1 { flex: 1; min-width: 0; } #vsStudio .muted { color: var(--dim); } #vsStudio .small { font-size: 12px; }
+#vsStudio .vs-body { display: grid; grid-template-columns: 310px 1fr 380px; min-height: 0; }
+#vsStudio .vs-left { overflow: auto; background: var(--panel); border-right: 1px solid var(--line); }
+#vsStudio .sec { padding: 12px 14px; border-bottom: 1px solid var(--line); }
+#vsStudio .sec h3 { margin: 0 0 8px; font-size: 13px; }
+#vsStudio .row { display: flex; align-items: center; gap: 8px; margin: 6px 0; min-height: 26px; }
+#vsStudio .row > .l { width: 68px; flex: none; color: var(--dim); }
+#vsStudio .row select, #vsStudio .row input[type=text], #vsStudio textarea { min-width: 0; height: 26px; padding: 0 6px; background: var(--well); color: var(--text); border: 1px solid var(--edge); border-radius: var(--r); font: inherit; user-select: text; }
+#vsStudio .row select { flex: 1; } #vsStudio .row input[type=range] { flex: 1; min-width: 60px; accent-color: var(--potato); }
+#vsStudio textarea { display: block; width: 100%; height: auto; padding: 4px 7px; box-sizing: border-box; resize: vertical; }
+#vsStudio .btnrow { display: flex; flex-wrap: wrap; gap: 5px; margin: 7px 0; }
+#vsStudio .btn.sm { height: 24px; padding: 0 9px; font-size: 12px; }
+#vsStudio .chk { display: inline-flex; align-items: flex-start; gap: 6px; cursor: pointer; }
+#vsStudio .vs-main { display: grid; grid-template-rows: 1fr auto; min-width: 0; min-height: 0; background: #111; }
+#vsStudio .gs-stage { position: relative; display: flex; align-items: center; justify-content: center; min-height: 0; overflow: hidden; }
+#vsStudio .gs-stage.drop { outline: 3px dashed var(--pick); outline-offset: -10px; }
+#vsStudio .gs-empty { position: absolute; max-width: 340px; background: var(--raise); border-radius: 8px; padding: 18px 20px; text-align: center; color: var(--dim); line-height: 1.5; display: flex; flex-direction: column; gap: 6px; }
+#vsStudio .gs-empty b { color: var(--text); font-size: 15px; }
+#vsStudio .vs-wrap { position: relative; background: #000; }
+#vsStudio .vs-wrap video { display: block; width: 100%; height: 100%; }
+#vsStudio .vs-rg { position: absolute; border: 2px dashed #3fa9ff; box-shadow: 0 0 0 1px rgba(0,0,0,.5); pointer-events: none; box-sizing: border-box; }
+#vsStudio .vs-ov { position: absolute; display: flex; align-items: center; justify-content: center; text-align: center; white-space: pre; color: #fff; font-weight: 700; font-family: "Malgun Gothic","맑은 고딕","Apple SD Gothic Neo","Noto Sans KR","Noto Sans CJK KR",sans-serif; pointer-events: none; overflow: hidden; text-shadow: 0 0 .12em #000, 0 0 .12em #000, 0 0 .12em #000, .05em .05em .08em #000; }
+#vsStudio .vs-ov.cover { background: #000; text-shadow: none; }
+#vsStudio .vs-bar { display: flex; align-items: center; gap: 10px; padding: 8px 14px; background: var(--panel); border-top: 1px solid var(--line); }
+#vsStudio #vsMsg { color: var(--dim); min-height: 17px; user-select: text; }
+#vsStudio .czbar { height: 6px; border-radius: 3px; background: var(--well); overflow: hidden; margin: 4px 0 0; }
+#vsStudio .czbar i { display: block; height: 100%; width: 0; background: var(--potato); transition: width .2s; }
+#vsStudio .vs-right { display: flex; flex-direction: column; min-height: 0; overflow: hidden; background: var(--panel); border-left: 1px solid var(--line); }
+#vsStudio .vs-lh { display: flex; align-items: baseline; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+#vsStudio .vs-list { flex: 1; min-height: 0; overflow: auto; padding: 8px; display: flex; flex-direction: column; gap: 5px; }
+#vsStudio .vs-row { border: 1px solid var(--edge); border-radius: 6px; padding: 5px 6px; background: var(--strip); flex: none; }
+#vsStudio .vs-row.on { border-color: var(--pick); box-shadow: 0 0 0 1px var(--pick); }
+#vsStudio .vs-row.bad { border-color: var(--bad); }
+#vsStudio .vs-rt { display: flex; align-items: flex-start; gap: 6px; margin-bottom: 4px; }
+#vsStudio .vs-t { flex: none; border: 0; background: var(--raise); color: var(--pick); border-radius: 4px; font: inherit; font-size: 11.5px; padding: 1px 6px; cursor: pointer; font-variant-numeric: tabular-nums; }
+#vsStudio .vs-src { flex: 1; min-width: 0; font-size: 12px; color: var(--dim); white-space: pre-wrap; word-break: break-word; line-height: 1.4; user-select: text; }
+#vsStudio .vs-x { flex: none; border: 0; background: transparent; color: var(--faint); cursor: pointer; font-size: 14px; line-height: 1; padding: 1px 4px; }
+#vsStudio .vs-x:hover { color: var(--bad); }
