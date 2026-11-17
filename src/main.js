@@ -3786,6 +3786,7 @@ async function gsLoad() {
 /*@@TRANS@@*/
 /*@@VIDGEN@@*/
 /*@@DUB@@*/
+/*@@VSUB@@*/
 /*@@CZ@@*/
 /* ================= 모달 ================= */
 function modal(html, opts = {}) {
@@ -3817,7 +3818,7 @@ function openNewModal(first) {
       <div class="btnrow"><button class="btn" id="nPickF">그림 파일 고르기</button><button class="btn" id="nPickD">폴더 통째로 고르기</button></div></div>
       <p class="muted small" style="margin-top:8px">그림 없이 '만들기'를 눌러도 돼요. 나중에 왼쪽 위에서 불러올 수 있어요.</p></div>
     <div id="nGif" hidden><div class="dropzone" id="nGDrop"><b>쓸 사진·GIF·영상을 여기로 끌어오세요</b><br><span class="small">넣은 순서대로 장면이 돼요. 그냥 '만들기'를 눌러 빈 움짤로 시작해도 돼요.</span></div></div>
-    <div class="foot">${first ? '<button class="btn" id="nDub" title="그림 없이 목소리만 만들어요">AI 더빙만 쓰기</button><button class="btn" id="nOpen">저장해 둔 파일 열기</button>' : '<button class="btn" data-close>취소</button>'}<button class="btn primary" id="nGo">만들기</button></div>`, { wide: true });
+    <div class="foot">${first ? '<button class="btn" id="nDub" title="그림 없이 목소리만 만들어요">AI 더빙만 쓰기</button><button class="btn" id="nVs" title="영상에 박힌 자막을 한국어로 번역해요">영상 자막 번역</button><button class="btn" id="nOpen">저장해 둔 파일 열기</button>' : '<button class="btn" data-close>취소</button>'}<button class="btn primary" id="nGo">만들기</button></div>`, { wide: true });
   const nm = $('#nName', m), autoNm = new Set(['새 작품']), gifNm = pjGifName();
   $$('[data-kind]', m).forEach(b => b.addEventListener('click', () => {
     kind = b.dataset.kind; $$('[data-kind]', m).forEach(x => x.classList.toggle('on', x === b)); $('#nCut', m).hidden = kind !== 'cut'; $('#nImg', m).hidden = kind !== 'image'; $('#nGif', m).hidden = kind !== 'gif';
@@ -3826,6 +3827,7 @@ function openNewModal(first) {
   $$('#nCut .preset', m).forEach(b => b.addEventListener('click', () => { pick = +b.dataset.i; $$('#nCut .preset', m).forEach(x => x.classList.toggle('on', x === b)); }));
   if (first) $('#nOpen', m).addEventListener('click', () => { closeModal(); $('#fileProj').click(); });
   if (first) $('#nDub', m).addEventListener('click', () => dbOpen());
+  if (first) $('#nVs', m).addEventListener('click', () => { closeModal(); vsOpen(); });
   let busy = false;
   const start = async items => {
     if (busy) return; busy = true;
@@ -4215,7 +4217,8 @@ function openHelp() {
       <li><b>AI로 번역·다듬기</b> (제미나이): 말풍선·글자(움짤 글자도)를 고르고 'AI로 번역·다듬기…'에서 다른 말로 번역, 자연스럽게, 짧게, 반말·존댓말, 직접 요청을 골라요. 후보 3개 중 누르면 바뀌어요. 컷 편집에서 아무것도 안 고르면 '말풍선·글자 번역'으로 페이지 전체를 한 번에 번역해요(다른 나라 말 판 만들기).</li>
       <li><b>AI 영상 만들기</b> (제미나이, 유료 키): 이미지 편집 'AI 도구 → AI 영상 만들기…' 또는 움짤 장면의 'AI 영상으로…'. 그림 한 장과 '어떻게 움직일지' 적은 글로 몇 초짜리 영상(소리 포함)을 만들어 MP4로 저장하거나 움짤 탭에 넣어요. 가로 16:9·세로 9:16만 되고, 노출·성인 그림은 거절돼요.</li>
       <li><b>AI 더빙</b> (제미나이): 맨 위 'AI 더빙'(움짤 화면에도 있어요). 그림이 없어도 돼요. 대사를 줄마다 적고 목소리와 말투·감정을 고르면 읽어 줘요. ▶로 한 줄씩 듣고 '다시'로 다른 연기를 받아요. '캐릭터 목소리'에 캐릭터별 목소리·기본 말투를 저장해 두고, '말풍선에서 가져오기'로 대사를 한꺼번에 불러와요. 다 되면 '이어 붙여 저장'·'따로 저장'(WAV) 또는 '움짤에 넣기'로 소리 줄에 얹어요.</li>
-      <li><b>API 사용 내역</b>: 메뉴 AI → API 사용 내역(아래 상태 줄의 'API' 금액을 눌러도 돼요). 제미나이를 쓰는 창(페이지 번역·AI 번역·다듬기·AI 더빙·AI 영상)에는 시작 전에 예상 금액이 나오고, 끝나면 실제로 쓴 토큰과 금액이 작업 탭별로 기록돼요. 오늘·이번 달·전체 합계, 작업 탭별 합계, CSV 저장, 원화 환율 바꾸기가 돼요. 금액은 구글 표준 요금으로 계산한 값이라 무료 사용량 안이면 실제 청구는 0원이에요.</li>
+      <li><b>영상 자막 번역</b> (제미나이): 메뉴 AI → 영상 자막 번역. 영상에 박혀 있는 자막을 읽어 한국어로 번역해요. 자막이 나오는 장면에서 파란 점선(자막 자리)을 자막에 맞추고 '번역 시작'을 누르세요. 영상은 이 컴퓨터에서만 읽고, 제미나이에는 자막 글자 조각(흑백)과 읽은 글만 보내요. 끝나면 영상 위에서 바로 보고, 자막 입힌 영상(MP4)이나 자막 파일(SRT·ASS)로 저장해요.</li>
+      <li><b>API 사용 내역</b>: 메뉴 AI → API 사용 내역(아래 상태 줄의 'API' 금액을 눌러도 돼요). 제미나이를 쓰는 창(페이지 번역·AI 번역·다듬기·AI 더빙·AI 영상·영상 자막 번역)에는 시작 전에 예상 금액이 나오고, 끝나면 실제로 쓴 토큰과 금액이 작업 탭별로 기록돼요. 오늘·이번 달·전체 합계, 작업 탭별 합계, CSV 저장, 원화 환율 바꾸기가 돼요. 금액은 구글 표준 요금으로 계산한 값이라 무료 사용량 안이면 실제 청구는 0원이에요.</li>
       <li><b>메뉴·우클릭·설정</b>: 맨 위 메뉴 막대(파일·편집·보기·넣기·도구·AI·영상·도움말)에 모든 기능이 있어요. 그림판·그림 목록·레이어·페이지·작업 탭·영상 시간 막대·미리보기에서 <b>우클릭</b>하면 그 자리에서 할 수 있는 일이 나와요. 설정(<kbd>Ctrl</kbd>+<kbd>,</kbd>)에서 화면 밝기·패널·영상 기본값·미리보기 화질·하드웨어 가속·API 키와 모델·이번 달 예산·AI 팩·단축키·업데이트를 한곳에서 바꿔요. 오른쪽 속성 칸 제목을 누르면 접혀요.</li>
       <li><b>영상·움짤 (영상 편집기)</b>: 시퀀스 설정(해상도 720p~4K, 가로·세로·정사각형, 8~60fps)을 기준으로 편집하고 MP4로 내보내요. 같은 창에서 GIF·WebP 움짤로도 저장하는데, 움짤은 크기(기본 긴 쪽 800)와 프레임(GIF 50fps까지, WebP 60fps까지)을 따로 줄여요. 큰 해상도는 미리보기만 줄여 그려 가벼워요.</li>
       <li><b>일괄 처리</b> (이미지 편집): 아무것도 안 고르고 오른쪽 '일괄 처리'에서 '● 기록 시작'을 누른 뒤 한 그림을 고쳐요. '기록 끝내기'를 누르면 한 일(돌리기·자르기·크기·보정·AI 배경 지우기·자동 흰칠·글자 넣기)이 동작으로 저장되고, 폴더나 모든 그림에 똑같이 할 수 있어요.</li>
@@ -4230,7 +4233,7 @@ const CMDS = {
   'add-panel': addPanel, 'bubble-menu': () => openMenu('#menuBubble', '#bBubble'), 'layer-menu': () => openMenu('#menuLayer', '#bLayerAdd'), shape: () => setMode(mode === 'shape' ? null : 'shape'), 'split-menu': () => openMenu('#menuSplit', '#bSplit'), 'cz-menu': openCzMenu,
   'add-text': () => addText(), pen: () => setMode(mode === 'pen' ? null : 'pen'), brush: () => setMode(mode === 'brush' ? null : 'brush'),
   'zoom-in': () => zoomStep(1), 'zoom-out': () => zoomStep(-1), 'zoom-fit': fitView,
-  export: openExportModal, help: openHelp, theme: () => setTheme(isDark() ? 'light' : 'dark'), gif: pjOpenGif, dub: () => dbOpen(), apilog: () => apiOpenLog(), import: () => pickFiles(false), 'import-dir': () => pickFiles(true), 'new-folder': () => newFolder(null),
+  export: openExportModal, help: openHelp, theme: () => setTheme(isDark() ? 'light' : 'dark'), gif: pjOpenGif, dub: () => dbOpen(), vsub: () => vsOpen(), apilog: () => apiOpenLog(), import: () => pickFiles(false), 'import-dir': () => pickFiles(true), 'new-folder': () => newFolder(null),
   'img-prev': () => navImg(-1), 'img-next': () => navImg(1), crop: () => setMode(mode === 'crop' ? null : 'crop'), select: () => setMode(mode === 'select' ? null : 'select'), autolayout: openAutoLayout,
   'import-stamp': () => $('#fileStamp').click(), 'import-pack': () => $('#filePack').click(),
   'page-add': () => pageCmd('page-add'), 'page-dup': () => pageCmd('page-dup'), 'page-up': () => pageCmd('page-up'), 'page-down': () => pageCmd('page-down'), 'page-del': () => pageCmd('page-del'),

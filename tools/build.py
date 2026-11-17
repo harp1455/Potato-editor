@@ -45,7 +45,9 @@ def page(kind, extra):
     build += '<script>window.POTATO_CHANGES = ' + json.dumps(changes(), ensure_ascii=False).replace('</', '<\\/') + ';</script>'
     mux = read(os.path.join(ROOT, 'vendor', 'mp4-muxer', 'mp4-muxer.js'))  # MP4 저장 (MIT)
     assert '</script' not in mux.lower()
-    parts = [head, build, '<script>' + mux + '</script>', read(os.path.join(S, 'sfx-packs.html')).rstrip('\n'), main, NOTICE] + extra + ['</body>', '</html>']
+    mb = read(os.path.join(ROOT, 'vendor', 'mediabunny', 'mediabunny.min.js'))  # 영상 읽기·다시 만들기 (MPL-2.0, 영상 자막 번역의 MP4 저장)
+    assert '</script' not in mb.lower() and '<!--' not in mb
+    parts = [head, build, '<script>' + mux + '</script>', '<script>' + mb + '</script>', read(os.path.join(S, 'sfx-packs.html')).rstrip('\n'), main, NOTICE] + extra + ['</body>', '</html>']
     return '\n'.join(parts) + '\n'
 
 

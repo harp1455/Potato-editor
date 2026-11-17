@@ -17,7 +17,7 @@ const API_PRICES = [ // [모델 이름, [[이날까지(그날 포함), 입력, �
   [/^gemini-omni/, [[null, 1.5, 17.5]]], // 영상 출력: 720p 1초 = 5,792토큰 (약 0.1달러)
 ];
 const API_VID_TOK = { '360p': 5792 / 3, '720p': 5792, '1080p': 5792 * 1.5 }; // 영상 1초당 출력 토큰
-const API_KINDS = { tr: '페이지 번역', tx: 'AI 번역·다듬기', dub: 'AI 더빙', vid: 'AI 영상', etc: '기타' };
+const API_KINDS = { tr: '페이지 번역', tx: 'AI 번역·다듬기', dub: 'AI 더빙', vid: 'AI 영상', vs: '영상 자막 번역', etc: '기타' };
 const apiCfg = { krw: 1340 };
 try { Object.assign(apiCfg, JSON.parse(localStorage.getItem('potatoApiCfg') || '{}')); } catch (_) { }
 let apiLog = [];

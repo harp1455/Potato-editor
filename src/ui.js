@@ -131,7 +131,7 @@ const UI_MENUS = [
   ].map(x => x === '-' ? x : Object.assign(x, { dis: x.dis || !uiEd() }))],
   ['AI', () => [
     { l: '자동 흰칠', fn: openCzMenu, dis: !uiEd() }, { l: '페이지 번역…', fn: trOpen, dis: !isImg() || !uiEd() }, { l: '고른 대사 AI 번역·다듬기…', fn: aiTxEl, dis: !uiTxtEl() || !uiEd() },
-    { l: '페이지 말풍선 모두 번역…', fn: () => aiTxPages(false), dis: isImg() || !uiEd() }, '-',
+    { l: '페이지 말풍선 모두 번역…', fn: () => aiTxPages(false), dis: isImg() || !uiEd() }, { l: '영상 자막 번역…', fn: vsOpen }, '-',
     { l: 'AI 더빙…', fn: () => uiTxtEl() && uiEd() ? dbFromEl() : dbOpen() }, { l: 'AI 영상 만들기…', fn: () => uiGif() ? vgFromScene() : vgFromImage(), dis: uiGif() ? !gs.slides[gs.sel] : !isImg() }, { l: '캐릭터 움직이기 (뼈대)…', fn: () => uiGif() ? rgFromScene() : rgFromImage(), dis: uiGif() ? !gs.slides[gs.sel] : !isImg() }, '-',
     { l: 'API 사용 내역…', fn: apiOpenLog }, { l: 'AI 설정·팩 관리…', fn: () => uiSettings('ai') },
   ]],
@@ -139,7 +139,7 @@ const UI_MENUS = [
     { l: uiGif() ? '편집기로 돌아가기' : '영상·움짤 편집 열기', fn: () => uiGif() ? pjBackToEditor() : pjOpenGif() }, { l: '새 영상·움짤 작업', fn: () => pjNewGif() }, '-',
     { l: '재생 / 멈춤', k: uiGif() ? 'Space' : '', fn: () => gs.playing ? gsPause() : gsPlay(), dis: !uiGif() }, { l: '처음으로', k: 'Home', fn: () => gpSeek(0), dis: !uiGif() }, { l: '지금 화면을 PNG로 저장', fn: uiSaveFrame, dis: !uiGif() || !gs.slides.length }, '-',
     { l: '시퀀스 설정 (해상도·프레임)', fn: async () => { if (!uiGif()) await pjOpenGif(); gs.focus = 'set'; gs.sel = gs.sel; gsChanged(); } }, { l: '내보내기 (MP4·GIF·WebP)…', k: 'Ctrl+M', fn: async () => { if (!uiGif()) await pjOpenGif(); gsExportOpen(); } }, '-',
-    { l: 'AI 중간 장면 (부드럽게 잇기)…', fn: async () => { if (!uiGif()) await pjOpenGif(); riOpen(gs.pick.size > 1 ? 'pick' : 'all', gs.sel); } }, { l: 'AI 더빙…', fn: () => dbOpen() }, { l: '영상 기본값·미리보기 설정…', fn: () => uiSettings('video') },
+    { l: 'AI 중간 장면 (부드럽게 잇기)…', fn: async () => { if (!uiGif()) await pjOpenGif(); riOpen(gs.pick.size > 1 ? 'pick' : 'all', gs.sel); } }, { l: 'AI 더빙…', fn: () => dbOpen() }, { l: '영상 자막 번역 (박힌 자막 → 한국어)…', fn: vsOpen }, { l: '영상 기본값·미리보기 설정…', fn: () => uiSettings('video') },
   ]],
   ['도움말', () => [
     { l: '사용법', k: 'F1', fn: openHelp }, { l: '단축키', fn: () => uiSettings('keys') }, { l: '업데이트 기록', fn: () => uiChangelog() }, '-',
