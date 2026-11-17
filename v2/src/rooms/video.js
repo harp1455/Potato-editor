@@ -201,7 +201,9 @@ const clipTracks = s => s.scenes.filter(x => x.clip && (x.vol ?? 1) > 0).map(x =
 const allTracks = s => [...tracksOf(s), ...clipTracks(s)];
 function ownTracks(s) { if (!s.audios) { s.audios = tracksOf(s).map(a => ({ ...a })); delete s.audio; } return s.audios; }
 const AUD = new Map();   // id → { el, len, peaks }
-async function audOf(a) {
+const AUDP = new Map();   // 불러오는 중인 것 (같은 소리를 두 번 만들지 않게: 겹쳐 만들면 먼저 튼 것이 멈추지 않아요)
+function audOf(a) { let p = AUDP.get(a.id); if (!p) { p = audLoad(a); AUDP.set(a.id, p); } return p; }
+async function audLoad(a) {
   let o = AUD.get(a.id); if (o) return o;
   const b = await idb.get('blobs', a.clip ? 'clip:' + a.clip : 'aud:' + a.id); if (!b) return null;
   o = { el: new Audio(URL.createObjectURL(b)), len: 0, peaks: null }; AUD.set(a.id, o);
@@ -280,6 +282,7 @@ function play(on) {
   V.playing = on; cancelAnimationFrame(V.raf); const s = seqOf();
   if (on) { V.last = performance.now(); V.raf = requestAnimationFrame(tickPlay); }
   syncAudio(s, true);
+  if (!on) { for (const o of AUD.values()) o.el.pause(); for (const c of CLIP.values()) if (c.el) c.el.pause(); }
   emit();
 }
 
@@ -317,7 +320,8 @@ export const videoRoom = {
     // 창이나 패널 크기가 바뀌면 미리 보기를 그 크기에 맞춰 다시 그려요
     new ResizeObserver(() => draw()).observe(wrap);
     const ro = new ResizeObserver(draw); ro.observe(wrap);
-    const drop = e => { e.preventDefault(); strip.classList.remove('over'); let ids = []; try { ids = JSON.parse(e.dataTransfer.getData('application/x-potato-medias')) || []; } catch (_) { /* 보관함 그림이 아님 */ } if (ids.length) addScenes(ids); };
+    const isClip = f => /^video\//.test(f.type) || /\.(mp4|mkv|mov|m4v|webm|avi|gif|webp)$/i.test(f.name);
+    const drop = e => { e.preventDefault(); strip.classList.remove('over'); const fs = [...(e.dataTransfer.files || [])].filter(isClip); if (fs.length) { e.stopPropagation(); (async () => { for (const f of fs) await clipToScenes(f); })(); return; } let ids = []; try { ids = JSON.parse(e.dataTransfer.getData('application/x-potato-medias')) || []; } catch (_) { /* 보관함 그림이 아님 */ } if (ids.length) addScenes(ids); };
     strip.addEventListener('dragover', e => { e.preventDefault(); strip.classList.add('over'); }); strip.addEventListener('dragleave', () => strip.classList.remove('over')); strip.addEventListener('drop', drop);
     wrap.addEventListener('dragover', e => e.preventDefault()); wrap.addEventListener('drop', drop);
 
@@ -353,7 +357,7 @@ export const videoRoom = {
           oncontextmenu: e => { e.preventDefault(); if (!V.sel.has(x.id)) { V.sel.clear(); V.sel.add(x.id); emit(); } showMenu([{ label: '앞으로 옮기기', run: () => run('video.left') }, { label: '뒤로 옮기기', run: () => run('video.right') }, { label: '복제', run: () => run('video.dup') }, '-', { label: '장면 지우기', run: () => run('video.delete') }], e.clientX, e.clientY); },
         }, h('img', { src: (x.clip ? x.thumb : state.thumbs.get(x.mediaId)) || '', alt: '', draggable: 'false' }), x.clip && h('span.vid-clipname', null, x.name))),
         h('div.vid-head', { style: `left:${headX(s)}px` }),
-      ] : [h('p.empty', null, '보관함의 그림을 이 줄로 끌어다 놓으면 장면이 돼요. 캐릭터 작업실에서 만든 움직임도 여기로 보낼 수 있어요.')]));
+      ] : [h('p.empty', null, '보관함의 그림이나 영상 파일을 이 줄로 끌어다 놓으면 장면이 돼요. 캐릭터 작업실에서 만든 움직임도 여기로 보낼 수 있어요.')]));
       const num = (label, val, step, min, on, unit) => { const i = h('input.num', { type: 'number', value: val, step, min, 'aria-label': label, onchange: () => { const v = parseFloat(i.value); if (!isNaN(v)) on(v); } }); return h('label.field', null, h('span.field-name.w', null, label), i, unit && h('span.field-unit', null, unit)); };
       side.replaceChildren(...(!s ? [h('p.empty', null, '장면을 넣으면 영상 설정이 여기 보여요.')] : [
         h('h3.sec', null, '영상'),
