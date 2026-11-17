@@ -162,8 +162,7 @@ export function makeEnc(deps) {
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 ${codecs[0]}
 ${pick('audio.js', ['auEncoderCfg', 'auEncode'])}
-${pick('gif2.js', ['gsMp4Codec', 'encodeMp4'])}
-${encMain}
+${(pick('gif2.js', ['gsMp4Codec', 'encodeMp4']) + '\n' + encMain).replace(/^(\s*)renderFrame\(g,/gm, '$1await renderFrame(g,')}
   return { encodeMp4, encodeGif, encodeWebp };
 }
 `);

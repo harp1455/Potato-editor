@@ -17,10 +17,10 @@ export async function encodeRender(src, fmt, o, onProg) {
   const prog = (a, b) => onProg && onProg(a / b);
   if (fmt === 'mp4') {
     const bitrate = Math.min(150e6, W * H * Math.pow(fps, 0.75) * 2.2 * (0.04 + (set.q / 100) * 0.22));
-    return E.encodeMp4(W, H, fps, src.total, (g, t, w, h) => { g.fillStyle = '#000'; g.fillRect(0, 0, w, h); src.render(g, t, w, h); }, prog, bitrate, o.audio || null);
+    return E.encodeMp4(W, H, fps, src.total, (g, t, w, h) => { g.fillStyle = '#000'; g.fillRect(0, 0, w, h); return src.render(g, t, w, h); }, prog, bitrate, o.audio || null);
   }
   const list = Array.from({ length: n }, (_, i) => ({ t: i * 1000 / fps, s: i * 1000 / fps, dur: 1000 / fps }));
-  const draw = (g, t, w, h) => { g.clearRect(0, 0, w, h); src.render(g, t, w, h); };
+  const draw = (g, t, w, h) => { g.clearRect(0, 0, w, h); return src.render(g, t, w, h); };   // 그리기가 끝날 때까지 기다려요 (영상 클립은 그 장면을 찾은 뒤에 그려요)
   return fmt === 'gif' ? E.encodeGif(W, H, list, draw, prog, 256) : E.encodeWebp(W, H, list, draw, prog, set.q);
 }
 // frames = 같은 크기의 캔버스들. o.fps = 장면 빠르기

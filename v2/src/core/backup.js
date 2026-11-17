@@ -2,7 +2,7 @@
 import { idb, state, saveNow } from './store.js';
 import { makeZip, unzipAll } from './files.js';
 
-const blobKeys = p => [...p.media.flatMap(m => [m.id, 't:' + m.id]), ...(p.sequences || []).flatMap(s => [...(s.audio ? [s.audio] : []), ...(s.audios || [])].map(a => 'aud:' + a.id)), ...(p.videos || []).map(v => 'vid:' + v.id)];
+const blobKeys = p => [...p.media.flatMap(m => [m.id, 't:' + m.id]), ...(p.sequences || []).flatMap(s => [...(s.audio ? [s.audio] : []), ...(s.audios || [])].map(a => 'aud:' + a.id).concat([...new Set((s.scenes || []).filter(x => x.clip).map(x => 'clip:' + x.clip))])), ...(p.videos || []).map(v => 'vid:' + v.id)];
 // ids가 없으면 모든 작업
 export async function backupZip(ids, onStep) {
   await saveNow();
