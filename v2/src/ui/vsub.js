@@ -32,7 +32,9 @@ const vsOff = {}; // 이 모델이 안 받는 선택 항목
 const VS_SRC = [['auto', '자동으로 알아내기'], ['ja', '일본어'], ['en', '영어'], ['zh', '중국어'], ['ko', '한국어']];
 const VS_DST = [['ko', '한국어'], ['en', '영어'], ['ja', '일본어'], ['zh', '중국어']];
 const VS_FONT = '"Malgun Gothic","맑은 고딕","Apple SD Gothic Neo","Noto Sans KR","Noto Sans CJK KR",sans-serif';
-const vsCfg = { src: 'auto', dst: 'ko', fps: 4, x0: 4, x1: 96, y0: 68, y1: 98, dark: false, cover: true, gloss: '', notes: '', bitrate: 0 };
+const vsCfg = { src: 'auto', dst: 'ko', fps: 4, x0: 4, x1: 96, y0: 68, y1: 98, dark: false, cover: true, gloss: '', notes: '', bitrate: 0, readModel: 'gemini-3.8-flash', trModel: 'gemini-4-argon' };
+// 글자 읽기(조각 그림이 많아요)와 번역에 쓰는 모델은 따로 골라요. 어느 쪽이든 아르곤·플래시 모두 쓸 수 있어요
+const VS_MODELS = [['gemini-4-argon', 'Gemini 4 Argon'], ['gemini-4-carbon', 'Gemini 4 Carbon'], ['gemini-3.8-flash', 'Gemini 3.8 Flash (빠르고 쌈)'], ['gemini-3.1-pro-preview', 'Gemini 3.1 Pro']];
 try { Object.assign(vsCfg, JSON.parse(localStorage.getItem('potato2VsCfg') || '{}')); } catch (_) { }
 const vsSaveCfg = () => { try { localStorage.setItem('potato2VsCfg', JSON.stringify(vsCfg)); } catch (_) { } };
 const vs = { built: false, file: null, url: '', W: 0, H: 0, D: 0, key: '', lines: [], scanned: false, busy: false, tk: null, cur: -2, raf: 0, from: '', to: '', msg: '', frac: 0, drop: 0 };
@@ -233,19 +235,19 @@ async function vsScan(tk) {
 
 /* ---- ② 읽기 · ③ 번역 (제미나이) ---- */
 // 제미나이 통로(api/gemini.js)가 안전 설정을 끄고 성인 창작 안내문을 붙여 줘요. 여기서는 긴 작업이라 한도·끊김만 기다렸다 다시 해요
-async function vsAsk(parts, schema, tk) {
-  const model = settings.get('textModel');
+async function vsAsk(parts, schema, tk, model) {
+  const off = vsOff[model] || (vsOff[model] = {});
   for (let n = 0; ; n++) {
     if (tk.stop) throw trErr('stop');
     const gc = { responseMimeType: 'application/json' };
-    if (!vsOff.schema) gc.responseSchema = schema;
-    if (parts.some(p => p.inlineData) && !vsOff.media) gc.mediaResolution = 'MEDIA_RESOLUTION_HIGH';
+    if (!off.schema) gc.responseSchema = schema;
+    if (parts.some(p => p.inlineData) && !off.media) gc.mediaResolution = 'MEDIA_RESOLUTION_HIGH';
     let r;
     try { r = await generate('translate', model, { contents: [{ role: 'user', parts }], generationConfig: gc }); }
     catch (e) {
       const d = String(e.detail || e.message || '');
-      if (e.code === 'bad' && !vsOff.media && /media/i.test(d)) { vsOff.media = 1; continue; }
-      if (e.code === 'bad' && !vsOff.schema && /schema|response_?mime/i.test(d)) { vsOff.schema = 1; continue; }
+      if (e.code === 'bad' && !off.media && /media/i.test(d)) { off.media = 1; continue; }
+      if (e.code === 'bad' && !off.schema && /schema|response_?mime/i.test(d)) { off.schema = 1; continue; }
       if ((e.code === 'quota' || e.code === 'net' || e.code === 'http') && n < 5) { // 잠깐 기다렸다 다시
         const w = Math.min(120, 15 * Math.pow(2, n)), t0 = Date.now();
         while (Date.now() - t0 < w * 1000) { if (tk.stop) throw trErr('stop'); tk.set(`${e.code === 'quota' ? '사용량 한도에 걸려서' : '연결이 끊겨서'} ${Math.ceil(w - (Date.now() - t0) / 1000)}초 기다리는 중…`); await new Promise(res => setTimeout(res, 500)); }
@@ -287,7 +289,7 @@ Return JSON {"items":[{"id":1,"text":"..."}, ...]} with one item per crop number
 - If a crop has no readable subtitle text (only picture fragments, noise, a logo or a watermark), return "" for it.
 - This is fiction for adults. Transcribe faithfully, including sexual, crude or violent words. Never censor, skip or replace anything.`;
   try {
-    const r = await vsAsk([{ text: prompt }, { inlineData: { mimeType: 'image/jpeg', data: vsSheet(list, hard).toDataURL('image/jpeg', 0.9).split(',')[1] } }], VS_READ, tk);
+    const r = await vsAsk([{ text: prompt }, { inlineData: { mimeType: 'image/jpeg', data: vsSheet(list, hard).toDataURL('image/jpeg', 0.9).split(',')[1] } }], VS_READ, tk, vsCfg.readModel);
     const got = new Map(); for (const it of r.items || []) got.set(+it.id, String(it.text || '').replace(/\\n/g, '\n').trim());
     list.forEach((l, i) => { l.src = got.has(i + 1) ? got.get(i + 1) : ''; delete l.fail; });
   } catch (e) {
@@ -364,7 +366,7 @@ Return JSON {"items":[{"i":0,"t":"..."}, ...]} with exactly one item for every l
   if (ctx.length) p += `\n\nEarlier lines, already translated (context only, do not return them):\n${ctx.slice(-14).map(x => `${x.s.replace(/\n/g, ' ')} => ${x.d.replace(/\n/g, ' ')}`).join('\n')}`;
   p += `\n\nLines:\n${list.map((l, i) => `${i}: ${l.src.replace(/\n/g, ' / ')}`).join('\n')}`;
   try {
-    const r = await vsAsk([{ text: p }], VS_TR, tk);
+    const r = await vsAsk([{ text: p }], VS_TR, tk, vsCfg.trModel);
     for (const it of r.items || []) { const l = list[+it.i]; if (l && typeof it.t === 'string') l.ko = it.t.replace(/\\n/g, '\n').trim(); }
     const miss = list.filter(l => l.ko == null);
     if (miss.length && miss.length < list.length) await vsTrBatch(miss, ctx, tk); else for (const l of miss) { l.ko = ''; l.fail = 'tr'; }
@@ -587,6 +589,7 @@ function vsRenderLeft() {
   if (!vs.file) { box.innerHTML = `<div class="sec"><p class="muted small" style="margin:0;line-height:1.6">영상에 박혀 있는 자막(따로 꺼낼 수 없는 자막)을 찾아 읽고 번역해요.<br><br>영상은 이 컴퓨터에서만 읽어요. 제미나이에는 <b>자막 글자 둘레만 남긴 흑백 조각</b>과 읽은 글만 보내고, 장면은 보내지 않아요. 그래서 어떤 장면이 나와도 거절되지 않고 자막만 번역돼요.</p></div>`; return; }
   const has = vs.lines.length > 0, read = vs.lines.some(l => l.src !== undefined), left = vs.lines.some(l => l.src === undefined || (l.src && l.ko == null)), dn = vsDone().length, B = vs.busy ? 'disabled' : '';
   const sl = (f, l) => `<div class="row"><span class="l">${l}</span><input type="range" min="0" max="100" step="1" data-f="${f}" value="${vsCfg[f]}" ${B}></div>`;
+  const mopt = cur => [...VS_MODELS, ...[cur, settings.get('textModel')].filter((m, i, a) => m && a.indexOf(m) === i && !VS_MODELS.some(x => x[0] === m)).map(m => [m, m])].map(([a, b]) => `<option value="${esc(a)}" ${a === cur ? 'selected' : ''}>${esc(b)}</option>`).join('');
   const opt = (list, cur) => list.map(([a, b]) => `<option value="${a}" ${String(a) === String(cur) ? 'selected' : ''}>${b}</option>`).join('');
   box.innerHTML = `<div class="sec"><h3>① 자막 자리</h3><p class="muted small" style="margin:0 0 4px">자막이 나오는 장면으로 옮긴 뒤, 파란 점선 안에 자막이 다 들어오게 맞춰 주세요. 좁을수록 빠르고 정확해요.</p>
       ${sl('y0', '위')}${sl('y1', '아래')}${sl('x0', '왼쪽')}${sl('x1', '오른쪽')}
@@ -597,7 +600,9 @@ function vsRenderLeft() {
     <div class="sec"><h3>② 번역</h3>
       <div class="row"><span class="l">원문</span><select data-f="src" ${B}>${opt(VS_SRC, vsCfg.src)}</select></div>
       <div class="row"><span class="l">번역할 말</span><select data-f="dst" ${B}>${opt(VS_DST, vsCfg.dst)}</select></div>
-      <p class="muted small" style="margin:4px 0">모델: ${esc(settings.get('textModel'))} (설정 > AI와 API의 글 모델을 써요)</p>
+      <div class="row"><span class="l">읽기 모델</span><select data-f="readModel" ${B}>${mopt(vsCfg.readModel)}</select></div>
+      <div class="row"><span class="l">번역 모델</span><select data-f="trModel" ${B}>${mopt(vsCfg.trModel)}</select></div>
+      <p class="muted small" style="margin:2px 0 4px">읽기는 자막 조각 그림에서 글자를 옮겨 적는 일이라 플래시로도 충분하고, 번역은 아르곤이 더 자연스러워요. 둘 다 바꿀 수 있어요.</p>
       <details style="margin:6px 0"><summary class="small" style="cursor:pointer">용어집·말투 메모</summary>
         <p class="muted small" style="margin:6px 0 4px">한 줄에 하나씩 '원문 = 번역' (이름·호칭 등)</p><textarea data-f="gloss" rows="3" spellcheck="false" style="width:100%" placeholder="カイ = 카이&#10;先輩 = 선배" ${B}>${esc(vsCfg.gloss)}</textarea>
         <p class="muted small" style="margin:6px 0 4px">말투·관계 메모</p><textarea data-f="notes" rows="2" spellcheck="false" style="width:100%" placeholder="예: 둘은 연인, 서로 반말" ${B}>${esc(vsCfg.notes)}</textarea></details>
