@@ -7,6 +7,7 @@ import { PANELS } from './panels.js';
 const ZONES = ['left', 'right', 'bottom'];
 const BASE = {
   image: { left: ['media'], right: ['layers', 'props', 'nai', 'dub', 'history'], bottom: [] },
+  cut: { left: ['media', 'sfx'], right: ['history', 'jobs'], bottom: [] },
   other: { left: ['media'], right: ['history', 'jobs'], bottom: [] },
   single: { left: ['media', 'history'], right: ['layers', 'props', 'nai', 'dub', 'jobs'], bottom: [] },
 };

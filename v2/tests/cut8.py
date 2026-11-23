@@ -80,6 +80,18 @@ with sync_playwright() as pw:
     P(page, "(() => { __potato.picked.clear(); __potato.picked.add(__potato.state.project.media[0].id); __potato.emit(); })()"); P(page, "__potato.run('cut.addPic')")
     page.check('.vid-side input[aria-label="색 입히기"]'); page.fill('.vid-side input[aria-label="테두리"]', '4'); page.keyboard.press('Tab'); pc = P(page, ELS + ".at(-1)"); assert pc['type'] == 'pic' and pc['tint'] and pc['ol'] == 4
     page.wait_for_timeout(200); shot(page, '95-handles')
+    # 선으로 자르기: 비스듬히 그으면 컷이 두 조각이 되고, 사이가 벌어지고, 그림은 제자리에 이어져요
+    page.keyboard.press('Escape'); big = P(page, ELS + ".filter(e => e.type === 'panel').sort((a, b) => b.h - a.h)[0]"); np0 = P(page, ELS + ".filter(e => e.type === 'panel').length")
+    page.keyboard.press('k'); page.mouse.move(SX(big['x'] - 30), SY(big['y'] + big['h'] * 0.3)); page.mouse.down(); page.mouse.move(SX(big['x'] + big['w'] + 30), SY(big['y'] + big['h'] * 0.6), steps=4); page.mouse.up()
+    ps = P(page, ELS + ".filter(e => e.type === 'panel')"); assert len(ps) == np0 + 1, len(ps); two = [e for e in ps if e.get('poly')]; assert len(two) == 2 and all(len(e['poly']) == 4 and e['mediaId'] == big['mediaId'] for e in two), two
+    top, bot = sorted(two, key=lambda e: e['y']); assert top['y'] == big['y'] and abs(bot['y'] + bot['h'] - big['y'] - big['h']) < 1 and top['h'] + bot['h'] > big['h']   # 비스듬해서 두 상자가 겹쳐요
+    page.wait_for_timeout(200); shot(page, '97-slice'); page.keyboard.press('v'); page.keyboard.press('Control+z'); assert P(page, ELS + ".filter(e => e.type === 'panel').length") == np0
+    # 효과음 패널: 내장 효과음을 찾아 누르면 스티커로 놓여요 (흰펜 모양이 없는 글자는 색 입히기로 대신)
+    page.keyboard.press('Escape'); page.click('.zone-tab >> text=효과음'); page.wait_for_selector('.sfx-item'); assert page.locator('.sfx-item').count() >= 60
+    page.fill('.sfx-head input[type=search]', '쾅'); page.wait_for_timeout(150); assert 1 <= page.locator('.sfx-item').count() < 20
+    n1 = P(page, ELS + ".length"); page.click('.sfx-item >> nth=0'); page.wait_for_function(ELS + ".length === %d" % (n1 + 1)); sf = P(page, ELS + ".at(-1)")
+    assert sf['type'] == 'pic' and 200 < sf['w'] < 420 and P(page, "__potato.state.project.media.find(m => m.id === '%s').sfx" % sf['mediaId']), sf
+    page.wait_for_timeout(300); shot(page, '96-sfx'); page.click('.zone-tab >> text=보관함')
     # 내보내기 창: JPG, 세로로 잘라 여러 장
     page.keyboard.press('Escape'); P(page, "window.showDirectoryPicker = undefined"); page.click('.cut-bar >> text=내보내기'); page.wait_for_selector('.dlg >> text=세로로 자르기')
     page.select_option('.dlg select[aria-label="파일"]', 'jpeg'); page.fill('.dlg input[aria-label="세로로 자르기"]', '300'); page.keyboard.press('Tab'); shot(page, '94-export')

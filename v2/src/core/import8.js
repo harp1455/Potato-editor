@@ -30,8 +30,9 @@ export async function import8(file, onStep) {
   for (const pg of doc.pages || []) {
     const n = { id: uid('g'), name: pg.name || `${(p.pages || []).length + made.length + 1}쪽`, w: Math.round(pg.w) || 800, h: Math.round(pg.h) || 1280, bg: pg.bg || '#ffffff', els: [] };
     for (const e of pg.els || []) {
-      const base = { id: uid('e'), x: Math.round(e.x), y: Math.round(e.y), w: Math.round(e.w), h: Math.round(e.h) };
-      if (e.type === 'panel') n.els.push({ ...base, type: 'panel', mediaId: imap.get(e.img) || null, ix: e.ox || 0, iy: e.oy || 0, is: Math.max(1, e.iz || 1), bw: e.bw ?? 4, bc: e.bc || '#111111' });
+      const base = { id: uid('e'), x: Math.round(e.x), y: Math.round(e.y), w: Math.round(e.w), h: Math.round(e.h), ...(e.rot ? { rot: Math.round(e.rot * 10) / 10 } : {}) };
+      if (e.type === 'panel') n.els.push({ ...base, type: 'panel', mediaId: imap.get(e.img) || null, ix: e.ox || 0, iy: e.oy || 0, is: Math.max(0.05, e.iz || 1), bw: e.bw ?? 4, bc: e.bc || '#111111', ...(e.radius ? { br: e.radius } : {}), ...(e.fill ? { bgc: e.fill } : {}), ...(e.flip ? { ifx: true } : {}) });
+      else if (e.type === 'stamp' && imap.get(e.img)) n.els.push({ ...base, type: 'pic', mediaId: imap.get(e.img), op: (e.op ?? 100) / 100, ...(e.flip ? { fx: true } : {}), ...(e.tintOn && e.tint ? { tint: e.tint } : {}), ...(e.ow ? { ol: Math.min(10, Math.max(1, Math.round(e.ow / Math.max(1, Math.min(e.w, e.h)) * 100))), olc: e.oc || '#ffffff' } : {}) });   // 스티커·효과음 그림
       else if (e.type === 'bubble') n.els.push({ ...base, type: 'bubble', shape: SHAPE[e.shape] || 'ellipse', text: e.text || '', size: Math.round(e.fs) || 28, font: FONT[e.font] || '', color: e.color || '#111111', bold: !!e.bold, fill: e.fill || '#ffffff', bc: e.stroke || '#111111', bw: e.sw ?? 3, tail: !!e.tail, tx: Math.round(e.tx ?? base.x + base.w * 0.3), ty: Math.round(e.ty ?? base.y + base.h * 1.3), vert: !!e.vert });
       else if (e.type === 'text') n.els.push({ ...base, type: 'text', text: e.text || '', size: Math.round(e.fs) || 48, font: FONT[e.font] || '', color: e.color || '#111111', bold: e.bold !== false, sw: e.sw ?? 0, sc: e.sc || '#ffffff', vert: !!e.vert });
       else skipped++;

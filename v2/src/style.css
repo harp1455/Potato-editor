@@ -322,6 +322,11 @@ label.batch-row { cursor: pointer; } .batch-row input[type=checkbox] { accent-co
 .cut-thumb { width: 54px; height: auto; max-height: 86px; display: block; background: #fff; }
 .cut-add { width: 54px; height: 54px; display: grid; place-items: center; border: 1px dashed var(--edge); border-radius: var(--r); color: var(--dim); flex: none; margin-bottom: 18px; }
 .cut-bar { gap: 6px; height: 34px; } .cut-bar .btn.small { display: inline-flex; align-items: center; gap: 5px; flex: none; } .cut-bar .check { flex: none; } .tool-vsep { width: 1px; height: 16px; background: var(--edge); flex: none; } .zoom-pct { min-width: 52px; justify-content: center; }
+.sfx-head { display: grid; gap: 6px; padding: 8px; } .sfx-head .field-row { gap: 6px; } .sfx-head select { width: 100%; min-width: 0; }
+.sfx-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 6px; padding: 0 8px 8px; }
+.sfx-item { display: grid; gap: 2px; justify-items: center; padding: 4px; border: 1px solid var(--line); border-radius: var(--r); background: #d9d9d9; color: #222; font-size: 11px; cursor: pointer; }
+.sfx-item img { width: 100%; height: 54px; object-fit: contain; pointer-events: none; } .sfx-item:hover { border-color: var(--potato); }
+.sfx-grid .empty { grid-column: 1 / -1; }
 .bub-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; align-self: stretch; }
 .bub-pre { padding: 0; border: 1px solid var(--line); border-radius: var(--r); background: #8d8d8d; cursor: pointer; display: block; overflow: hidden; }
 .bub-pre canvas { width: 100%; height: auto; display: block; }

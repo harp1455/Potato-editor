@@ -21,6 +21,9 @@ const ort = readFileSync(ortOut, 'utf8');
 for (const bad of ['</script', '<!--', '<script']) if (ort.toLowerCase().includes(bad)) throw new Error('실행 도구 안에 ' + bad + ' 가 있어요');
 const mux = readFileSync(join(here, '..', 'vendor', 'mp4-muxer', 'mp4-muxer.js'), 'utf8');   // MP4 저장 (MIT)
 if (/<\/script/i.test(mux)) throw new Error('mp4-muxer 안에 </script 가 있어요');
+// 내장 효과음 묶음(8.x와 같은 것): 컷 작업실의 효과음 패널이 처음 쓸 때 읽어요
+const sfx = readFileSync(join(here, '..', 'src', 'sfx-packs.html'), 'utf8').trim();
+if ((sfx.match(/<script/g) || []).length !== 1 || !sfx.startsWith('<script type="application/json" id="cutSfxPacks">')) throw new Error('sfx-packs.html 모양이 달라졌어요');
 const notice = readFileSync(join(here, '..', 'tools', 'notice.txt'), 'utf8').trim();
 const css = readFileSync(join(here, 'src/style.css'), 'utf8') + '\n' + readFileSync(join(here, 'src/legacy/rig.gen.css'), 'utf8') + '\n' + readFileSync(join(here, 'src/legacy/legacy.css'), 'utf8');
 const html = `<!doctype html>
@@ -34,6 +37,7 @@ ${css}</style>
 </head>
 <body>
 <script type="text/plain" id="ortJs">${ort}</script>
+${sfx}
 <script>
 ${mux}</script>
 <script>

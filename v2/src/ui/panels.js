@@ -10,6 +10,7 @@ import { binPanel } from './bin.js';
 import { naiPanel } from './naipanel.js';
 import { jobsPanel } from './aitools.js';
 import { dubPanel } from './geminitools.js';
+import { sfxPanel } from './sfxpanel.js';
 
 const num = (label, value, step, on, unit) => {
   const i = h('input.num', { type: 'number', value, step, 'aria-label': label, onchange: () => { const v = parseFloat(i.value); if (!isNaN(v)) on(v); } });
@@ -20,6 +21,7 @@ let lastClick = { id: null, t: 0 };
 
 export const PANELS = {
   media: binPanel,
+  sfx: sfxPanel,
   layers: {
     title: '레이어',
     render(el) {
