@@ -3,7 +3,7 @@
 import { logErr } from '../core/errlog.js';
 import { makeFx } from '../legacy/fx.gen.js';
 import { h, icon, drag, clamp } from '../ui/dom.js';
-import { state, commit, emit, uid, ensureBitmap, addMedia, ensureFolder, idb } from '../core/store.js';
+import { state, commit, emit, uid, ensureBitmap, addMedia, ensureFolder, idb, hold } from '../core/store.js';
 import { runJob, aiLoad } from '../core/ai.js';
 import { ensurePacks } from '../ui/aitools.js';
 import { legacyAi } from '../legacy/shim.js';
@@ -300,14 +300,17 @@ function exportDialog() {
   drawBox();
   dialog({ title: '영상 내보내기', body: box, buttons: [{ label: '취소' }, { label: '내보내기', primary: true, run: () => { (async () => {
     if (EXPORTING) { toast('이미 내보내는 중이에요. 끝난 뒤에 다시 해 주세요.'); return; }
-    play(false); const b = busy('파일을 만드는 중이에요.'); EXPORTING = true;
+    // 진행 창이 떠 있는 동안에는 장면을 고칠 수 없어요 (만드는 도중에 장면이 바뀌지 않게). 멈추기를 누르면 그만둬요
+    play(false); EXPORTING = true; let stop = false; const free = hold(), msg = h('p.dlg-text', null, '파일을 만드는 중이에요.'), bar = h('progress', { max: 100, value: 0, style: 'width:100%', 'aria-label': '내보내기 진행' });
+    const pd = dialog({ title: '영상 내보내기', dismiss: false, body: h('div', null, msg, bar), buttons: [{ label: '멈추기', run: () => { stop = true; msg.textContent = '멈추는 중이에요.'; return false; } }] });
     try {
       await Promise.all([...s.scenes.map(x => x.clip ? clipOf(x.clip).wait : ensureBitmap(x.mediaId)), ...(s.overs || []).filter(o => o.mediaId).map(o => ensureBitmap(o.mediaId))]);
       const audio = F.fmt === 'mp4' ? await audioBuffer(s, total(s)).catch(() => null) : null;
-      const blob = await encodeRender({ W: s.w, H: s.h, fps: s.fps, total: total(s), render: async (g, t, w, hh) => { await clipPrep(s, t); renderSeq(g, s, t, w, hh); } }, F.fmt, { size: F.size, loop: F.loop, quality: 90, audio }, p => b.set(`파일을 만드는 중이에요. ${Math.round(p * 100)}%`));
-      b.done(''); const ok = await download(blob, `${s.name}.${F.fmt}`); if (ok) toast(`'${s.name}.${F.fmt}'로 내보냈어요.`);
-    } catch (e) { b.done(String(e && e.message) === 'nomp4' ? '이 컴퓨터에서는 MP4를 만들 수 없어요. WebP나 GIF로 저장해 주세요.' : '파일을 만들지 못했어요. ' + ((e && e.message) || ''), 'err'); }
-    finally { EXPORTING = false; draw(); }
+      const blob = await encodeRender({ W: s.w, H: s.h, fps: s.fps, total: total(s), render: async (g, t, w, hh) => { if (stop) throw new Error('stopped'); await clipPrep(s, t); renderSeq(g, s, t, w, hh); } }, F.fmt, { size: F.size, loop: F.loop, quality: 90, audio }, p => { if (stop) return; bar.value = Math.round(p * 100); msg.textContent = `파일을 만드는 중이에요. ${Math.round(p * 100)}%`; });
+      if (stop) throw new Error('stopped');
+      pd.close(); const ok = await download(blob, `${s.name}.${F.fmt}`); if (ok) toast(`'${s.name}.${F.fmt}'로 내보냈어요.`);
+    } catch (e) { pd.close(); const m = String(e && e.message); if (stop || m === 'stopped') toast('내보내기를 멈췄어요.'); else toast(m === 'nomp4' ? '이 컴퓨터에서는 MP4를 만들 수 없어요. WebP나 GIF로 저장해 주세요.' : '파일을 만들지 못했어요. ' + ((e && e.message) || ''), 'err'); }
+    finally { free(); EXPORTING = false; draw(); }
   })(); } }] });
 }
 
@@ -350,8 +353,9 @@ export const videoRoom = {
       // 둘째 줄: 얹는 그림과 자막이 언제 나오는지 막대로 보여요. 누르면 그 시각으로 가요
       const xOf = tt => { let a = 0, px = 8; for (const x of s.scenes) { if (tt < a + x.dur) return px + (tt - a) / x.dur * widthOf(x); a += x.dur; px += widthOf(x); } return px; };
       const bars = s && s.scenes.length ? [...(s.overs || []).map(o => [o, 'over', o.text != null ? String(o.text).split('\n')[0] : (state.project.media.find(m => m.id === o.mediaId) || {}).name || '그림']), ...(s.fx || []).map(f => [{ t0: f.t0 || 0, dur: (f.t1 == null ? total(s) : f.t1) - (f.t0 || 0) }, 'fx', (fxLib().FXK[f.kind] || [0, f.kind])[1]]), ...(s.caps || []).map(c => [c, 'cap', String(c.text || '').split('\n')[0]]), ...tracksOf(s).map(a => [{ t0: a.t0 || 0, dur: lenOf(a, AUD.get(a.id)) || 1 }, 'aud', a.name])] : [];
-      lane.hidden = !bars.length;
-      lane.replaceChildren(h('div.vid-lane-in', { style: `width:${s ? xOf(1e9) + 8 : 0}px` }, bars.map(([o, kind, name]) => h('button.vid-chip.' + kind, { style: `left:${xOf(o.t0)}px;width:${Math.max(10, xOf(o.t0 + o.dur) - xOf(o.t0))}px`, title: `${{ over: '얹는 것', aud: '소리', fx: '효과' }[kind] || '자막'}: ${name}, ${o.t0.toFixed(2)}초부터 ${o.dur.toFixed(2)}초 동안`, onclick: () => { V.t = o.t0; emit(); } }, name))));
+      const rows = ['over', 'cap', 'fx', 'aud'].filter(k => bars.some(b => b[1] === k));   // 얹는 것·자막·효과·소리를 줄을 나눠 보여요 (겹쳐서 안 읽히지 않게)
+      lane.hidden = !bars.length; lane.style.height = Math.max(1, rows.length) * 20 + 2 + 'px';
+      lane.replaceChildren(h('div.vid-lane-in', { style: `width:${s ? xOf(1e9) + 8 : 0}px` }, bars.map(([o, kind, name]) => h('button.vid-chip.' + kind, { style: `top:${rows.indexOf(kind) * 20 + 3}px;left:${xOf(o.t0)}px;width:${Math.max(10, xOf(o.t0 + o.dur) - xOf(o.t0))}px`, title: `${{ over: '얹는 것', aud: '소리', fx: '효과' }[kind] || '자막'}: ${name}, ${o.t0.toFixed(2)}초부터 ${o.dur.toFixed(2)}초 동안`, onclick: () => { V.t = o.t0; emit(); } }, name))));
       lane.scrollLeft = strip.scrollLeft;
       strip.replaceChildren(...(s && s.scenes.length ? [
         ...s.scenes.map((x, i) => h('button.vid-scene' + (V.sel.has(x.id) ? '.on' : ''), { style: `width:${widthOf(x)}px`, title: x.clip ? `${i + 1}번 장면, 영상 '${x.name}', ${x.dur.toFixed(2)}초` : `${i + 1}번 장면, ${x.dur.toFixed(2)}초`, 'aria-pressed': String(V.sel.has(x.id)),

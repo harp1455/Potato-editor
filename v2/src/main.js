@@ -1,7 +1,7 @@
 import { h, icon, fmtKeys } from './ui/dom.js';
 import { settings } from './core/settings.js';
 import { addCmd, cmds, cmd, run, handleKey, keysOf, keyName, setErrHandler } from './core/cmd.js';
-import { state, canvasOf, tidyMedia, boot, onChange, onTick, emit, commit, undo, redo, canUndo, canRedo, saveNow, setSaveErrHandler, newProject, openProject, listProjects, deleteProject } from './core/store.js';
+import { state, canvasOf, tidyMedia, boot, onChange, onTick, emit, commit, undo, redo, canUndo, canRedo, saveNow, setSaveErrHandler, setHeldHandler, setOtherTabHandler, newProject, openProject, listProjects, deleteProject } from './core/store.js';
 import { showMenu, closeMenu, cmdItem, toast, dialog, confirmBox, palette, busy, setErrUi } from './ui/overlay.js';
 import { errLog, errClear, errText, logErr, noteDetail } from './core/errlog.js';
 import { renderDock, updatePanels, isRendering, togglePanel, hasPanel, resetLayout } from './ui/dock.js';
@@ -366,6 +366,8 @@ async function start() {
   addEventListener('unhandledrejection', e => { const r = e.reason || {}; logErr('알 수 없는 오류', r.message || String(r), (r.code ? r.code + ' / ' : '') + (r.detail ? r.detail + ' / ' : '') + String(r.stack || '').split('\n').slice(0, 4).join(' | ')); });
   registerCmds(); build();
   setSaveErrHandler(why => toast('작업을 저장하지 못하고 있어요. 저장 공간이 모자라거나 막혀 있을 수 있어요. 파일 메뉴의 백업으로 작업을 따로 남겨 두세요. (' + why + ')', 'err'));
+  setHeldHandler(() => toast('지금 하는 작업이 끝난 뒤에 되돌릴 수 있어요.'));
+  let warned = false; setOtherTabHandler(k => { if (k === 'reloaded') toast('다른 탭에서 고친 내용을 불러왔어요.'); else if (!warned) { warned = true; toast('이 작업이 다른 탭에도 열려 있어요. 한쪽에서 고치면 다른 쪽이 그 내용을 따라가요. 두 탭에서 동시에 고치지는 마세요.'); } });
   const bootErr = await boot(); tidyMedia().catch(() => {});
   if (bootErr) setTimeout(() => toast('마지막 작업을 열지 못해서 새 작업으로 시작했어요. 파일 메뉴의 작업 목록에서 다시 열어 볼 수 있어요. (' + bootErr + ')', 'err'), 300);   // 작업을 열 때 안 쓰는 그림을 치워요
   renderChrome(); mountRoom(); refresh();

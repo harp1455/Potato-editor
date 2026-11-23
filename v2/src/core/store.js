@@ -70,8 +70,14 @@ export function commit(label) {
   hist.at = hist.items.length - 1;
   state.saved = false; scheduleSave(); emit();
 }
+// 오래 걸리는 일(AI 작업, 내보내기)이 도는 동안에는 되돌리기를 쉬어요.
+// 되돌리면 작업 전체가 새것으로 바뀌어서, 끝난 결과가 사라진 레이어에 들어가 버리거든요.
+const holds = new Set(); let onHeld = () => {};
+export const setHeldHandler = f => { onHeld = f; };
+export function hold() { const k = {}; holds.add(k); const t = setTimeout(() => holds.delete(k), 15 * 60000); return () => { clearTimeout(t); holds.delete(k); }; }
 export function jump(i) {
   if (i < 0 || i >= hist.items.length || i === hist.at) return;
+  if (holds.size) { onHeld(); return; }
   hist.at = i; state.project = clone(hist.items[i].snap);
   state.saved = false; scheduleSave(); emit();
 }
@@ -88,8 +94,22 @@ export async function saveNow() {
   const p = state.project; p.at = Date.now();
   try { await idb.put('projects', p.id, clone(p)); state.saved = true; state.saveErr = ''; try { localStorage.setItem('potato2.last', p.id); } catch (_) { /* 마지막 작업 기억만 못 해요 */ } }
   catch (e) { console.error(e); state.saved = false; const first = !state.saveErr; state.saveErr = (e && e.message) || '알 수 없는 까닭'; if (first) onSaveErr(state.saveErr); }
+  if (state.saved) say({ type: 'saved', id: p.id });
   emit(); return state.saved;
 }
+// 탭끼리 알리기: 같은 작업을 두 탭에서 열면 알려 주고, 한쪽이 저장하면 다른 쪽은 그 내용을 다시 읽어요 (서로 덮어쓰지 않게)
+const TAB = Math.random().toString(36).slice(2); let chan = null, onOther = () => {};
+export const setOtherTabHandler = f => { onOther = f; };
+function say(m) { try { if (chan) chan.postMessage({ ...m, tab: TAB }); } catch (_) { /* 알리지 못해도 저장은 됐어요 */ } }
+try {
+  chan = new BroadcastChannel('potato2');
+  chan.onmessage = async e => {
+    const m = e.data || {}; if (m.tab === TAB || !state.project || m.id !== state.project.id) return;
+    if (m.type === 'opened') { say({ type: 'here', id: m.id }); onOther('opened'); }
+    else if (m.type === 'here') onOther('here');
+    else if (m.type === 'saved' && !holds.size && state.saved) { clearTimeout(saveT); try { await openProject(m.id, true); onOther('reloaded'); } catch (_) { /* 다음 저장 때 다시 맞춰져요 */ } }
+  };
+} catch (_) { /* 이 환경에는 탭끼리 알리는 길이 없어요 */ }
 // 저장이 안 될 때 한 번 알려요 (다시 저장되면 다음 실패 때 또 알려요)
 let onSaveErr = () => {};
 export const setSaveErrHandler = f => { onSaveErr = f; };
@@ -108,6 +128,12 @@ async function loadThumbs(p) {
 }
 const loadBitmaps = loadThumbs;
 const loading = new Map();
+// 지금 작업 어디에서도 쓰지 않는 그림은 메모리에서 내려요. 되돌리기로 다시 쓰이면 저장된 것을 다시 읽어 와요
+export function dropBitmap(id) {
+  const b = state.bitmaps.get(id); if (!b) return;
+  if (JSON.stringify({ ...state.project, media: [] }).includes('"' + id + '"')) return;
+  if (b.close) b.close(); state.bitmaps.delete(id);
+}
 export function ensureBitmap(id) {
   if (state.bitmaps.has(id)) return Promise.resolve(state.bitmaps.get(id));
   if (!loading.has(id)) loading.set(id, (async () => {
@@ -124,12 +150,13 @@ export async function newProject(name) {
   reset(blank(name), '새 작업');
   await saveNow();
 }
-export async function openProject(id) {
+export async function openProject(id, quiet) {
   const p = await idb.get('projects', id);
   if (!p) return false;
   for (const k of ['media', 'folders', 'canvases']) if (!Array.isArray(p[k])) p[k] = [];   // 옛 판이나 깨진 기록에 빠진 칸은 비워서 열어요
   await loadBitmaps(p); reset(p, '작업 열기');
-  localStorage.setItem('potato2.last', id);
+  try { localStorage.setItem('potato2.last', id); } catch (_) { /* 기억만 못 해요 */ }
+  if (!quiet) say({ type: 'opened', id });
   return true;
 }
 export const listProjects = async () => (await idb.all('projects')).sort((a, b) => b.at - a.at).map(p => ({ id: p.id, name: p.name, at: p.at, media: p.media.length, canvases: p.canvases.length }));

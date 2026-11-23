@@ -2,6 +2,7 @@
 import { logErr, takeDetail } from '../core/errlog.js';
 import { h, icon, fmtKeys } from './dom.js';
 import { cmds, canRun, keysOf, run } from '../core/cmd.js';
+import { hold } from '../core/store.js';
 
 let openMenu = null;
 export function closeMenu() { if (openMenu) { openMenu.remove(); openMenu = null; document.querySelectorAll('.mb-item.on').forEach(b => b.classList.remove('on')); } }
@@ -115,6 +116,6 @@ export const askText = (title, value = '', okLabel = '확인') => new Promise(re
 // 오래 걸리는 일의 진행 알림. set(글)으로 바꾸고 done(글)으로 끝내요.
 export function busy(text) {
   if (!toastBox) { toastBox = h('div.toasts', { role: 'status', 'aria-live': 'polite' }); document.body.append(toastBox); }
-  const t = h('div.toast.busy', null, text); toastBox.append(t);
-  return { set: s => { t.textContent = s; }, done: (s, kind) => { t.remove(); if (s) toast(s, kind); } };
+  const t = h('div.toast.busy', null, text), free = hold(); toastBox.append(t);   // 도는 동안 되돌리기를 쉬어요
+  return { set: s => { t.textContent = s; }, done: (s, kind) => { free(); t.remove(); if (s) toast(s, kind); } };
 }

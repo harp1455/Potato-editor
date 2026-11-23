@@ -1,6 +1,6 @@
 // 그리는 도구: 붓, 지우개, 도형, 글자. 그린 것은 '그리기' 레이어에 들어가서 원래 그림은 그대로예요.
 import { h } from '../ui/dom.js';
-import { state, commit, emit, layerOf, addMedia, addLayer, ensureBitmap, tidyMedia } from '../core/store.js';
+import { state, commit, emit, layerOf, addMedia, addLayer, ensureBitmap, tidyMedia, dropBitmap } from '../core/store.js';
 import { settings } from '../core/settings.js';
 import { dialog } from '../ui/overlay.js';
 
@@ -39,7 +39,7 @@ async function begin(c, to) {
   // 그림판 좌표 → 레이어 그림 좌표: 옮기기·크기뿐 아니라 돌리기·뒤집기도 거꾸로 풀어요
   const M = new DOMMatrix().translate(w.width / 2, w.height / 2).scale((l.flipX ? -1 : 1) / l.scale, (l.flipY ? -1 : 1) / l.scale).rotate(-(l.rot || 0)).translate(-(l.x + w.width * l.scale / 2), -(l.y + w.height * l.scale / 2));
   const toLayer = p => { const q = M.transformPoint(new DOMPoint(p.x, p.y)); return { x: q.x, y: q.y }; }, fromCanvas = g2 => g2.setTransform(M);
-  const done = async label => { const oldId = l.mediaId, m = await addMedia(new File([await new Promise(r => w.toBlob(r, 'image/png'))], '그리기.png', { type: 'image/png' }), null, { hidden: true }); state.bitmaps.set(oldId, old); await ensureBitmap(m.id); l.mediaId = m.id; commit(label); if (++strokes % 20 === 0) tidyMedia(); };   // 스무 번 그을 때마다, 되돌리기로도 못 돌아가는 옛 그림을 치워요
+  const done = async label => { const oldId = l.mediaId, m = await addMedia(new File([await new Promise(r => w.toBlob(r, 'image/png'))], '그리기.png', { type: 'image/png' }), null, { hidden: true }); state.bitmaps.set(oldId, old); await ensureBitmap(m.id); l.mediaId = m.id; commit(label); dropBitmap(oldId); if (++strokes % 20 === 0) tidyMedia(); };   // 스무 번 그을 때마다, 되돌리기로도 못 돌아가는 옛 그림을 치워요
   const cancel = () => { state.bitmaps.set(l.mediaId, old); };
   return { l, g, w, toLayer, fromCanvas, done, cancel, k: 1 / l.scale };
 }
