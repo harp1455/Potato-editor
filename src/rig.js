@@ -677,6 +677,37 @@ function rgUpMask(bin0, tw, th, W, H) {
   const ud = ug.getImageData(0, 0, W, H).data, out = new Uint8ClampedArray(W * H); for (let i = 0; i < W * H; i++) out[i] = clamp((ud[i * 4 + 3] - 96) * 4, 0, 255);
   return out;
 }
+// 한 명일 때 몸만 남기기: 따내는 모델은 캐릭터가 누운 침대·베개·옆의 물건까지 캐릭터로 보는 일이 많아요.
+// 뼈대 점(머리·어깨·팔꿈치·손목·골반·무릎·발목)을 '여기가 몸'이라고 SAM에 알려 주고, 그 답 밖의 것을 덜어 내요.
+// 머리 둘레와 뼈 둘레는 SAM이 놓쳐도 지키고(머리카락·팔다리), 덜어 낼 것이 적으면(= 처음부터 잘 따졌으면) 그대로 둬요 → { A, cut(덜어 낸 비율) } 또는 null
+async function rgBodyOnly(sh, A, K, tk) {
+  const { W, H } = sh, n = W * H, at = i => A[clamp(Math.round(K[i][1]), 0, H - 1) * W + clamp(Math.round(K[i][0]), 0, W - 1)];
+  const ok = (i, t = 0.45) => K && K[i] && K[i][2] >= t && K[i][0] >= 0 && K[i][0] < W && K[i][1] >= 0 && K[i][1] < H, ids = [0, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16].filter(i => ok(i) && at(i) > 100);
+  if (ids.length < 4) return null;
+  const E = await rgSamEnc(sh, tk), { s, tw, th } = E, plane = tw * th, r = await rgSamAsk(E, ids.map(i => [K[i][0] * s, K[i][1] * s, 1]), null);
+  let best = -1, bs = -1e9; // 찍은 점을 가장 많이 품은 답 (같으면 SAM이 더 자신 있는 것)
+  for (let k = 0; k < r.nm; k++) { let hit = 0; for (const i of ids) if (r.m[k * plane + clamp(Math.round(K[i][1] * s), 0, th - 1) * tw + clamp(Math.round(K[i][0] * s), 0, tw - 1)] > 0) hit++; const sc = hit / ids.length * 4 + (r.iou ? r.iou[k] : 0); if (sc > bs) { bs = sc; best = k; } }
+  if (best < 0) return null;
+  const bin = new Uint8Array(plane); for (let i = 0; i < plane; i++) if (r.m[best * plane + i] > 0) bin[i] = 1;
+  const up = rgUpMask(bin, tw, th, W, H), sw = ok(5, 0.3) && ok(6, 0.3) ? Math.hypot(K[5][0] - K[6][0], K[5][1] - K[6][1]) : Math.sqrt(n) * 0.18, U = Math.max(16, sw);
+  // 지킬 곳: 머리 둘레(머리카락)와 뼈 둘레
+  const pc = newCanvas(W, H), pg = pc.getContext('2d', { willReadFrequently: true }); pg.fillStyle = pg.strokeStyle = '#fff'; pg.lineCap = 'round'; pg.lineWidth = U * 0.4;
+  for (const [a, b] of [[5, 7], [7, 9], [6, 8], [8, 10], [11, 13], [13, 15], [12, 14], [14, 16], [5, 6], [11, 12], [5, 11], [6, 12]]) if (ok(a) && ok(b)) { pg.beginPath(); pg.moveTo(K[a][0], K[a][1]); pg.lineTo(K[b][0], K[b][1]); pg.stroke(); }
+  const pd = pg.getImageData(0, 0, W, H).data, keep = new Float32Array(n); for (let i = 0; i < n; i++) keep[i] = Math.max(up[i], pd[i * 4]) / 255;
+  // 머리(머리카락까지): 얼굴 점으로 SAM에 따로 물어, 머리 둘레 안에서 그 답만 지켜요 (머리 밑의 베개는 빼고). 답이 이상하면 머리 둘레를 통째로 지켜요
+  const hd = [0, 1, 2, 3, 4].filter(i => ok(i, 0.4));
+  if (hd.length) {
+    const hx = hd.reduce((v, i) => v + K[i][0], 0) / hd.length, hy = hd.reduce((v, i) => v + K[i][1], 0) / hd.length, R = U * 0.95, disk = Math.PI * R * R * s * s;
+    const rh = await rgSamAsk(E, hd.slice(0, 3).map(i => [K[i][0] * s, K[i][1] * s, 1]), [(hx - R) * s, (hy - R) * s, (hx + R) * s, (hy + R) * s]); let hb = -1, hs = -1e9;
+    for (let k = 0; k < rh.nm; k++) { let ar = 0; for (let i = 0; i < plane; i += 2) if (rh.m[k * plane + i] > 0) ar += 2; if (ar < disk * 0.12 || ar > disk * 1.3) continue; const sc = rh.iou ? rh.iou[k] : 0; if (sc > hs) { hs = sc; hb = k; } }
+    let hup = null; if (hb >= 0) { const hbin = new Uint8Array(plane); for (let i = 0; i < plane; i++) if (rh.m[hb * plane + i] > 0) hbin[i] = 1; hup = rgUpMask(hbin, tw, th, W, H); }
+    const x0 = Math.max(0, Math.floor(hx - R)), x1 = Math.min(W - 1, Math.ceil(hx + R)), y0 = Math.max(0, Math.floor(hy - R)), y1 = Math.min(H - 1, Math.ceil(hy + R));
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) { if ((x - hx) * (x - hx) + (y - hy) * (y - hy) > R * R) continue; const i = y * W + x, v = hup ? hup[i] / 255 : 1; if (v > keep[i]) keep[i] = v; }
+  }
+  const soft = dpBox(keep, W, H, Math.max(2, Math.round(Math.max(W, H) / 160))), out = new Uint8ClampedArray(n); let was = 0, now = 0;
+  for (let i = 0; i < n; i++) { const v = Math.round(A[i] * clamp(soft[i] * 2.5, 0, 1)); out[i] = v; if (A[i] > 100) { was++; if (v > 100) now++; } }
+  return was ? { A: out, cut: 1 - now / was } : null;
+}
 // 캐릭터가 여럿일 때: 사람 상자 + 뼈대 점으로 SAM에 한 명씩 물어서, 따낸 그림(A0)의 픽셀을 캐릭터마다 나눠요
 async function rgInstances(sh, A0, people, tk) {
   const { W, H } = sh, E = await rgSamEnc(sh, tk), { s, tw, th } = E, plane = tw * th, BODY = [0, 5, 6, 11, 12, 7, 8];
@@ -836,6 +867,11 @@ async function rgPrepare(src, sw, sh0, tk) {
     const nearB = dpBox(Float32Array.from(big.bin), W, H, 3), A = new Uint8ClampedArray(n); for (let i = 0; i < n; i++) A[i] = nearB[i] > 0.01 ? A0[i] : 0;
     const box = rgBBox(A, W, H, 100); tk && tk.set('뼈대를 찾는 중…', 0.3);
     people = [{ A, box, K: await soft(() => rgPoseRun(c, W, H, box, tk), null) }]; stopQ();
+    // 침대·베개·옆의 물건이 같이 따졌으면 뼈대 기준으로 몸만 남겨요 (덜어 낸 것은 배경에 그대로 있어요)
+    tk && tk.set('몸만 남기는 중…', 0.36);
+    const P0 = people[0], R = P0.K ? await soft(() => rgBodyOnly(sh, P0.A, P0.K, tk), null) : null; stopQ();
+    sh.cutTried = R ? R.cut : null;
+    if (R && R.cut >= 0.12 && R.cut <= 0.8) { const b2 = rgBBox(R.A, W, H, 100); if (b2) { P0.A = R.A; P0.box = b2; sh.trim = Math.round(R.cut * 100); } }
   }
   tk && tk.set('캐릭터 뒤 배경을 메우는 중…', 0.45);
   const m = new Float32Array(n); for (const P of people) for (let i = 0; i < n; i++) if (P.A[i] > m[i] * 255) m[i] = P.A[i] / 255;
@@ -855,7 +891,8 @@ async function rgPrepare(src, sw, sh0, tk) {
   }
   // 왼쪽부터 번호를 붙여요
   [...chars].sort((a, b) => a.joints.chest.x - b.joints.chest.x).forEach((r, i) => { r.cname = '캐릭터 ' + (i + 1); });
-  const main = chars[0]; main.more = chars.slice(1); main.autoParts = [];
+  const main = chars[0]; main.more = chars.slice(1); main.autoParts = []; main.trim = sh.trim || 0;
+  if (typeof window !== 'undefined' && window.__potato) window.__potato.rigLast = { main, cut: sh.cutTried }; // 시험에서 따낸 결과를 보려고
   for (const r of chars) { const made = await soft(() => rgAutoParts(r, tk, chars), []); stopQ(); for (const L of made) main.autoParts.push((chars.length > 1 ? r.cname + ' ' : '') + L.name); }
   tk && tk.set('그물을 씌우는 중…', 0.95);
   for (const r of chars) for (const L of r.layers) rgBuildLayer(r, L);
@@ -1685,6 +1722,7 @@ function rgWindow(main, from) {
   const nC = chars().length, noSk = chars().filter(c => c.autoSk === false);
   if (nC > 1) toast(`캐릭터 ${nC}명을 따로 나눴어요. 그림에서 캐릭터를 누르면 그 캐릭터를 움직일 수 있어요.${noSk.length ? ' ' + noSk.map(c => c.cname).join(', ') + '은(는) 뼈대를 찾지 못했으니 ① 뼈대 맞추기에서 맞춰 주세요.' : ''}`, 6500);
   else if (rig.autoSk === false) toast(rig.stdOff ? 'AI가 사람 모양 뼈대를 찾지 못했어요. ① 뼈대 맞추기의 \'내 뼈\'에서 움직일 곳(손·팔·다리·목 등)에만 뼈를 넣어 주세요.' : 'AI가 뼈대를 찾지 못했어요. ① 뼈대 맞추기에서 관절을 그림에 맞춰 주세요.', 6500);
+  else if (main.trim) { toast(`캐릭터와 같이 따진 배경(침대·베개·옆의 것 등)을 뼈대 기준으로 덜어 냈어요. 몸이 같이 잘렸으면 ② 부위 나누기의 붓으로 다시 칠해 넣을 수 있어요.`, 6500); main.trim = 0; }
   else if (main.autoParts && main.autoParts.length) toast(`몸 앞에 겹친 ${main.autoParts.join(', ')}은(는) 따로 움직이게 떼어 놨어요. (② 부위 나누기에서 다시 합칠 수 있어요)`, 5600);
   else if ((rig.conf || 0) < 0.45) toast('뼈대가 조금 어긋났을 수 있어요. ① 뼈대 맞추기에서 확인해 보세요.', 4600);
   main.autoParts = null;
