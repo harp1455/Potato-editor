@@ -4,7 +4,7 @@
   "description": "감자 편집기 2.0",
   "scripts": {
     "build": "node build.mjs",
-    "test": "python3 -I tests/smoke.py && python3 -I tests/bin.py && python3 -I tests/edit.py && python3 -I tests/gemini.py && python3 -I tests/encode.py && python3 -I tests/video.py && python3 -I tests/cut.py && python3 -I tests/bubble.py && python3 -I tests/link.py"
+    "test": "python3 -I tests/smoke.py && python3 -I tests/bin.py && python3 -I tests/edit.py && python3 -I tests/gemini.py && python3 -I tests/encode.py && python3 -I tests/video.py && python3 -I tests/cut.py && python3 -I tests/cut8.py && python3 -I tests/bubble.py && python3 -I tests/link.py"
   },
   "devDependencies": {
     "acorn": "^8.19.0",

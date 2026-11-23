@@ -85,19 +85,21 @@ const target = (el, fid) => {
   return el;
 };
 
+// 두 번 누르면: 컷 작업실에서는 페이지에 놓고(고른 컷이 있으면 그 컷에), 그 밖에서는 그림판에 올려요
+const place = id => (settings.get('room') === 'cut' ? import('../rooms/cut.js').then(c => c.placeInCut(id)) : placeMedia(id));
 function mediaEl(m, siblings) {
   const on = picked.has(m.id);
   return h('button.media' + (on ? '.on' : ''), {
     draggable: 'true', 'data-id': m.id, 'aria-pressed': String(on), title: `${m.name}\n${m.w} × ${m.h}` + (m.meta ? '\nNAI 정보가 들어 있어요' : ''),
     onclick: e => {
       const twice = lastClick.id === m.id && Date.now() - lastClick.t < 450; lastClick = { id: m.id, t: Date.now() };
-      if (twice) return placeMedia(m.id);
+      if (twice) return place(m.id);
       if (e.shiftKey && anchor && siblings.some(s => s.id === anchor)) { const a = siblings.findIndex(s => s.id === anchor), b = siblings.indexOf(m); siblings.slice(Math.min(a, b), Math.max(a, b) + 1).forEach(s => picked.add(s.id)); }
       else if (e.ctrlKey || e.metaKey) { on ? picked.delete(m.id) : picked.add(m.id); anchor = m.id; }
       else { picked.clear(); picked.add(m.id); anchor = m.id; }
       emit();
     },
-    onkeydown: e => { if (e.key === 'Enter') placeMedia(m.id); if (e.key === 'Delete') removeAsk(picked.has(m.id) ? [...picked] : [m.id]); },
+    onkeydown: e => { if (e.key === 'Enter') place(m.id); if (e.key === 'Delete') removeAsk(picked.has(m.id) ? [...picked] : [m.id]); },
     ondragstart: e => {
       const ids = picked.has(m.id) ? [...picked] : [m.id];
       e.dataTransfer.setData(MEDIA, m.id); e.dataTransfer.setData(MEDIAS, JSON.stringify(ids)); e.dataTransfer.effectAllowed = 'copyMove';

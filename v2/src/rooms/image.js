@@ -578,5 +578,5 @@ export function registerImageCmds() {
   addCmd({ id: 'layer.delete', title: '레이어 지우기', menu: '레이어', group: 'del', keys: 'Delete', enabled: hasLayer, run: () => { const c = canvasOf(); c.layers = c.layers.filter(l => l.id !== state.project.sel); state.project.sel = null; commit('레이어 지우기'); } });
   addEventListener('keydown', e => { if (e.code === 'Space' && !e.repeat && !/^(INPUT|TEXTAREA|SELECT|BUTTON)$/.test(e.target.tagName)) { view.space = true; if (cv) cv.dataset.tool = 'hand'; e.preventDefault(); } });
   addEventListener('keyup', e => { if (e.code === 'Space') { view.space = false; if (cv) cv.dataset.tool = view.tool; } });
-  addEventListener('paste', e => { const fs = [...(e.clipboardData || {}).files || []]; if (fs.length && !/^(INPUT|TEXTAREA)$/.test(e.target.tagName)) importFiles(fs, { toCanvas: true }); });
+  addEventListener('paste', e => { const fs = [...(e.clipboardData || {}).files || []]; if (!fs.length || /^(INPUT|TEXTAREA)$/.test(e.target.tagName)) return; if (settings.get('room') === 'cut') import('./cut.js').then(c => c.placeFiles(fs)); else importFiles(fs, { toCanvas: true }); });   // 컷 작업실에서는 붙여넣은 그림이 곧바로 컷이 돼요
 }

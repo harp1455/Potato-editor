@@ -11,7 +11,7 @@ import { generate } from '../api/gemini.js';
 import { dialog, toast, busy, showMenu, askText } from '../ui/overlay.js';
 import { SHAPES, LINES, TAILS, PRESETS, drawBubbles, inBubble, insetOf } from '../core/bubble.js';
 
-const SIZES = [[800, 1280, '웹툰 한 화면 (800 × 1280)'], [1080, 1920, '세로 (1080 × 1920)'], [1600, 2260, '만화 원고 (1600 × 2260)'], [1920, 1080, '가로 (1920 × 1080)'], [1080, 1080, '정사각형 (1080 × 1080)']];
+const SIZES = [[800, 4000, '웹툰 세로 스크롤 (800 × 4000)'], [800, 1280, '웹툰 한 화면 (800 × 1280)'], [1000, 1414, '만화 페이지 (1000 × 1414)'], [1080, 1350, '인스타툰 세로 (1080 × 1350)'], [1080, 1920, '세로 (1080 × 1920)'], [1600, 2260, '만화 원고 (1600 × 2260)'], [1920, 1080, '가로 (1920 × 1080)'], [1080, 1080, '정사각형 (1080 × 1080)']];
 const LAYOUTS = [['1', '한 컷', [[0, 0, 1, 1]]], ['2', '위아래 2컷', [[0, 0, 1, .5], [0, .5, 1, .5]]], ['3', '위아래 3컷', [[0, 0, 1, 1 / 3], [0, 1 / 3, 1, 1 / 3], [0, 2 / 3, 1, 1 / 3]]], ['4', '4컷 (2 × 2)', [[0, 0, .5, .5], [.5, 0, .5, .5], [0, .5, .5, .5], [.5, .5, .5, .5]]], ['t', '위 큰 컷 + 아래 2컷', [[0, 0, 1, .6], [0, .6, .5, .4], [.5, .6, .5, .4]]]];
 const FONTS = [['', '기본 (고딕)'], ['"Pretendard", "Noto Sans KR", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif', '또렷한 고딕'], ['"NanumSquareRound", "나눔스퀘어라운드", "Nanum Gothic", "Malgun Gothic", sans-serif', '둥근 고딕'], ['"Batang", "Nanum Myeongjo", "Noto Serif KR", serif', '명조'], ['"Gungsuh", serif', '궁서'], ['"Nanum Pen Script", "나눔손글씨 펜", "Comic Sans MS", cursive', '손글씨 (펜)'], ['"Nanum Brush Script", "나눔손글씨 붓", "Gungsuh", cursive', '손글씨 (붓)']];
 // 내 컴퓨터 글꼴: 브라우저가 허락하면 깔려 있는 글꼴 이름을 받아 와서 목록에 더해요 (이름만 기억해요)
@@ -147,9 +147,9 @@ export function renderPage(g, pg) {
     const grp = joined(pg, e); grp.forEach(o => done.add(o.id)); drawBubbles(g, grp); grp.forEach(o => bubbleText(g, o));
   }
 }
-async function pageCanvas(pg) {
+async function pageCanvas(pg, k = 1) {
   await Promise.all(pg.els.filter(e => e.mediaId).map(e => ensureBitmap(e.mediaId)));
-  const c = document.createElement('canvas'); c.width = pg.w; c.height = pg.h; renderPage(c.getContext('2d'), pg); return c;
+  const c = document.createElement('canvas'); c.width = Math.round(pg.w * k); c.height = Math.round(pg.h * k); const g = c.getContext('2d'); g.scale(k, k); renderPage(g, pg); return c;
 }
 function fit() { const pg = pageOf(); if (!pg || !wrap) return; const W = wrap.clientWidth, H = wrap.clientHeight; V.zoom = clamp(Math.min((W - 48) / pg.w, (H - 48) / pg.h), 0.02, 16); V.ox = (W - pg.w * V.zoom) / 2; V.oy = (H - pg.h * V.zoom) / 2; V.fitted = pg.id; draw(); }
 function draw() {
@@ -245,6 +245,96 @@ export async function translateImage(pg, lang) {
   return made;
 }
 
+// ---- 놓기·고르기·정렬 (8.x에서 한 번에 되던 것들) ----
+const viewCenter = () => (wrap ? toPage(wrap.clientWidth / 2, wrap.clientHeight / 2) : { x: 0, y: 0 });
+const contentBottom = pg => Math.max(0, ...pg.els.map(e => e.y + e.h));
+const setSel = ids => { V.sel = ids.length ? ids.at(-1) : null; V.more = ids.length > 1 ? { anchor: V.sel, ids: new Set(ids.slice(0, -1)) } : null; };
+const mediaOf = id => state.project.media.find(m => m.id === id);
+// 그림으로 새 컷: 그림 비율 그대로, 페이지 폭에 넉넉히 들어가게
+function newImagePanel(pg, id, at) {
+  const m = mediaOf(id); if (!m) return null; const mg = Math.round(pg.w * 0.04), w = Math.min(pg.w - 2 * mg, Math.max(160, Math.round(pg.w * 0.7))), hh = Math.round(w * m.h / m.w), c = at || viewCenter();
+  const n = { id: uid('e'), type: 'panel', x: Math.round(clamp(c.x - w / 2, 0, Math.max(0, pg.w - w))), y: Math.round(Math.max(0, c.y - hh / 2)), w, h: hh, mediaId: id, ix: 0, iy: 0, is: 1, bw: 4, bc: '#111111' };
+  pg.els.push(n); ensureBitmap(id); return n;
+}
+// 보관함 그림 놓기: 컷을 골라 뒀으면 그 컷에 담고, 아니면 화면 가운데에 새 컷으로
+export function placeInCut(ids) {
+  const pg = pageOf(); if (!pg) { toast('먼저 페이지를 만들어 주세요.'); return false; } const e = elOf(), list = [].concat(ids).filter(mediaOf); if (!list.length) return false;
+  if (list.length === 1 && e && e.type === 'panel') { Object.assign(e, { mediaId: list[0], ix: 0, iy: 0, is: 1 }); ensureBitmap(list[0]); commit('컷에 그림 담기'); return true; }
+  const c = viewCenter(), made = list.map((id, i) => newImagePanel(pg, id, { x: c.x + i * 24, y: c.y + i * 24 })).filter(Boolean); setSel(made.map(n => n.id)); commit('그림으로 컷 만들기'); return true;
+}
+// 컴퓨터의 그림 파일을 보관함에 넣고 곧바로 페이지에 놓아요 (끌어다 놓기·붙여넣기)
+export async function placeFiles(files, at) {
+  const pg = pageOf(), fs = [...files].filter(f => /^image\//.test(f.type)); if (!pg || !fs.length) return 0; const { hasMeta } = await import('../core/files.js'), made = [];
+  for (const [i, f] of fs.slice(0, 20).entries()) { try { const m = await addMedia(f, null, { meta: await hasMeta(f) }), c = at || viewCenter(), n = newImagePanel(pg, m.id, { x: c.x + i * 24, y: c.y + i * 24 }); if (n) made.push(n.id); } catch (_) { /* 그림이 아니면 건너뜀 */ } }
+  if (made.length) { setSel(made); commit('그림으로 컷 만들기'); } else toast('그림 파일(PNG, JPG, WebP 등)만 넣을 수 있어요.', 'err');
+  return made.length;
+}
+// 정렬: 여럿이면 서로에게, 하나면 페이지에 맞춰요
+function alignSel(how) {
+  const pg = pageOf(), g = group(); if (!g.length) return; const one = g.length === 1, x0 = one ? 0 : Math.min(...g.map(e => e.x)), x1 = one ? pg.w : Math.max(...g.map(e => e.x + e.w)), y0 = one ? 0 : Math.min(...g.map(e => e.y)), y1 = one ? pg.h : Math.max(...g.map(e => e.y + e.h));
+  for (const e of g) { const ox = e.x, oy = e.y; if (how === 'l') e.x = x0; else if (how === 'r') e.x = x1 - e.w; else if (how === 'cx') e.x = Math.round((x0 + x1 - e.w) / 2); else if (how === 't') e.y = y0; else if (how === 'b') e.y = y1 - e.h; else if (how === 'cy') e.y = Math.round((y0 + y1 - e.h) / 2); if (isB(e)) { e.tx += e.x - ox; e.ty += e.y - oy; } }
+  commit('정렬');
+}
+function distributeSel(ax) {
+  const g = [...group()]; if (g.length < 3) return; const k = ax === 'x' ? 'x' : 'y', s = ax === 'x' ? 'w' : 'h'; g.sort((a, b) => a[k] - b[k]);
+  const total = g.reduce((v, e) => v + e[s], 0), gap = (g.at(-1)[k] + g.at(-1)[s] - g[0][k] - total) / (g.length - 1); let at = g[0][k];
+  for (const e of g) { const o = e[k]; e[k] = Math.round(at); at += e[s] + gap; if (isB(e)) { if (ax === 'x') e.tx += e[k] - o; else e.ty += e[k] - o; } }
+  commit('간격 똑같이');
+}
+// 세로로 자동 배치(웹툰): 그림들을 페이지 폭에 맞춰 위에서 아래로 쌓고, 모자라면 페이지를 아래로 늘려요
+function stackDialog() {
+  const pg = pageOf(), ms = (picked.size ? [...picked].map(mediaOf).filter(Boolean) : state.project.media.filter(m => !m.hidden)); if (!pg) return; if (!ms.length) { toast('보관함에 그림이 없어요.'); return; }
+  const O = { m: Math.round(pg.w * 0.04), gap: Math.round(pg.w * 0.05), bw: 4, cont: pg.els.length > 0, ...(settings.get('cutStack') || {}) };
+  const numF = (label, k, max) => h('label.field', null, h('span.field-name.w', null, label), h('input.num', { type: 'number', min: 0, max, value: O[k], 'aria-label': label, onchange: ev => { O[k] = clamp(parseFloat(ev.target.value) || 0, 0, max); } }));
+  dialog({ title: '세로로 자동 배치', body: h('div.vid-form', null, h('p.dlg-text', null, `${picked.size ? '보관함에서 고른' : '보관함의'} 그림 ${ms.length}장을 페이지 폭에 맞춰 위에서 아래로 쌓아요. 페이지가 모자라면 아래로 늘어나요.`),
+    h('div.field-row', null, numF('옆 여백', 'm', 400), numF('컷 사이 간격', 'gap', 2000)), h('div.field-row', null, numF('테두리', 'bw', 40), h('label.check', null, h('input', { type: 'checkbox', checked: O.cont, onchange: ev => { O.cont = ev.target.checked; } }), '지금 내용 아래에 이어서'))),
+    buttons: [{ label: '취소' }, { label: '배치하기', primary: true, run: () => {
+      settings.set('cutStack', { m: O.m, gap: O.gap, bw: O.bw }); if (!O.cont) pg.els = []; let y = O.cont && pg.els.length ? contentBottom(pg) + O.gap : O.m; const w = pg.w - 2 * O.m, made = [];
+      for (const m of ms) { const hh = Math.round(w * m.h / m.w), n = { id: uid('e'), type: 'panel', x: O.m, y, w, h: hh, mediaId: m.id, ix: 0, iy: 0, is: 1, bw: O.bw, bc: '#111111' }; pg.els.push(n); made.push(n.id); ensureBitmap(m.id); y += hh + O.gap; }
+      pg.h = Math.max(pg.h, y - O.gap + O.m); setSel([]); V.fitted = null; commit('세로로 자동 배치'); toast(`그림 ${ms.length}장을 쌓았어요. 페이지는 ${pg.w} × ${pg.h}이 됐어요.`);
+    } }] });
+}
+// 내보내기 창: 어느 페이지를, 어떤 파일로, 몇 배로, 얼마마다 잘라서
+function exportDialog() {
+  const pg = pageOf(); if (!pg) return; const O = { scope: 'page', fmt: 'png', k: 1, cut: 0, ...(settings.get('cutExport') || {}) }, box = h('div.vid-form');
+  const sel = (label, k, opts, num) => h('label.field', null, h('span.field-name.w', null, label), h('select.text', { 'aria-label': label, onchange: ev => { O[k] = num ? +ev.target.value : ev.target.value; } }, opts.map(([v, t]) => h('option', { value: v, selected: String(O[k]) === String(v) }, t))));
+  box.append(h('div.field-row', null, sel('내보낼 것', 'scope', [['page', '이 페이지'], ['all', `모든 페이지 (${pages().length}쪽)`]]), sel('파일', 'fmt', [['png', 'PNG (가장 깨끗함)'], ['jpeg', 'JPG (작은 용량)'], ['webp', 'WebP']])),
+    h('div.field-row', null, sel('크기', 'k', [[1, '그대로'], [2, '2배'], [0.5, '절반']], true), h('label.field', { title: '웹툰처럼 긴 페이지를 올리기 좋게 세로로 잘라 여러 장으로 저장해요. 0이면 자르지 않아요.' }, h('span.field-name.w', null, '세로로 자르기'), h('input.num', { type: 'number', min: 0, step: 100, value: O.cut, 'aria-label': '세로로 자르기', onchange: ev => { O.cut = Math.max(0, Math.round(parseFloat(ev.target.value) || 0)); } }))),
+    h('p.dlg-text', null, '세로로 자르기에 1280처럼 적으면 그 높이마다 잘라 차례로 번호를 붙여요. 여러 장이면 폴더나 ZIP으로 저장돼요.'));
+  dialog({ title: '내보내기', body: box, buttons: [{ label: '취소' }, { label: '내보내기', primary: true, run: () => { settings.set('cutExport', O); (async () => {
+    const b = busy('페이지를 그리는 중이에요.'), files = [], list = O.scope === 'all' ? pages() : [pg], ext = O.fmt === 'jpeg' ? 'jpg' : O.fmt, blobOf = c => new Promise(r => c.toBlob(r, 'image/' + O.fmt, 0.92));
+    try {
+      for (const [i, p] of list.entries()) {
+        const c = await pageCanvas(p, O.k), base = (list.length > 1 ? String(i + 1).padStart(3, '0') + ' ' : '') + p.name, step = O.cut ? Math.round(O.cut * O.k) : 0;
+        if (!step || c.height <= step) files.push({ name: `${base}.${ext}`, blob: await blobOf(c) });
+        else for (let y = 0, n = 1; y < c.height; y += step, n++) { const t = document.createElement('canvas'); t.width = c.width; t.height = Math.min(step, c.height - y); t.getContext('2d').drawImage(c, 0, -y); files.push({ name: `${base}-${String(n).padStart(2, '0')}.${ext}`, blob: await blobOf(t) }); }
+        b.set(`페이지를 그리는 중이에요. ${i + 1} / ${list.length}`);
+      }
+      if (files.some(f => !f.blob)) throw new Error('그림이 너무 커서 만들지 못했어요. 크기를 줄이거나 세로로 잘라 주세요.');
+      b.done('');
+      if (files.length === 1) { if (await download(files[0].blob, files[0].name)) toast(`'${files[0].name}'로 저장했어요.`); }
+      else if (await saveFiles(files, state.project.name + ' 페이지.zip')) toast(`그림 ${files.length}장을 저장했어요.`);
+    } catch (e) { b.done(e.message || '내보내지 못했어요.', 'err'); }
+  })(); } }] });
+}
+// 컷 모양대로 나누기(지금 페이지에): 빈 컷은 지우고, 내용이 있으면 그 아래에 이어서 놓아요
+function applyLayout(key) {
+  const pg = pageOf(); if (!pg) return; const L = (LAYOUTS.find(l => l[0] === key) || LAYOUTS[0])[2], m = Math.round(Math.min(pg.w, 1600) * 0.04), gap = Math.round(m * 0.6);
+  pg.els = pg.els.filter(e => !(e.type === 'panel' && !e.mediaId)); const top = pg.els.length ? contentBottom(pg) + gap : m, area = Math.min(pg.h - 2 * m, Math.round((pg.w - 2 * m) * 1.5)), made = [];
+  for (const [fx, fy, fw, fh] of L) { const n = { id: uid('e'), type: 'panel', x: Math.round(m + fx * (pg.w - 2 * m) + (fx ? gap / 2 : 0)), y: Math.round(top + fy * area + (fy ? gap / 2 : 0)), w: Math.round(fw * (pg.w - 2 * m) - (fx ? gap / 2 : 0) - (fx + fw < 1 ? gap / 2 : 0)), h: Math.round(fh * area - (fy ? gap / 2 : 0) - (fy + fh < 1 ? gap / 2 : 0)), mediaId: null, ix: 0, iy: 0, is: 1, bw: 4, bc: '#111111' }; pg.els.push(n); made.push(n.id); }
+  pg.h = Math.max(pg.h, top + area + m); setSel([]); commit('컷 모양대로 나누기');
+}
+// 화면 가운데에 곧바로 넣기 (위쪽 줄의 단추)
+function addAtCenter(kind) {
+  const pg = pageOf(); if (!pg) return; const c = viewCenter(); let n;
+  if (kind === 'panel') { const w = Math.round(pg.w * 0.6), hh = Math.round(w * 0.7); n = { id: uid('e'), type: 'panel', x: Math.round(c.x - w / 2), y: Math.round(c.y - hh / 2), w, h: hh, mediaId: null, ix: 0, iy: 0, is: 1, bw: 4, bc: '#111111' }; }
+  else if (kind === 'bubble') { const w = Math.round(pg.w * 0.3), hh = Math.round(w * 0.58); n = newBubble(pg, { x: c.x - w / 2, y: c.y - hh / 2, w, h: hh }); }
+  else n = { id: uid('e'), type: 'text', x: Math.round(c.x - 60), y: Math.round(c.y - 20), w: 120, h: 40, text: '글자', size: Math.round(pg.w / 22), color: '#111111', sw: 3, sc: '#ffffff', bold: true };
+  pg.els.push(n); V.sel = n.id; V.more = null; V.tool = 'pick'; commit({ panel: '컷 만들기', bubble: '말풍선 넣기', text: '글자 넣기' }[kind]);
+  if (kind !== 'panel') setTimeout(editInPlace, 30);
+}
+const zoomBy = f => { if (!wrap || !pageOf()) return; const W = wrap.clientWidth, H = wrap.clientHeight, p = toPage(W / 2, H / 2), z = clamp(V.zoom * f, 0.02, 16); V.zoom = z; V.ox = W / 2 - p.x * z; V.oy = H / 2 - p.y * z; draw(); emit(); };
+
 // ---- 말풍선 다루기 ----
 const isB = e => !!e && e.type === 'bubble';
 const syncLook = e => { if (isB(e) && e.join) for (const o of joined(pageOf(), e)) if (o !== e) LOOK.forEach(k => { o[k] = e[k]; }); };
@@ -292,11 +382,13 @@ export const cutRoom = {
     const empty = h('div.empty-room', null, h('h2', null, '페이지를 만들어 시작해요'), h('p', null, '컷을 나눈 페이지를 만들고, 보관함의 그림을 컷 위로 끌어다 놓아요. 그 위에 말풍선과 글자를 얹어요.'),
       h('div.btn-row', null, LAYOUTS.map(([k, t]) => h('button.btn', { onclick: () => { newPage(800, 1280, k); commit('새 페이지'); } }, t))));
     wrap = h('div.viewport-wrap', null, cv, empty);
-    el.append(tools, h('div.vid-room', null, h('div.vid-top', null, wrap, side), strip));
+    const bar = h('div.optbar.cut-bar', { role: 'toolbar', 'aria-label': '넣기와 보기' });
+    el.append(tools, h('div.vid-room', null, bar, h('div.vid-top', null, wrap, side), strip));
     const ro = new ResizeObserver(() => { if (V.fitted !== (pageOf() || {}).id) fit(); else draw(); }); ro.observe(wrap);
     cv.addEventListener('wheel', e => {
       e.preventDefault(); const r = cv.getBoundingClientRect(), sx = e.clientX - r.left, sy = e.clientY - r.top, pg = pageOf(), p = toPage(sx, sy), t = pg && e.altKey ? hit(pg, p) : null;
       if (t && t.type === 'panel' && t.mediaId) { t.is = clamp((t.is || 1) * Math.exp(-e.deltaY * 0.0015), 1, 8); draw(); clearTimeout(V.wt); V.wt = setTimeout(() => commit('컷 안 그림 크기'), 400); return; }
+      if (!(e.ctrlKey || e.metaKey)) { if (e.shiftKey) V.ox -= e.deltaY || e.deltaX; else { V.oy -= e.deltaY; V.ox -= e.deltaX; } draw(); return; }   // 긴 페이지는 휠로 내려요. Ctrl+휠이 확대예요
       const z = clamp(V.zoom * Math.exp(-e.deltaY * 0.0015), 0.02, 16); V.zoom = z; V.ox = sx - p.x * z; V.oy = sy - p.y * z; draw(); tick();
     }, { passive: false });
     cv.addEventListener('pointerdown', e => {
@@ -327,24 +419,43 @@ export const cutRoom = {
         ids.delete(V.sel); V.more = { anchor: V.sel, ids }; emit(); return;
       }
       const inGroup = t && group().length > 1 && group().includes(t);
-      if (!inGroup && V.sel !== (t ? t.id : null)) { V.sel = t ? t.id : null; emit(); } if (!t) return;
+      if (!inGroup && V.sel !== (t ? t.id : null)) { V.sel = t ? t.id : null; emit(); }
+      if (!t) { V.draft = { x: p.x, y: p.y, w: 0, h: 0 }; return drag(e, ev => { const q = at(ev); Object.assign(V.draft, { x: Math.min(p.x, q.x), y: Math.min(p.y, q.y), w: Math.abs(q.x - p.x), h: Math.abs(q.y - p.y) }); draw(); }, () => { const d = V.draft; V.draft = null; if (d.w > 4 || d.h > 4) { setSel(pg.els.filter(o => o.x < d.x + d.w && o.x + o.w > d.x && o.y < d.y + d.h && o.y + o.h > d.y).map(o => o.id)); emit(); } else draw(); }); }   // 빈 곳을 끌면 걸친 요소를 모두 골라요
       if (inGroup) { const g0 = group().map(x => ({ x, x0: x.x, y0: x.y, tx0: x.tx, ty0: x.ty })); let mv = false; return drag(e, ev => { const dx = Math.round((ev.clientX - e.clientX) / V.zoom), dy = Math.round((ev.clientY - e.clientY) / V.zoom); if (dx || dy) mv = true; for (const o of g0) { o.x.x = o.x0 + dx; o.x.y = o.y0 + dy; if (o.x.type === 'bubble') { o.x.tx = o.tx0 + dx; o.x.ty = o.ty0 + dy; } } draw(); }, () => mv && commit('함께 옮기기')); }
       if (e.altKey && t.type === 'panel' && t.mediaId) { const ix = t.ix || 0, iy = t.iy || 0; let mv = false; return drag(e, ev => { t.ix = ix + (ev.clientX - e.clientX) / V.zoom; t.iy = iy + (ev.clientY - e.clientY) / V.zoom; mv = true; draw(); }, () => mv && commit('컷 안 그림 옮기기')); }
       const x0 = t.x, y0 = t.y, tx0 = t.tx, ty0 = t.ty; let mv = false;
       drag(e, ev => { let dx = Math.round((ev.clientX - e.clientX) / V.zoom), dy = Math.round((ev.clientY - e.clientY) / V.zoom); if (dx || dy) mv = true; if (!ev.altKey && !t.rot) { const q = snapEl(pg, t, x0 + dx, y0 + dy); dx = q.x - x0; dy = q.y - y0; } t.x = x0 + dx; t.y = y0 + dy; if (t.type === 'bubble') { t.tx = tx0 + dx; t.ty = ty0 + dy; } draw(); }, () => mv && commit('옮기기'));
     });
     cv.addEventListener('dblclick', () => editInPlace());
-    cv.addEventListener('contextmenu', e => { e.preventDefault(); if (!elOf()) return; const e0 = elOf(), txt = e0.type === 'bubble' || e0.type === 'text'; showMenu([...(txt ? [{ label: '대사 고치기', run: () => editInPlace() }] : []), ...(isB(e0) ? [{ label: '글자에 맞추기', run: () => run('cut.fitText') }, { label: '이어 붙이기', disabled: group().filter(isB).length < 2, run: () => run('cut.join') }, { label: '떼어 내기', disabled: !e0.join, run: () => run('cut.unjoin') }, '-'] : []), { label: '맨 앞으로', run: () => run('cut.front') }, { label: '맨 뒤로', run: () => run('cut.back') }, { label: '복제', run: () => run('cut.dup') }, '-', { label: '지우기', run: () => run('cut.delete') }], e.clientX, e.clientY); });
+    cv.addEventListener('contextmenu', e => { e.preventDefault(); if (!pageOf()) return; if (!elOf()) { showMenu([{ label: '붙여넣기', disabled: !clip.length, run: () => run('cut.paste') }, '-', { label: '여기에 말풍선 넣기', run: () => addAtCenter('bubble') }, { label: '여기에 글자 넣기', run: () => addAtCenter('text') }, { label: '여기에 컷 넣기', run: () => addAtCenter('panel') }, '-', { label: '모두 고르기', run: () => run('cut.selectAll') }, { label: '화면에 맞추기', run: () => { V.fitted = null; emit(); } }], e.clientX, e.clientY); return; } const e0 = elOf(), txt = e0.type === 'bubble' || e0.type === 'text'; showMenu([...(txt ? [{ label: '대사 고치기', run: () => editInPlace() }] : []), ...(isB(e0) ? [{ label: '글자에 맞추기', run: () => run('cut.fitText') }, { label: '이어 붙이기', disabled: group().filter(isB).length < 2, run: () => run('cut.join') }, { label: '떼어 내기', disabled: !e0.join, run: () => run('cut.unjoin') }, '-'] : []), { label: '맨 앞으로', run: () => run('cut.front') }, { label: '앞으로', run: () => run('cut.forward') }, { label: '뒤로', run: () => run('cut.backward') }, { label: '맨 뒤로', run: () => run('cut.back') }, '-', { label: '잘라내기', run: () => run('cut.cutEl') }, { label: '복사', run: () => run('cut.copy') }, { label: '복제', run: () => run('cut.dup') }, '-', { label: '지우기', run: () => run('cut.delete') }], e.clientX, e.clientY); });
     wrap.addEventListener('dragover', e => e.preventDefault());
     wrap.addEventListener('drop', e => {
-      e.preventDefault(); const id = e.dataTransfer.getData('application/x-potato-media'), pg = pageOf(); if (!id || !pg) return;
-      const r = cv.getBoundingClientRect(), p = toPage(e.clientX - r.left, e.clientY - r.top), t = [...pg.els].reverse().find(x => x.type === 'panel' && p.x >= x.x && p.y >= x.y && p.x <= x.x + x.w && p.y <= x.y + x.h);
-      if (!t) { toast('그림을 컷 위에 놓아 주세요. 컷이 없으면 컷 만들기 도구로 먼저 만들어요.'); return; }
-      t.mediaId = id; t.ix = 0; t.iy = 0; t.is = 1; ensureBitmap(id); V.sel = t.id; commit('컷에 그림 담기');
+      e.preventDefault(); const pg = pageOf(); if (!pg) return; const r = cv.getBoundingClientRect(), p = toPage(e.clientX - r.left, e.clientY - r.top);
+      if (e.dataTransfer.files && e.dataTransfer.files.length) { placeFiles(e.dataTransfer.files, p); return; }   // 컴퓨터의 그림 파일
+      const id = e.dataTransfer.getData('application/x-potato-media'); if (!id) return; let ids = [id]; try { ids = JSON.parse(e.dataTransfer.getData('application/x-potato-medias')) || ids; } catch (_) { /* 한 장만 */ }
+      const t = ids.length === 1 && !e.shiftKey ? [...pg.els].reverse().find(x => x.type === 'panel' && p.x >= x.x && p.y >= x.y && p.x <= x.x + x.w && p.y <= x.y + x.h) : null;
+      if (t) { t.mediaId = id; t.ix = 0; t.iy = 0; t.is = 1; ensureBitmap(id); V.sel = t.id; commit('컷에 그림 담기'); return; }
+      // 빈 곳에 놓으면 그림 비율대로 새 컷이 생겨요 (여러 장이면 아래로 차례로)
+      let y = p.y; const made = []; for (const [i, mid] of ids.slice(0, 20).entries()) { const n = newImagePanel(pg, mid, { x: p.x, y }); if (!n) continue; if (i) n.y = Math.round(y); y = n.y + n.h + Math.round(pg.w * 0.04) + (i ? 0 : 0); made.push(n.id); y += 0; }
+      if (made.length) { setSel(made); commit('그림으로 컷 만들기'); }
     });
 
     const update = () => {
       const pg = pageOf(), e = elOf();
+      const tb = (label, title, fn, ic, cls = '') => h('button.btn.small' + cls, { title, onclick: fn }, ic ? icon(ic, 14) : null, label);
+      bar.hidden = !pg; bar.replaceChildren(
+        tb('컷', '화면 가운데에 빈 컷을 넣어요. 보관함 그림을 끌어다 놓으면 그림으로 컷이 생겨요.', () => addAtCenter('panel'), 'cut'),
+        tb('컷 나누기', '컷 모양을 골라 이 페이지에 넣거나, 고른 컷을 둘·셋·넷으로 나눠요.', ev => showMenu([{ head: '모양 골라서 넣기' }, ...LAYOUTS.map(([k, t]) => ({ label: t, run: () => applyLayout(k) })), '-', { head: '고른 컷 나누기' }, ...['cut.splitV', 'cut.splitH', 'cut.split3V', 'cut.split3H', 'cut.split4'].map(id => ({ label: { 'cut.splitV': '좌우 둘로', 'cut.splitH': '위아래 둘로', 'cut.split3V': '좌우 셋으로', 'cut.split3H': '위아래 셋으로', 'cut.split4': '넷으로' }[id], disabled: !(e && e.type === 'panel'), run: () => run(id) }))], ev.clientX, ev.clientY + 14)),
+        tb('말풍선', '화면 가운데에 말풍선을 넣고 바로 대사를 적어요. 종류는 오른쪽 견본에서 골라요.', () => addAtCenter('bubble'), 'bubble'),
+        tb('글자', '화면 가운데에 글자를 넣고 바로 적어요.', () => addAtCenter('text'), 'text'),
+        tb('효과음', '크고 기울어진 효과음 글자를 넣어요.', () => run('cut.sfx')),
+        tb('집중선', '끌어서 집중선을 넣는 도구로 바꿔요.', () => { V.tool = 'lines'; emit(); }, 'lines'),
+        h('span.tool-vsep'),
+        tb('세로로 자동 배치', '보관함 그림을 페이지 폭에 맞춰 위에서 아래로 쌓아요 (웹툰).', stackDialog),
+        h('span.grow'),
+        h('label.check', { title: '옮길 때 다른 요소와 페이지의 가장자리·가운데에 달라붙어요. Alt를 누르면 잠깐 꺼져요.' }, h('input', { type: 'checkbox', checked: settings.get('cutSnap') !== false, onchange: ev => settings.set('cutSnap', ev.target.checked) }), '자석'),
+        h('button.icon-btn', { title: '작게 (Ctrl+−)', 'aria-label': '작게', onclick: () => zoomBy(1 / 1.25) }, '−'), h('button.btn.small.zoom-pct', { title: '화면에 맞추기 (Ctrl+0)', onclick: () => { V.fitted = null; emit(); } }, Math.round(V.zoom * 100) + '%'), h('button.icon-btn', { title: '크게 (Ctrl++)', 'aria-label': '크게', onclick: () => zoomBy(1.25) }, '+'),
+        tb('내보내기', 'PNG·JPG·WebP로, 2배로, 긴 페이지는 세로로 잘라서 저장해요.', exportDialog, 'export', '.primary'));
       tools.replaceChildren(...TOOLS.map(([id, title, key, ic]) => h('button.tool' + (V.tool === id ? '.on' : ''), { title: `${title} (${key})`, 'aria-label': title, 'aria-pressed': String(V.tool === id), onclick: () => { V.tool = id; emit(); } }, icon(ic, 18))));
       empty.hidden = !!pg; cv.hidden = !pg;
       const num = (label, k, o = e, step = 1, lim = {}) => { const i = h('input.num', { type: 'number', value: Math.round((o[k] ?? lim.def ?? 0) * 100) / 100, step, min: lim.min, max: lim.max, 'aria-label': label, onchange: () => { const v = parseFloat(i.value); if (!isNaN(v)) { o[k] = clamp(v, lim.min ?? -1e6, lim.max ?? 1e6); syncLook(o); commit(label); } } }); return h('label.field', null, h('span.field-name.w', null, label), i); };
@@ -365,12 +476,15 @@ export const cutRoom = {
         h('h3.sec', null, '페이지'),
         h('label.field', null, h('span.field-name.w', null, '이름'), h('input.text', { type: 'text', value: pg.name, 'aria-label': '페이지 이름', onchange: ev => { pg.name = ev.target.value.trim() || pg.name; commit('페이지 이름'); } })),
         h('label.field', null, h('span.field-name.w', null, '크기'), h('select.text', { 'aria-label': '페이지 크기', onchange: ev => { const s = SIZES[+ev.target.value]; if (s) { pg.w = s[0]; pg.h = s[1]; V.fitted = null; commit('페이지 크기'); } } }, [h('option', { value: -1, selected: true }, `${pg.w} × ${pg.h}`), ...SIZES.map(([, , t], i) => h('option', { value: i }, t))])),
+        h('div.field-row', null, num('폭', 'w', pg, 10, { min: 64, max: 8000 }), num('높이', 'h', pg, 10, { min: 64, max: 60000 })),
         h('label.field', null, h('span.field-name.w', null, '바탕'), h('input', { type: 'color', value: pg.bg || '#ffffff', 'aria-label': '바탕색', onchange: ev => { pg.bg = ev.target.value; commit('바탕색'); } })),
+        h('div.btn-row', null, h('button.btn.small', { title: '웹툰처럼 아래로 이어 그릴 때 써요', onclick: () => { pg.h += 1000; commit('아래로 늘리기'); } }, '아래로 1000px 늘리기'), h('button.btn.small', { title: '맨 아래 요소 바로 밑까지만 남겨요', disabled: !pg.els.length, onclick: () => { pg.h = Math.max(64, Math.round(contentBottom(pg) + Math.min(pg.w, 1600) * 0.04)); V.fitted = null; commit('내용 끝에 맞춰 줄이기'); } }, '내용 끝에 맞춰 줄이기')),
+        h('div.btn-row', null, h('button.btn.small', { onclick: stackDialog }, '세로로 자동 배치…'), h('button.btn.small', { onclick: () => run('cut.auto'), disabled: !picked.size, title: '보관함에서 고른 그림 수만큼 컷을 나눈 새 페이지를 만들어요' }, '고른 그림으로 컷 채우기')),
         h('h3.sec', null, '내보내기와 번역'),
-        h('div.btn-row', null, h('button.btn.small', { onclick: () => run('cut.export') }, '이 페이지 PNG'), h('button.btn.small', { onclick: () => run('cut.exportAll') }, '모든 페이지 저장')),
+        h('div.btn-row', null, h('button.btn.small', { onclick: exportDialog }, '내보내기…'), h('button.btn.small', { onclick: () => run('cut.export') }, '이 페이지 PNG'), h('button.btn.small', { onclick: () => run('cut.exportAll') }, '모든 페이지 저장')),
         h('div.btn-row', null, h('button.btn.small', { onclick: () => run('cut.translate') }, '대사 번역…'), h('button.btn.small', { onclick: () => run('cut.sfx') }, '효과음 넣기')),
         h('h3.sec', null, '새 말풍선 종류'), gallery(),
-        h('p.panel-note', null, '종류를 고른 뒤 말풍선 도구(B)로 끌거나 눌러서 놓아요. 요소를 누르면 그 요소의 설정이 보여요. 보관함 그림은 컷 위로 끌어 담아요.'),
+        h('p.panel-note', null, '종류를 고른 뒤 말풍선 도구(B)로 끌거나 눌러서 놓아요. 요소를 누르면 그 요소의 설정이 보여요. 보관함 그림은 페이지 아무 데나 끌어다 놓으면 컷이 되고, 컷 위에 놓으면 그 컷에 담겨요. 보관함에서 두 번 눌러도 돼요.'),
       ] : [
         h('h3.sec', null, { panel: '컷', bubble: '말풍선', text: '글자', lines: '집중선', pic: '스티커' }[e.type]),
         ...(e.type === 'panel' ? [h('div.field-row', null, num('테두리', 'bw'), col('테두리색', 'bc', '#111111')), h('div.btn-row', null, h('button.btn.small', { disabled: !e.mediaId, onclick: () => { e.ix = 0; e.iy = 0; e.is = 1; commit('그림 가운데로'); } }, '그림 가운데로'), h('button.btn.small', { disabled: !e.mediaId, onclick: () => { e.mediaId = null; commit('그림 빼기'); } }, '그림 빼기')), h('p.panel-note', null, 'Alt를 누르고 끌면 컷 안의 그림이 움직이고, Alt를 누르고 휠을 돌리면 커져요.')] : []),
@@ -394,8 +508,11 @@ export const cutRoom = {
           h('div.btn-row', null, h('select.text', { 'aria-label': '모양 묶음', style: 'flex:1;width:auto', onchange: ev => { const st = styles().filter(x => x.type === e.type)[+ev.target.value]; if (st) { Object.assign(e, st.props); commit('모양 묶음 입히기'); } } }, [h('option', { value: -1, selected: true }, styles().some(x => x.type === e.type) ? '저장한 모양 고르기' : '저장한 모양이 없어요'), ...styles().filter(x => x.type === e.type).map((x, i) => h('option', { value: i }, x.name))]),
             h('button.btn.small', { title: '지금 이 요소의 글자 크기·색·테두리·모양을 이름 붙여 저장해요', onclick: async () => { const name = await askText('모양 묶음 이름', e.type === 'bubble' ? '기본 말풍선' : '기본 글자', '저장'); if (!name) return; const props = {}; STYLE_KEYS[e.type].forEach(k => { if (e[k] !== undefined) props[k] = e[k]; }); settings.set('cutStyles', [...styles().filter(x => !(x.type === e.type && x.name === name)), { name, type: e.type, props }]); emit(); toast(`'${name}' 모양을 저장했어요.`); } }, '지금 모양 저장'))] : []),
         h('h3.sec', null, '자리'),
+        h('div.btn-row', { role: 'group', 'aria-label': '정렬' }, [['l', '왼쪽'], ['cx', '가로 가운데'], ['r', '오른쪽'], ['t', '위'], ['cy', '세로 가운데'], ['b', '아래']].map(([k, t]) => h('button.btn.small', { title: group().length > 1 ? '고른 것들을 서로 ' + t + '에 맞춰요' : '페이지의 ' + t + '에 맞춰요', onclick: () => alignSel(k) }, t))),
+        group().length > 2 && h('div.btn-row', null, h('button.btn.small', { onclick: () => distributeSel('x') }, '가로 간격 똑같이'), h('button.btn.small', { onclick: () => distributeSel('y') }, '세로 간격 똑같이')),
+        e.type === 'panel' && h('div.btn-row', null, h('button.btn.small', { title: '옆 여백 없이 페이지 폭에 꽉 채워요', onclick: () => { const k = pg.w / e.w; e.x = 0; e.w = pg.w; e.h = Math.round(e.h * k); commit('페이지 폭 꽉 채우기'); } }, '페이지 폭 꽉 채우기')),
         h('div.field-row', null, num('X', 'x'), num('Y', 'y')), h('div.field-row', null, num('회전', 'rot')), e.type !== 'text' && h('div.field-row', null, num('가로', 'w'), num('세로', 'h')),
-        h('div.btn-row', null, h('button.icon-btn', { title: '맨 앞으로', 'aria-label': '맨 앞으로', onclick: () => run('cut.front') }, icon('up')), h('button.icon-btn', { title: '맨 뒤로', 'aria-label': '맨 뒤로', onclick: () => run('cut.back') }, icon('down')), h('span.grow'), h('button.icon-btn', { title: '지우기', 'aria-label': '지우기', onclick: () => run('cut.delete') }, icon('trash'))),
+        h('div.btn-row', null, h('button.btn.small', { onclick: () => run('cut.front') }, '맨 앞'), h('button.btn.small', { onclick: () => run('cut.forward') }, '앞으로'), h('button.btn.small', { onclick: () => run('cut.backward') }, '뒤로'), h('button.btn.small', { onclick: () => run('cut.back') }, '맨 뒤'), h('span.grow'), h('button.icon-btn', { title: '지우기', 'aria-label': '지우기', onclick: () => run('cut.delete') }, icon('trash'))),
       ].filter(Boolean)));
       strip.replaceChildren(...pages().map((p, i) => { const t = h('canvas.cut-thumb'); t.width = 96; t.height = Math.max(24, Math.round(96 * p.h / p.w)); const g = t.getContext('2d'); g.scale(96 / p.w, 96 / p.w); renderPage(g, p);
         return h('button.cut-page' + (p.id === (pg || {}).id ? '.on' : ''), { title: p.name, 'aria-pressed': String(p.id === (pg || {}).id), onclick: () => { state.project.activePage = p.id; V.sel = null; emit(); },
@@ -414,9 +531,18 @@ export const cutRoom = {
 
 export const pick = id => { V.sel = id; V.more = null; emit(); };   // 요소 하나를 골라요
 export const sel = () => V.sel;
+export const view = () => ({ zoom: V.zoom, ox: V.ox, oy: V.oy });
+export const selected = () => group().map(e => e.id);
 export function registerCutCmds() {
   const on = () => !!cv && !!pageOf(), has = () => on() && !!elOf();
-  const order = front => { const pg = pageOf(), e = elOf(); pg.els.splice(pg.els.indexOf(e), 1); front ? pg.els.push(e) : pg.els.unshift(e); commit(front ? '맨 앞으로' : '맨 뒤로'); };
+  const order = front => { const pg = pageOf(), g = group(), rest = pg.els.filter(e => !g.includes(e)), mine = pg.els.filter(e => g.includes(e)); pg.els = front ? [...rest, ...mine] : [...mine, ...rest]; commit(front ? '맨 앞으로' : '맨 뒤로'); };
+  const step = d => { const pg = pageOf(), g = new Set(group()), a = pg.els; if (d > 0) { for (let i = a.length - 2; i >= 0; i--) if (g.has(a[i]) && !g.has(a[i + 1])) [a[i], a[i + 1]] = [a[i + 1], a[i]]; } else for (let i = 1; i < a.length; i++) if (g.has(a[i]) && !g.has(a[i - 1])) [a[i], a[i - 1]] = [a[i - 1], a[i]]; commit(d > 0 ? '앞으로' : '뒤로'); };
+  addCmd({ id: 'cut.forward', title: '앞으로', menu: '컷', group: 'el', keys: 'Ctrl+]', enabled: has, run: () => step(1) });
+  addCmd({ id: 'cut.backward', title: '뒤로', menu: '컷', group: 'el', keys: 'Ctrl+[', enabled: has, run: () => step(-1) });
+  addCmd({ id: 'cut.selectAll', title: '모두 고르기', menu: '컷', group: 'el', keys: 'Ctrl+A', enabled: on, run: () => { setSel(pageOf().els.map(e => e.id)); emit(); } });
+  addCmd({ id: 'cut.cutEl', title: '요소 잘라내기', menu: '컷', group: 'el', keys: 'Ctrl+X', enabled: has, run: () => { clip = group().map(e => JSON.parse(JSON.stringify(e))); run('cut.delete'); } });
+  addCmd({ id: 'cut.exportDlg', title: '내보내기… (파일 종류·크기·잘라 저장)', menu: '컷', group: 'out', words: 'jpg webp 2배 슬라이스 웹툰', enabled: on, run: exportDialog });
+  addCmd({ id: 'cut.stack', title: '세로로 자동 배치… (웹툰)', menu: '컷', group: 'page', enabled: on, run: stackDialog });
   addCmd({ id: 'cut.newPage', title: '새 페이지', menu: '컷', enabled: () => !!cv, run: () => { const c = pageOf(); newPage(c ? c.w : 800, c ? c.h : 1280, '1'); commit('새 페이지'); } });
   addCmd({ id: 'cut.dupPage', title: '페이지 복제', menu: '컷', enabled: on, run: () => { const pg = pageOf(), n = JSON.parse(JSON.stringify(pg)); n.id = uid('g'); n.name = pg.name + ' 복사'; n.els.forEach(e => { e.id = uid('e'); }); pages().splice(pages().indexOf(pg) + 1, 0, n); state.project.activePage = n.id; commit('페이지 복제'); } });
   addCmd({ id: 'cut.deletePage', title: '페이지 지우기', menu: '컷', enabled: on, run: () => { const pg = pageOf(), i = pages().indexOf(pg); pages().splice(i, 1); state.project.activePage = (pages()[Math.min(i, pages().length - 1)] || {}).id || null; V.sel = null; V.fitted = null; commit('페이지 지우기'); } });
@@ -454,7 +580,7 @@ export function registerCutCmds() {
   addCmd({ id: 'cut.fitText', title: '말풍선을 글자에 맞추기', menu: '컷', group: 'bubble', enabled: () => selB().length > 0, run: () => { selB().forEach(fitText); commit('글자에 맞추기'); } });
   addCmd({ id: 'cut.reseed', title: '말풍선 다르게 그리기', menu: '컷', group: 'bubble', words: '다시 모양 seed', enabled: () => selB().length > 0, run: () => { selB().forEach(b => { b.seed = 1 + Math.floor(Math.random() * 99999); }); commit('다르게 그리기'); } });
   addCmd({ id: 'cut.editText', title: '대사 그 자리에서 고치기', menu: '컷', group: 'bubble', enabled: () => has() && (elOf().type === 'bubble' || elOf().type === 'text'), run: editInPlace });
-  addCmd({ id: 'cut.dup', title: '요소 복제', menu: '컷', group: 'el', enabled: has, run: () => { const pg = pageOf(), e = elOf(), n = { ...e, id: uid('e'), join: undefined, x: e.x + 24, y: e.y + 24, ...(e.type === 'bubble' ? { tx: e.tx + 24, ty: e.ty + 24 } : {}) }; pg.els.push(n); V.sel = n.id; commit('요소 복제'); } });
+  addCmd({ id: 'cut.dup', title: '요소 복제', menu: '컷', group: 'el', keys: 'Ctrl+D', enabled: has, run: () => { const pg = pageOf(), jm = {}, ns = group().map(e => ({ ...JSON.parse(JSON.stringify(e)), id: uid('e'), x: e.x + 24, y: e.y + 24, ...(isB(e) ? { tx: e.tx + 24, ty: e.ty + 24 } : {}) })); ns.forEach(n => { if (n.join) n.join = jm[n.join] || (jm[n.join] = uid('j')); if (n.gid) n.gid = jm[n.gid] || (jm[n.gid] = uid('g')); }); ns.forEach(n => { if (n.join && ns.filter(o => o.join === n.join).length < 2) delete n.join; }); pg.els.push(...ns); setSel(ns.map(n => n.id)); commit(ns.length > 1 ? `요소 ${ns.length}개 복제` : '요소 복제'); } });
   addCmd({ id: 'cut.delete', title: '요소 지우기', menu: '컷', group: 'el', enabled: has, run: () => { const pg = pageOf(), g = new Set(group().map(e => e.id)); pg.els = pg.els.filter(e => !g.has(e.id)); V.sel = null; commit(g.size > 1 ? `요소 ${g.size}개 지우기` : '요소 지우기'); } });
   addCmd({ id: 'cut.overview', title: '페이지 한눈에 보기…', menu: '컷', words: '전체 목록 순서', enabled: () => pages().length > 0, run: overview });
   addCmd({ id: 'cut.sfx', title: '효과음 글자 넣기', menu: '컷', group: 'el', words: '의성어 쾅 sfx', enabled: on, run: () => { const pg = pageOf(), size = Math.round(pg.w / 7), t = { id: uid('e'), type: 'text', x: Math.round(pg.w / 2 - size), y: Math.round(pg.h / 2 - size / 2), w: size * 2, h: size, text: '쾅!', size, color: '#ffffff', sw: Math.max(4, Math.round(size / 12)), sc: '#111111', bold: true, rot: -12 }; pg.els.push(t); V.sel = t.id; V.tool = 'pick'; commit('효과음 넣기'); } });
@@ -465,7 +591,9 @@ export function registerCutCmds() {
   addEventListener('keydown', e => {
     if (!cv || document.querySelector('.dlg-back, #modalRoot .modal-bg')) return; const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName);
     if (e.code === 'Space' && !typing) { V.space = true; e.preventDefault(); e.stopImmediatePropagation(); return; }
+    if (!typing && (e.ctrlKey || e.metaKey) && !e.altKey && pageOf() && ['0', '=', '+', '-'].includes(e.key)) { if (e.key === '0') { V.fitted = null; emit(); } else zoomBy(e.key === '-' ? 1 / 1.25 : 1.25); e.preventDefault(); e.stopImmediatePropagation(); return; }
     if (typing || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key === 'Escape' && (V.sel || V.tool !== 'pick')) { V.sel = null; V.more = null; V.tool = 'pick'; emit(); e.preventDefault(); return; }
     const t = TOOLS.find(x => x[2] === e.key.toUpperCase()); if (t) { V.tool = t[0]; emit(); e.preventDefault(); e.stopImmediatePropagation(); }
     else if ((e.key === 'Delete' || e.key === 'Backspace') && elOf()) { run('cut.delete'); e.preventDefault(); e.stopImmediatePropagation(); }
     else if (e.key === 'Enter' && (e.target === cv || e.target === document.body) && elOf() && elOf().type !== 'panel') { editInPlace(); e.preventDefault(); e.stopImmediatePropagation(); }
