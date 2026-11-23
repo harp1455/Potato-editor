@@ -235,6 +235,27 @@ export async function censorMask(src, job, say) {
   og.putImageData(id, 0, 0);
   return { canvas: out, found, retried };
 }
+// 성기 자리를 뼈로 쓸 선분들로: 찾기 모델이 가린 덩어리마다 길게 뻗은 방향의 양 끝을 돌려줘요 (캐릭터 움직이기의 '가슴·성기에 뼈 넣기')
+// 돌려주는 값 = [{ a: {x, y}, b: {x, y}, name }] (그림 좌표)
+export async function censorSegments(src, job) {
+  if (!await ensurePacks(['deep', 'deepn', 'segN', 'samE', 'samD'])) throw new Error('AI 팩이 없어요');
+  const A = legacyAi(), k = censorCfg(), ds = Math.min(1, 2048 / Math.max(src.width, src.height)), W = Math.round(src.width * ds), Hh = Math.round(src.height * ds);
+  const cv = mk(W, Hh), g = cv.getContext('2d', { willReadFrequently: true }); g.fillStyle = '#fff'; g.fillRect(0, 0, W, Hh); g.drawImage(src, 0, 0, W, Hh);
+  const pass = async (sens, small) => { Object.assign(A.czCfg, { model: 'fast', shape: 'contour', pad: 0, sens, male: true, female: false, anus: false, small, color: '#ffffff' }); const st = A.czNewState(W, Hh, 0); await A.czAnalyze(cv, st, job || {}, () => {}); return A.czComposeMask(st); };
+  let M = await pass(k.sens, false); if (!M.some(v => v)) M = await pass(Math.max(k.sens, 85), true);
+  // 이어진 덩어리마다 가운데와 긴 축을 구해요
+  const seen = new Uint8Array(W * Hh), out = [], stack = [];
+  for (let s0 = 0; s0 < M.length; s0++) {
+    if (!M[s0] || seen[s0]) continue; let n = 0, sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0; const pts = []; stack.push(s0); seen[s0] = 1;
+    while (stack.length) { const i = stack.pop(), x = i % W, y = (i / W) | 0; n++; sx += x; sy += y; sxx += x * x; syy += y * y; sxy += x * y; if (n % 7 === 0) pts.push(x, y);
+      if (x > 0 && M[i - 1] && !seen[i - 1]) { seen[i - 1] = 1; stack.push(i - 1); } if (x < W - 1 && M[i + 1] && !seen[i + 1]) { seen[i + 1] = 1; stack.push(i + 1); } if (y > 0 && M[i - W] && !seen[i - W]) { seen[i - W] = 1; stack.push(i - W); } if (y < Hh - 1 && M[i + W] && !seen[i + W]) { seen[i + W] = 1; stack.push(i + W); } }
+    if (n < W * Hh * 0.0015) continue;
+    const mx = sx / n, my = sy / n, cxx = sxx / n - mx * mx, cyy = syy / n - my * my, cxy = sxy / n - mx * my, th = 0.5 * Math.atan2(2 * cxy, cxx - cyy), ux = Math.cos(th), uy = Math.sin(th); let lo = 0, hi = 0;
+    for (let i = 0; i < pts.length; i += 2) { const t = (pts[i] - mx) * ux + (pts[i + 1] - my) * uy; if (t < lo) lo = t; if (t > hi) hi = t; }
+    out.push({ n, a: { x: (mx + ux * lo * 0.92) / ds, y: (my + uy * lo * 0.92) / ds }, b: { x: (mx + ux * hi * 0.92) / ds, y: (my + uy * hi * 0.92) / ds }, name: '성기' });
+  }
+  return out.sort((p, q) => q.n - p.n).slice(0, 3);
+}
 function censorDialog() {
   const k = censorCfg(), set = (key, v) => { k[key] = v; settings.set('censor', k); draw(); }, box = H('div.vid-form');
   const chk = (key, label) => H('label.check', null, H('input', { type: 'checkbox', checked: !!k[key], onchange: e => set(key, e.target.checked) }), label);

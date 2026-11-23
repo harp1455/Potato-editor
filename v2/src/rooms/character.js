@@ -75,7 +75,7 @@ function pickOutside() {
 // src = 그림(캔버스·비트맵), key = 이어서 하기용 이름
 export async function rigOpen(src, name, key, selMask) {
   const c0 = canvasOf();
-  await openRig({ src, W: src.width, H: src.height, name, key, goLabel: '내보내기', selMask, pickOutside,
+  await openRig({ src, W: src.width, H: src.height, name, key, goLabel: '내보내기', selMask, pickOutside, findParts: async rig => (await import('../ui/aitools.js')).censorSegments(rig.src),
     onFrames: async (frames, fps) => { if (frames && frames.length) framesDialog(frames, fps, name); },
     onStill: async cv => { const c = canvasOf() || c0; if (!c) return; await layerFromBlob(c, await png(cv), name + ' 자세', { scale: Math.min(c.w / cv.width, c.h / cv.height), hidden: true }); commit('자세를 레이어로'); toast('이 자세를 새 레이어로 올렸어요.'); },
   });

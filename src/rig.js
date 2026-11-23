@@ -384,7 +384,7 @@ function rgBlinkAuto(rig, t) { // 0~1 (1 = 감음)
   return v;
 }
 // 내 뼈 자동 움직임의 종류: 이름, 한 번 오가는 시간(초)
-const RG_AM = { sway: { name: '흔들기', per: 2.2 }, wave: { name: '물결', per: 1.8 }, bend: { name: '굽혔다 펴기', per: 2.4 }, pump: { name: '앞뒤로', per: 1.2 }, shake: { name: '떨림', per: 0.22 } };
+const RG_AM = { sway: { name: '흔들기', per: 2.2 }, wave: { name: '물결', per: 1.8 }, bend: { name: '굽혔다 펴기', per: 2.4 }, pump: { name: '앞뒤로', per: 1.2 }, shake: { name: '떨림', per: 0.22 }, jig: { name: '출렁임', per: 1.0 } };
 // 자동 움직임 한 번에 맞추기
 const RG_STYLES = { calm: ['잔잔하게', { breath: 40, sway: 15, head: 15, bounce: 0, wind: 25, follow: 40, arms: 10, hip: 0, shake: 0, jig: 15, speed: 80 }, 22], live: ['살아 있게', { breath: 60, sway: 40, head: 40, bounce: 0, wind: 50, follow: 60, arms: 35, hip: 15, shake: 0, jig: 40, speed: 100 }, 40], active: ['활발하게', { breath: 70, sway: 70, head: 60, bounce: 25, wind: 70, follow: 80, arms: 65, hip: 45, shake: 0, jig: 60, speed: 130 }, 62], hard: ['거칠게', { breath: 100, sway: 55, head: 45, bounce: 0, wind: 60, follow: 90, arms: 40, hip: 60, shake: 40, jig: 80, speed: 170 }, 85] };
 // 그 시각의 자세 = 저장한 자세 + 자동 움직임(숨쉬기·몸 흔들기·고개)
@@ -404,6 +404,7 @@ function rgPoseAt(rig, t, noAuto) {
     else if (m.kind === 'wave') for (let i = 0; i < n; i++) add(ids[i], 0.075 * k * (0.5 + i * 0.5) * Math.sin(x - i * 1.3));
     else if (m.kind === 'bend') for (let i = 0; i < n; i++) add(ids[i], 0.2 * k * (i ? 1 : 0.5) * (0.5 - 0.5 * Math.cos(x - i * 0.25)));
     else if (m.kind === 'pump') { const a0 = rig.joints[ids[0]], b0 = rig.joints[ids[n]], l = Math.hypot(b0.x - a0.x, b0.y - a0.y) || 1, sn = Math.sin(x), e = Math.sign(sn) * Math.pow(Math.abs(sn), 0.8) * 0.07 * k * l; mv(ids[0], (b0.x - a0.x) / l * e, (b0.y - a0.y) / l * e); for (let i = 1; i < n; i++) add(ids[i], 0.03 * k * Math.sin(x - 0.9 - i * 0.5)); }
+    else if (m.kind === 'jig') { const a0 = rig.joints[ids[0]], b0 = rig.joints[ids[n]], l = Math.hypot(b0.x - a0.x, b0.y - a0.y) || 1, e = Math.sin(x) + 0.35 * Math.sin(2 * x + 0.8); mv(ids[0], 0, l * 0.07 * k * e); for (let i = 0; i < n; i++) add(ids[i], 0.06 * k * Math.sin(x - 0.7 - i * 0.6)); } // 출렁임: 위아래로 튀고, 끝이 한 박자 늦게 따라와요
     else if (m.kind === 'shake') { const s1 = Math.sin(x), s2 = Math.sin(1.47 * x + 1); add(ids[0], 0.02 * k * s1); for (let i = 1; i < n; i++) add(ids[i], 0.028 * k * Math.sin(x - i * 1.1) * (0.7 + 0.3 * s2)); }
   }
   if (a.bounce) { const w = rgOmega(rig, 1.1), k = U * 0.03 * a.bounce / 50; p.ty -= k * Math.abs(Math.sin(w * t / 2)); }
@@ -1097,6 +1098,35 @@ function rgAutoBones(rig, max) {
   if (made.length) rig.ver++;
   return made;
 }
+// 몸 부위 뼈: 가슴 양쪽(뼈대의 어깨·몸통에서 자리를 잡아요)과, 따로 찾아 준 부위(parts: [{ a: {x, y}, b: {x, y}, name }])에 뼈를 넣고 출렁이게 해요 → 새로 넣은 뼈들
+function rgBodyBones(rig, parts) {
+  const J = rig.joints, U = rgUnit(rig), made = [], has = k => (rig.chains || []).some(c => c.body === k);
+  const used = new Set((rig.chains || []).flatMap(c => c.ids)), free = RG_X.filter(x => !used.has(x));
+  const put = (body, name, pts, attach, am, z) => {
+    if (has(body) || free.length < pts.length) return; const ids = free.splice(0, pts.length); ids.forEach((id, i) => { J[id] = { x: clamp(pts[i].x, 0, rig.W), y: clamp(pts[i].y, 0, rig.H), on: true }; });
+    if (!rig.chains) rig.chains = []; const ch = { id: 'k' + uid(), kind: 'free', name, attach, ids, z, auto: true, body, am }; rig.chains.push(ch); made.push(ch);
+  };
+  // 가슴: 목 뿌리(chest)에서 등뼈(spine) 쪽으로 내려온 자리의 양옆. 뼈는 안쪽 위에서 바깥쪽 아래로 놓아요
+  if (!rig.stdOff && rgOn(rig, 'chest') && J.chest && J.aSho && J.bSho) {
+    const top = J.chest, low = rgOn(rig, 'spine') && J.spine ? J.spine : rgOn(rig, 'waist') && J.waist ? J.waist : null;
+    let ax = low ? low.x - top.x : 0, ay = low ? low.y - top.y : U * 0.3; const al = Math.hypot(ax, ay) || 1; ax /= al; ay /= al;
+    const down = Math.min(al, U * 0.34) * 0.6;
+    for (const [side, S] of [['A', J.aSho], ['B', J.bSho]]) {
+      // 어깨 쪽으로 반쯤 간 뒤 몸통을 따라 조금 내려온 자리 (비스듬히 본 그림에서도 어깨를 따라가요)
+      const c = { x: top.x + (S.x - top.x) * 0.45 + ax * down * 0.85, y: top.y + (S.y - top.y) * 0.45 + ay * down * 0.85 };
+      put('pec' + side, (S.x < top.x ? '왼쪽' : '오른쪽') + ' 가슴', [{ x: c.x - ax * down * 0.5, y: c.y - ay * down * 0.5 }, { x: c.x + ax * down * 0.6, y: c.y + ay * down * 0.6 }], 'chest', { kind: 'jig', amt: 30, sp: 100, ph: side === 'A' ? 0 : 12 }, 1);
+    }
+  }
+  // 찾아 준 부위: 몸통에 가까운 끝이 뿌리, 먼 끝이 끝. 가운데에 점을 하나 더 넣어 끝이 늦게 따라오게 해요
+  const R = rig.stdOff || !J.root ? null : J[rgBase(rig)] || J.root; let no = 0;
+  for (const q of parts || []) {
+    let a = q.a, b = q.b; if (R && Math.hypot(b.x - R.x, b.y - R.y) < Math.hypot(a.x - R.x, a.y - R.y)) [a, b] = [b, a];
+    let attach = null, bd = 1e18; if (!rig.stdOff) for (const id of ['root', 'waist', 'spine']) if (rgOn(rig, id) && J[id]) { const d = Math.hypot(J[id].x - a.x, J[id].y - a.y); if (d < bd) { bd = d; attach = id; } }
+    put('part' + no++, q.name || '부위', [a, { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, b], attach, { kind: 'jig', amt: 35, sp: 90, ph: 20 }, 2);
+  }
+  if (made.length) rig.ver++;
+  return made;
+}
 // 화면에서 어느 쪽 팔·다리인지 (이름표용)
 const rgSideName = (rig, limb) => { const mine = rig.joints[RG_LIMBS[limb][0]], oth = rig.joints[RG_LIMBS[limb.slice(0, 3) + (limb.endsWith('A') ? 'B' : 'A')][0]]; return (mine.x < oth.x ? '왼쪽 ' : '오른쪽 ') + (limb.startsWith('arm') ? '팔' : '다리'); };
 const rgLimbOf = id => Object.keys(RG_LIMBS).find(k => RG_LIMBS[k].includes(id)) || null;
@@ -1315,7 +1345,7 @@ function rgWindow(main, from) {
       const cs = rig.chains || [];
       h += `<div class="sec"><h3>내 뼈 (원하는 곳에만)</h3><p class="muted small">얼굴이 안 보이거나 몸 일부만 나온 그림은, 움직일 곳에만 뼈를 넣으세요. 고른 뒤 그림에서 <b>차례대로</b> 눌러요. 뼈에서 먼 곳은 제자리에 있어요.</p>
         ${st.draft ? `<p class="small"><b>${esc(RG_CHAIN_KINDS[st.draft.kind].name)}</b>: ${esc(rgDraftName(st.draft))}</p><div class="btnrow"><button class="btn sm primary" data-rga="chainok" ${st.draft.pts.length < 2 ? 'disabled' : ''} title="Enter">여기까지 (${st.draft.pts.length}점)</button><button class="btn sm" data-rga="chainno" title="Esc">취소</button></div>`
-        : `${rig.stdOff ? '' : `<div class="btnrow"><button class="btn sm primary" data-rga="autobones" title="머리카락 다발·꼬리·옷자락·귀처럼 몸에서 늘어진 곳을 찾아 뼈를 넣고, 저절로 흔들리게 해요">✨ 늘어진 곳에 뼈 자동으로 넣기</button>${(rig.chains || []).some(c => c.auto) ? '<button class="btn sm" data-rga="autobones0">자동 뼈 지우기</button>' : ''}</div>`}<div class="btnrow">${Object.entries(RG_CHAIN_KINDS).map(([k, v]) => `<button class="btn sm" data-rgch="${k}" title="${esc(v.pts.slice(0, k === 'free' ? 2 : 9).join(' → '))}${k === 'free' ? ' … (꼬리·머리카락·옷자락·물건 등, 2~6점)' : ''}">${k === 'free' ? '그 밖의 것' : esc(v.name)}</button>`).join('')}</div>`}
+        : `${rig.stdOff ? '' : `<div class="btnrow"><button class="btn sm primary" data-rga="autobones" title="머리카락 다발·꼬리·옷자락·귀처럼 몸에서 늘어진 곳을 찾아 뼈를 넣고, 저절로 흔들리게 해요">✨ 늘어진 곳에 뼈 자동으로 넣기</button>${(rig.chains || []).some(c => c.auto) ? '<button class="btn sm" data-rga="autobones0">자동 뼈 지우기</button>' : ''}</div>`}<div class="btnrow"><button class="btn sm primary" data-rga="bodybones" title="가슴 양쪽과 성기를 찾아 뼈를 넣고, 저절로 출렁이게 해요. 가슴은 뼈대에서 자리를 잡고, 성기는 자동 흰칠의 찾기 모델로 찾아요. 자리가 어긋나면 점을 끌어 고치세요">✨ 가슴·성기에 뼈 넣기</button></div><div class="btnrow">${Object.entries(RG_CHAIN_KINDS).map(([k, v]) => `<button class="btn sm" data-rgch="${k}" title="${esc(v.pts.slice(0, k === 'free' ? 2 : 9).join(' → '))}${k === 'free' ? ' … (꼬리·머리카락·옷자락·물건 등, 2~6점)' : ''}">${k === 'free' ? '그 밖의 것' : esc(v.name)}</button>`).join('')}</div>`}
         ${cs.map(c => `<div class="rg-ly ${c.ids.includes(st.sel) ? 'on' : ''}" data-rgchsel="${c.id}"><span style="color:#9b6fe0;padding:0 4px">●</span><span class="nm">${esc(c.name)} <span class="muted small">${c.ids.length}점</span></span><button class="ic" data-rgchsplit="${c.id}" title="이 뼈 부분을 AI로 따로 떼어 내요. 팔·다리가 몸 위에 겹쳐 있을 때 쓰면 몸이 같이 끌려가지 않아요">✂</button><button class="ic" data-rgchren="${c.id}" title="이름 바꾸기">✎</button><button class="ic" data-rgchdel="${c.id}" title="이 뼈 지우기">✕</button></div>
           <label class="chk" style="margin-left:10px" title="머리카락·옷자락·꼬리처럼 가벼운 것에만 켜세요. 끄면 뼈 끝 너머까지 단단하게 움직여요"><input type="checkbox" data-rgchsoft="${c.id}" ${c.soft || (c.auto && c.soft !== false) ? 'checked' : ''}> 끝이 나풀거리게</label>
           ${c.ids.includes(st.sel) ? `<div class="btnrow" style="margin-left:10px"><button class="btn sm" data-rga="chpadd" ${c.ids.length >= 6 ? 'disabled' : ''} title="고른 점 바로 뒤에 점을 하나 더 넣어요 (끝점이면 그 너머로 늘려요). 한 뼈에 6점까지">점 넣기</button><button class="btn sm" data-rga="chpdel" ${c.ids.length <= 2 ? 'disabled' : ''} title="고른 점을 빼서 뼈를 줄여요">이 점 빼기</button></div>` : ''}
@@ -1464,6 +1494,13 @@ function rgWindow(main, from) {
       }
       c.kind = 'free'; rig.ver++; renderSide(); dirty();
     }
+    else if (act === 'bodybones') busy('몸 부위를 찾는 중…', async tk => {
+      let parts = [], why = ''; try { if (from.findParts) parts = (await from.findParts(rig, tk)) || []; else why = ' 성기는 이 판에서는 찾지 못해요.'; } catch (e) { why = ' 성기는 찾지 못했어요 (' + ((e && e.message) || '찾기 모델을 쓸 수 없어요') + ').'; }
+      const A0 = rgAlpha(base(), rig.W, rig.H); parts = parts.filter(q => { const x = Math.round((q.a.x + q.b.x) / 2), y = Math.round((q.a.y + q.b.y) / 2); return x >= 0 && y >= 0 && x < rig.W && y < rig.H && A0[y * rig.W + x] > 40; }); // 이 캐릭터 몸 위에 있는 것만
+      tk.done(); snap(); const made = rgBodyBones(rig, parts); for (const L of rig.layers) L.mesh = null; renderSide(); dirty();
+      const pec = made.filter(c => /^pec/.test(c.body)).length, gen = made.length - pec;
+      toast(made.length ? `${[pec ? '가슴 ' + pec + '군데' : '', gen ? '성기 ' + gen + '군데' : ''].filter(Boolean).join(', ')}에 뼈를 넣었어요. ③ 움직임 만들기의 '내 뼈 자동 움직임'에서 세기를 바꾸고, 자리가 어긋나면 여기서 점을 끌어 고치세요.` + why : '뼈를 새로 넣을 곳을 찾지 못했어요.' + why + ' 내 뼈를 직접 넣어 보세요.', 6500);
+    });
     else if (act === 'autobones0') { for (const c of (rig.chains || []).filter(q => q.auto)) chainDel(c.id); }
     else if (act === 'auto1') { snap(); Object.assign(A().auto, rgNewAnim().auto); if (!rig.eyes.length) A().auto.blink = 0; renderSide(); dirty(); }
     else if (act === 'repose') busy('뼈대를 다시 찾는 중…', async tk => { const bx = rgBBox(rgAlpha(base(), rig.W, rig.H), rig.W, rig.H, 100) || { x: 0, y: 0, w: rig.W, h: rig.H }; const K = await rgPoseRun(rig.src, rig.W, rig.H, bx, tk), sk = rgSkeleton(K, rig.W, rig.H, bx); snap(); const keep = Object.fromEntries(RG_X.filter(x => rig.joints[x]).map(x => [x, rig.joints[x]])); rig.joints = { ...sk.joints, ...keep }; rig.cut = sk.cut || null; rig.autoSk = sk.auto; rig.conf = sk.conf; if (sk.auto) rig.stdOff = false; rig.ver++; if (!sk.auto) toast('AI가 뼈대를 찾지 못해서 기본 뼈대를 놓았어요. 끌어서 맞춰 주세요.', 4200); });
