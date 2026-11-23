@@ -128,11 +128,16 @@ async function loadThumbs(p) {
 }
 const loadBitmaps = loadThumbs;
 const loading = new Map();
-// 지금 작업 어디에서도 쓰지 않는 그림은 메모리에서 내려요. 되돌리기로 다시 쓰이면 저장된 것을 다시 읽어 와요
+// 붓질로 바뀌기 전의 옛 그림: 바로 앞 몇 장은 되돌리기가 곧바로 되게 들고 있고, 그보다 오래된 것은 메모리에서 내려요.
+// 내린 그림도 되돌리기로 다시 쓰이면 저장된 것을 다시 읽어 와요
+const oldPics = [];
 export function dropBitmap(id) {
-  const b = state.bitmaps.get(id); if (!b) return;
-  if (JSON.stringify({ ...state.project, media: [] }).includes('"' + id + '"')) return;
-  if (b.close) b.close(); state.bitmaps.delete(id);
+  oldPics.push(id);
+  while (oldPics.length > 6) {
+    const k = oldPics.shift(), b = state.bitmaps.get(k); if (!b) continue;
+    if (JSON.stringify({ ...state.project, media: [] }).includes('"' + k + '"')) continue;
+    if (b.close) b.close(); state.bitmaps.delete(k);
+  }
 }
 export function ensureBitmap(id) {
   if (state.bitmaps.has(id)) return Promise.resolve(state.bitmaps.get(id));
