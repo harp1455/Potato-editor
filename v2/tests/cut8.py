@@ -33,7 +33,7 @@ with sync_playwright() as pw:
     page.keyboard.press('Escape'); page.dblclick('.media >> nth=0'); page.wait_for_function(ELS + ".length === 2")
     # 세로로 자동 배치: 페이지 폭에 맞춰 쌓고 페이지가 늘어나요
     P(page, "(() => { %s.els = []; __potato.picked.clear(); __potato.emit(); })()" % PG)
-    page.click('.cut-bar >> text=세로로 자동 배치'); page.wait_for_selector('.dlg >> text=세로로 자동 배치'); shot(page, '92-stack'); page.click('.dlg-foot >> text=배치하기')
+    page.click('.vid-side >> text=세로로 자동 배치…'); page.wait_for_selector('.dlg >> text=세로로 자동 배치'); shot(page, '92-stack'); page.click('.dlg-foot >> text=배치하기')
     page.wait_for_function(ELS + ".length === 2"); pg = P(page, PG); a, b = pg['els']
     assert a['x'] == b['x'] and a['w'] == b['w'] and b['y'] > a['y'] + a['h'] and pg['h'] >= b['y'] + b['h'], pg
     # 아래로 늘리기, 내용 끝에 맞춰 줄이기, 폭·높이 직접 적기
@@ -80,6 +80,18 @@ with sync_playwright() as pw:
     P(page, "(() => { __potato.picked.clear(); __potato.picked.add(__potato.state.project.media[0].id); __potato.emit(); })()"); P(page, "__potato.run('cut.addPic')")
     page.check('.vid-side input[aria-label="색 입히기"]'); page.fill('.vid-side input[aria-label="테두리"]', '4'); page.keyboard.press('Tab'); pc = P(page, ELS + ".at(-1)"); assert pc['type'] == 'pic' and pc['tint'] and pc['ol'] == 4
     page.wait_for_timeout(200); shot(page, '95-handles')
+    # 가리기 도구: 끌면 모자이크 요소가 생기고, 그 밑의 그림이 실제로 뭉개져요. 요소 목록에서 숨기고 잠가요
+    page.keyboard.press('Escape'); n3 = P(page, ELS + ".length"); bigp = P(page, ELS + ".filter(e => e.type === 'panel').sort((a, b) => b.h - a.h)[0]")
+    px = "(() => { const c = document.querySelector('canvas.viewport'), r = c.getBoundingClientRect(), k = c.width / r.width, d = c.getContext('2d').getImageData(Math.round((%f - r.left) * k), Math.round((%f - r.top) * k), 1, 1).data; return [d[0], d[1], d[2]]; })()"
+    ex, ey = SX(bigp['x']), SY(bigp['y'] + bigp['h'] * 0.8); before = P(page, px % (ex + 4, ey))   # 컷 테두리 바로 안쪽: 테두리의 검정과 그림 색이 섞여야 해요
+    page.keyboard.press('x'); page.mouse.move(ex - 20, ey - 30); page.mouse.down(); page.mouse.move(ex + 60, ey + 30, steps=3); page.mouse.up(); page.wait_for_timeout(150)
+    cvr = P(page, ELS + ".at(-1)"); assert P(page, ELS + ".length") == n3 + 1 and cvr['type'] == 'cover' and cvr['kind'] == 'mosaic', cvr
+    page.keyboard.press('v'); page.keyboard.press('Escape'); page.wait_for_timeout(150); after = P(page, px % (ex + 4, ey)); assert after != before, (before, after)
+    page.wait_for_selector('.el-row'); assert page.locator('.el-row').count() == n3 + 1; shot(page, '99-cover')
+    page.click('.el-row >> nth=0 >> button[title="숨기기"]'); assert P(page, ELS + ".at(-1).hide") is True; page.wait_for_timeout(100); assert P(page, px % (ex + 4, ey)) == before
+    page.click('.el-row >> nth=0 >> button[title="보이기"]'); page.click('.el-row >> nth=0 >> button[title^="잠그기"]'); assert P(page, ELS + ".at(-1).lock") is True
+    page.mouse.click(ex + 20, ey); assert P(page, "__potato.cut.sel()") != cvr['id']   # 잠근 것은 눌러도 안 골라져요
+    page.keyboard.press('Escape'); [page.keyboard.press('Control+z') for _ in range(5)]; assert P(page, ELS + ".length") == n3
     # 글자 꾸밈: 효과음 견본으로 넣고, 글자 모양 견본을 입히고, 값을 바꿔요 (되돌리면 그대로)
     page.keyboard.press('Escape'); n2 = P(page, ELS + ".length"); page.click('.cut-bar >> text=효과음'); page.click('.menu-item >> text=두근 설렘'); sx = P(page, ELS + ".at(-1)")
     assert P(page, ELS + ".length") == n2 + 1 and sx['text'] == '두근' and sx['sw2'] > 0 and sx['jit'] == 22 and sx['w'] > 100, sx

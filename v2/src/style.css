@@ -329,6 +329,11 @@ label.batch-row { cursor: pointer; } .batch-row input[type=checkbox] { accent-co
 .sfx-grid .empty { grid-column: 1 / -1; }
 .sec-fold { align-self: stretch; display: grid; gap: 8px; } .sec-fold > summary { font-size: 12px; font-weight: 600; color: var(--dim); padding: 4px 0; border-bottom: 1px solid var(--raise); cursor: pointer; }
 .txt-grid .bub-pre { background: #a9a9a9; }
+.vid-side > * { flex: none; }   /* 내용이 많아도 줄어들지 않고, 옆 패널이 통째로 스크롤돼요 */
+.el-list { align-self: stretch; display: grid; gap: 1px; max-height: 220px; overflow: auto; border: 1px solid var(--line); border-radius: var(--r); background: var(--line); }
+.el-row { display: grid; grid-template-columns: 24px 1fr 24px; align-items: center; background: var(--panel); } .el-row.off .el-name { color: var(--faint); }
+.el-row .icon-btn { width: 24px; height: 24px; color: var(--faint); } .el-row .icon-btn.on { color: var(--text); }
+.el-name { text-align: left; padding: 3px 4px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; } .el-name small { color: var(--faint); margin-right: 6px; } .el-name:hover { background: var(--raise); }
 .bub-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; align-self: stretch; }
 .bub-pre { padding: 0; border: 1px solid var(--line); border-radius: var(--r); background: #8d8d8d; cursor: pointer; display: block; overflow: hidden; }
 .bub-pre canvas { width: 100%; height: auto; display: block; }
