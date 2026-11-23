@@ -60,8 +60,8 @@ async function stripAsk(list, what) {
   if (!n) { toast('NAI 정보가 든 그림이 없어요.'); return; }
   if (!await confirmBox('NAI 정보 지우기', `${what} 그림 ${n}장에서 프롬프트·설정 정보를 지워요. 그림의 모습은 그대로예요. 보관함에 든 파일 자체를 바꾸기 때문에 되돌리기로 돌아오지 않아요.`, '지우기')) return;
   const b = busy(`NAI 정보를 지우는 중이에요. 0 / ${list.length}`);
-  const done = await stripMedia(list, (i, t) => b.set(`NAI 정보를 지우는 중이에요. ${i} / ${t}`));
-  b.done(`그림 ${done}장에서 NAI 정보를 지웠어요.`);
+  try { const done = await stripMedia(list, (i, t) => b.set(`NAI 정보를 지우는 중이에요. ${i} / ${t}`)); b.done(`그림 ${done}장에서 NAI 정보를 지웠어요.`); }
+  catch (e) { b.done('NAI 정보를 지우다가 멈췄어요. ' + (e.message || ''), 'err'); }
 }
 async function removeAsk(ids) {
   const used = layersUsing(ids);

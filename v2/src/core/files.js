@@ -156,7 +156,9 @@ export async function saveFiles(files, zipName) {
       return 'dir';
     }
   }
-  download(await makeZip(files.map(f => ({ name: f.name.split('/').map(safe).join('/'), blob: f.blob }))), zipName);
+  // 같은 이름이 둘이면 뒤의 것에 (2), (3)…을 붙여요 (풀 때 덮어쓰이지 않게)
+  const used = new Set(), uniq = name => { let out = name, n = 2; while (used.has(out.toLowerCase())) out = name.replace(/(\.[^./]+)?$/, m => `(${n++})${m}`); used.add(out.toLowerCase()); return out; };
+  download(await makeZip(files.map(f => ({ name: uniq(f.name.split('/').map(safe).join('/')), blob: f.blob }))), zipName);
   return 'zip';
 }
 

@@ -36,7 +36,8 @@ export function keyName(e) {
 
 export function handleKey(e) {
   const t = e.target;
-  const typing = t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
+  // 글자를 적는 칸에서만 단축키를 쉬어요. 슬라이더·체크 상자·고르는 칸을 만진 뒤에도 단축키는 그대로 들어요
+  const typing = t && (t.isContentEditable || t.tagName === 'TEXTAREA' || (t.tagName === 'INPUT' && !/^(range|checkbox|radio|color|button|file)$/.test(t.type)));
   const name = keyName(e);
   if (!name) return false;
   if (typing && !/^Ctrl\+|^F\d/.test(name)) return false;

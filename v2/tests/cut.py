@@ -98,7 +98,7 @@ with sync_playwright() as pw:
         return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text }] }, finishReason: 'STOP' }] }), { status: 200 }); }; })()""")
     n0 = len(P(page, ELS)); page.mouse.click(X(40), Y(1270)); page.click('.vid-side >> text=대사 번역'); page.check('.dlg label:has-text("그림 속에 그려진 글자도") input'); page.click('.dlg-foot >> text=번역하기')
     page.wait_for_function(ELS + ".length === %d" % (n0 + 1))
-    e = P(page, ELS + ".at(-1)"); assert e['text'] == '안녕하세요' and e['shape'] == 'rect' and (e['x'], e['y'], e['w'], e['h']) == (80, 128, 240, 128) and e['from'] == 'こんにちは' and e['fill'].startswith('#'), e
+    e = P(page, ELS + ".at(-1)"); assert e['text'] == '안녕하세요' and e['shape'] == 'box' and (e['x'], e['y'], e['w'], e['h']) == (80, 128, 240, 128) and e['from'] == 'こんにちは' and e['fill'].startswith('#'), e
     assert P(page, "__sent[0].contents[0].parts[0].inlineData.mimeType") == 'image/jpeg' and P(page, "__sent[0].systemInstruction.parts[0].text").startswith('# CRITICAL')
     shot(page, '84-image-text'); page.keyboard.press('Control+z'); assert len(P(page, ELS)) == n0
 

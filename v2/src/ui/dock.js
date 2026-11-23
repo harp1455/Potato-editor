@@ -85,12 +85,20 @@ export function renderDock(work, center) {
   updatePanels(true);
 }
 
+let rendering = false;
+export const isRendering = () => rendering;   // 다시 그리는 동안 생기는 초점 변화는 무시해요
 export function updatePanels(force) {
+  rendering = true; try { updatePanels0(force); } finally { rendering = false; }
+}
+function updatePanels0(force) {
   for (const z of ZONES) {
     const b = bodies[z]; if (!b || !b.id || !b.el.isConnected) continue;
     // 글자를 적고 있는 중에는 다시 그리지 않아요 (적던 칸이 사라지지 않게)
     const a = document.activeElement;
     if (!force && a && b.el.contains(a) && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) continue;
+    // 다시 그리면 누르고 있던 단추가 사라져요. 같은 것을 찾아 다시 붙잡아서 Delete·Enter가 엉뚱한 데로 가지 않게 해요
+    const keep = a && b.el.contains(a) && a.dataset && a.dataset.id ? a.dataset.id : null;
     const top = b.el.scrollTop; b.el.replaceChildren(); b.el.className = 'zone-body'; PANELS[b.id].render(b.el); b.el.scrollTop = top;
+    if (keep) { const again = [...b.el.querySelectorAll('[data-id]')].find(x => x.dataset.id === keep); if (again) again.focus({ preventScroll: true }); }
   }
 }

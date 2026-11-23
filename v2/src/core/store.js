@@ -9,7 +9,7 @@ function db() {
     const r = indexedDB.open(DB, 1);
     r.onupgradeneeded = () => { r.result.createObjectStore('projects'); r.result.createObjectStore('blobs'); };
     r.onsuccess = () => res(r.result);
-    r.onerror = () => rej(r.error);
+    r.onerror = () => { dbp = null; rej(r.error); };   // 다음에 다시 열어 볼 수 있게
   });
   return dbp;
 }
@@ -19,6 +19,7 @@ async function tx(store, mode, f) {
     const t = d.transaction(store, mode), rq = f(t.objectStore(store));
     t.oncomplete = () => res(rq && rq.result);
     t.onerror = () => rej(t.error);
+    t.onabort = () => rej(t.error || new Error('저장 공간이 모자라거나 저장이 중단됐어요.'));   // 공간이 모자라면 오류 없이 중단만 돼요
   });
 }
 export const idb = {
@@ -85,10 +86,13 @@ function scheduleSave() { clearTimeout(saveT); saveT = setTimeout(saveNow, 600);
 export async function saveNow() {
   clearTimeout(saveT);
   const p = state.project; p.at = Date.now();
-  try { await idb.put('projects', p.id, clone(p)); state.saved = true; localStorage.setItem('potato2.last', p.id); }
-  catch (e) { console.error(e); state.saved = false; }
-  emit();
+  try { await idb.put('projects', p.id, clone(p)); state.saved = true; state.saveErr = ''; try { localStorage.setItem('potato2.last', p.id); } catch (_) { /* 마지막 작업 기억만 못 해요 */ } }
+  catch (e) { console.error(e); state.saved = false; const first = !state.saveErr; state.saveErr = (e && e.message) || '알 수 없는 까닭'; if (first) onSaveErr(state.saveErr); }
+  emit(); return state.saved;
 }
+// 저장이 안 될 때 한 번 알려요 (다시 저장되면 다음 실패 때 또 알려요)
+let onSaveErr = () => {};
+export const setSaveErrHandler = f => { onSaveErr = f; };
 
 // 큰 그림은 그림판에 올라갔을 때만 풀어 두고, 보관함에는 작은 미리보기만 써요 (폴더째 수백 장을 넣어도 가볍게)
 async function loadThumbs(p) {
@@ -123,6 +127,7 @@ export async function newProject(name) {
 export async function openProject(id) {
   const p = await idb.get('projects', id);
   if (!p) return false;
+  for (const k of ['media', 'folders', 'canvases']) if (!Array.isArray(p[k])) p[k] = [];   // 옛 판이나 깨진 기록에 빠진 칸은 비워서 열어요
   await loadBitmaps(p); reset(p, '작업 열기');
   localStorage.setItem('potato2.last', id);
   return true;
@@ -139,15 +144,18 @@ export async function tidyMedia() {
   for (const m of dead) { bytes += m.size || 0; const b = state.bitmaps.get(m.id); if (b && b.close) b.close(); state.bitmaps.delete(m.id); await idb.del('blobs', m.id); await idb.del('blobs', 't:' + m.id); }
   state.saved = false; scheduleSave(); return { n: dead.length, bytes };
 }
+// 작업 하나에 딸린 저장 조각들: 그림과 미리보기, 영상 작업실의 소리·클립, 영상
+export const blobKeys = p => [...(p.media || []).flatMap(m => [m.id, 't:' + m.id]), ...(p.sequences || []).flatMap(s => [...(s.audio ? [s.audio] : []), ...(s.audios || [])].map(a => 'aud:' + a.id).concat([...new Set((s.scenes || []).filter(x => x.clip).map(x => 'clip:' + x.clip))])), ...(p.videos || []).map(v => 'vid:' + v.id)];
 export async function deleteProject(id) {
   const p = await idb.get('projects', id);
-  if (p) { for (const m of p.media) { await idb.del('blobs', m.id); await idb.del('blobs', 't:' + m.id); } for (const v of p.videos || []) await idb.del('blobs', 'vid:' + v.id); }
+  if (p) for (const k of blobKeys(p)) await idb.del('blobs', k);
   await idb.del('projects', id);
 }
 export async function boot() {
-  const last = localStorage.getItem('potato2.last');
-  if (last && await openProject(last)) return;
-  reset(blank(), '새 작업');
+  // 마지막 작업을 못 열어도 프로그램은 켜져야 해요: 빈 작업으로 시작하고 까닭을 돌려줘요
+  let last = null; try { last = localStorage.getItem('potato2.last'); } catch (_) { /* 저장 공간이 막힌 환경 */ }
+  try { if (last && await openProject(last)) return null; } catch (e) { console.error(e); reset(blank(), '새 작업'); return (e && e.message) || '알 수 없는 까닭'; }
+  reset(blank(), '새 작업'); return null;
 }
 
 // ---- 보관함 ----

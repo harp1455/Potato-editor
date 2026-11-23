@@ -2,6 +2,7 @@
 // 반대로 지금 그림을 '보낼 폴더'에 PNG로 내보내요. 프로그램 안쪽을 건드리지 않고 폴더만 같이 써요.
 import { state, idb, emit, commit, addMedia, ensureFolder, canvasOf, layerOf } from './store.js';
 import { settings } from './settings.js';
+import { hasMeta } from './files.js';
 import { toast } from '../ui/overlay.js';
 
 const L = { dir: null, out: null, seen: new Set(), timer: 0, busy: false, on: false, got: 0 };
@@ -20,7 +21,7 @@ async function tickApp(T) {
   for (const p of fresh) {
     try { const st = await T.fs.stat(p.path); if (st.mtime && Date.now() - new Date(st.mtime).getTime() < 700) continue; } catch (_) { /* 시각을 못 읽어도 가져와요 */ }
     L.seen.add(p.key);
-    try { const u = await T.fs.readFile(p.path), ext = p.name.split('.').pop().toLowerCase(); added.push(await addMedia(new File([u], p.name, { type: 'image/' + (ext === 'jpg' ? 'jpeg' : ext) }), folder)); } catch (_) { /* 깨진 파일은 건너뜀 */ }
+    try { const u = await T.fs.readFile(p.path), ext = p.name.split('.').pop().toLowerCase(); const f = new File([u], p.name, { type: 'image/' + (ext === 'jpg' ? 'jpeg' : ext) }); added.push(await addMedia(f, folder, { meta: await hasMeta(f) })); } catch (_) { /* 깨진 파일은 건너뜀 */ }
   }
   return added;
 }
@@ -45,7 +46,7 @@ async function tick() {
     for (const p of fresh) {
       const f = await p.hnd.getFile(); if (Date.now() - f.lastModified < 700) continue;   // 아직 쓰는 중일 수 있어요. 다음 번에
       L.seen.add(p.key);
-      try { added.push(await addMedia(f, folder)); } catch (_) { /* 그림이 아니거나 깨진 파일은 건너뜀 */ }
+      try { added.push(await addMedia(f, folder, { meta: await hasMeta(f) })); } catch (_) { /* 그림이 아니거나 깨진 파일은 건너뜀 */ }
     }
     if (!added.length) return;
     L.got += added.length;

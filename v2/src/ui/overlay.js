@@ -18,6 +18,7 @@ export function showMenu(items, x, y, owner) {
     m.append(b);
   });
   document.body.append(m);
+  if (owner || lastKeyboard) { const first = m.querySelector('.menu-item:not(:disabled)'); if (first) first.focus({ preventScroll: true }); }
   const r = m.getBoundingClientRect();
   m.style.left = Math.max(4, Math.min(x, innerWidth - r.width - 4)) + 'px';
   m.style.top = Math.max(4, Math.min(y, innerHeight - r.height - 4)) + 'px';
@@ -31,6 +32,10 @@ export function showMenu(items, x, y, owner) {
   return m;
 }
 export const cmdItem = c => ({ label: c.title, keys: keysOf(c.id), run: () => run(c.id), disabled: !canRun(c), checked: c.checked && c.checked() });
+// 메뉴는 어디에 초점이 있든 Esc로 닫혀요. 키보드로 열었으면 첫 줄을 붙잡아 화살표로 고를 수 있어요
+let lastKeyboard = false;
+addEventListener('keydown', e => { lastKeyboard = true; if (e.key === 'Escape' && openMenu) { e.preventDefault(); e.stopPropagation(); closeMenu(); } }, true);
+addEventListener('pointerdown', () => { lastKeyboard = false; }, true);
 document.addEventListener('pointerdown', e => { if (openMenu && !openMenu.contains(e.target) && !e.target.closest('.mb-item')) closeMenu(); }, true);
 addEventListener('blur', closeMenu);
 
@@ -43,9 +48,9 @@ export function toast(text, kind = '') {
   if (!toastBox) { toastBox = h('div.toasts', { role: 'status', 'aria-live': 'polite' }); document.body.append(toastBox); }
   // 오류는 화면을 막지 않아요: 기록에 남기고, 짧은 알림만 잠깐 보여요. 알림을 누르면 오류 기록이 열려요
   if (kind === 'err') logErr(toastWhere(), text, takeDetail(text));
-  const t = h('div.toast' + (kind ? '.' + kind : ''), kind === 'err' ? { role: 'button', tabindex: '0', title: '눌러서 오류 기록 보기', onclick: () => { t.remove(); if (onErrClick) onErrClick(); } } : null, text);
+  const t = h('div.toast' + (kind ? '.' + kind : ''), kind === 'err' ? { role: 'button', tabindex: '0', title: '눌러서 오류 기록 보기', onclick: () => { t.remove(); if (onErrClick) onErrClick(); }, onkeydown: e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); t.click(); } } } : null, text);
   toastBox.append(t); while (toastBox.querySelectorAll('.toast.err').length > 3) toastBox.querySelector('.toast.err').remove();
-  setTimeout(() => t.remove(), kind === 'err' ? 5000 : 3200);
+  setTimeout(() => t.remove(), Math.min(12000, (kind === 'err' ? 5000 : 3200) + Math.max(0, String(text).length - 30) * 55));   // 긴 글은 읽을 시간을 더 줘요
 }
 
 // ---- 대화 창 ----
@@ -53,15 +58,19 @@ export function dialog({ title, body, buttons = [], wide = false, onClose, dismi
   const prev = document.activeElement;
   const box = h('div.dlg' + (wide ? '.wide' : ''), { role: 'dialog', 'aria-modal': 'true', 'aria-label': title });
   const back = h('div.dlg-back', null, box);
-  const close = v => { back.remove(); document.removeEventListener('keydown', onKey, true); if (prev && prev.focus) prev.focus(); if (onClose) onClose(v); };
-  const onKey = e => { if (e.key === 'Escape' && dismiss) { e.stopPropagation(); close(); } };
+  const close = v => { if (!back.isConnected) return; back.remove(); document.removeEventListener('keydown', onKey, true); if (prev && prev.focus) prev.focus(); if (onClose) onClose(v); };
+  const onKey = e => {
+    const top = [...document.querySelectorAll('.dlg-back')].at(-1) === back; if (!top) return;   // 겹쳐 뜬 창은 맨 위 것만
+    if (e.key === 'Escape' && dismiss) { e.stopPropagation(); e.preventDefault(); close(); }
+    else if (e.key === 'Tab') { const fs = [...box.querySelectorAll('button, input, select, textarea, [tabindex]')].filter(x => !x.disabled && x.tabIndex >= 0 && x.offsetParent !== null); if (!fs.length) return; const a = document.activeElement, first = fs[0], last = fs.at(-1); if (!box.contains(a) || (e.shiftKey && a === first) || (!e.shiftKey && a === last)) { e.preventDefault(); (e.shiftKey ? last : first).focus(); } }
+  };
   box.append(h('div.dlg-head', null, h('h2', null, title), dismiss && h('button.icon-btn', { title: '닫기', 'aria-label': '닫기', onclick: () => close() }, icon('close'))));
   box.append(h('div.dlg-body', null, body));
   if (buttons.length) box.append(h('div.dlg-foot', null, buttons.map(b => h('button.btn' + (b.primary ? '.primary' : '') + (b.danger ? '.danger' : ''), { onclick: () => { if (!b.run || b.run() !== false) close(b.value); } }, b.label))));
   if (dismiss) back.addEventListener('pointerdown', e => { if (e.target === back) close(); });
   document.addEventListener('keydown', onKey, true);
   document.body.append(back);
-  const f = box.querySelector('[autofocus], .btn.primary, input, button');
+  const f = box.querySelector('[autofocus]') || box.querySelector('.dlg-body input:not([type=checkbox]):not([type=radio]):not([type=color]):not([type=range]), .dlg-body textarea') || box.querySelector('.btn.primary') || box.querySelector('button');
   if (f) f.focus();
   return { el: box, close };
 }

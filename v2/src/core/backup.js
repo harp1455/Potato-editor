@@ -1,8 +1,7 @@
 // 백업: 작업(설정, 레이어, 페이지, 영상)과 그 안의 그림·소리를 ZIP 하나로 내보내고, 다시 들여와요.
-import { idb, state, saveNow } from './store.js';
+import { idb, state, saveNow, blobKeys } from './store.js';
 import { makeZip, unzipAll } from './files.js';
 
-const blobKeys = p => [...p.media.flatMap(m => [m.id, 't:' + m.id]), ...(p.sequences || []).flatMap(s => [...(s.audio ? [s.audio] : []), ...(s.audios || [])].map(a => 'aud:' + a.id).concat([...new Set((s.scenes || []).filter(x => x.clip).map(x => 'clip:' + x.clip))])), ...(p.videos || []).map(v => 'vid:' + v.id)];
 // ids가 없으면 모든 작업
 export async function backupZip(ids, onStep) {
   await saveNow();

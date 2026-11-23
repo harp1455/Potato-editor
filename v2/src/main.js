@@ -1,10 +1,10 @@
 import { h, icon, fmtKeys } from './ui/dom.js';
 import { settings } from './core/settings.js';
 import { addCmd, cmds, cmd, run, handleKey, keysOf, keyName, setErrHandler } from './core/cmd.js';
-import { state, canvasOf, tidyMedia, boot, onChange, onTick, emit, commit, undo, redo, canUndo, canRedo, saveNow, newProject, openProject, listProjects, deleteProject } from './core/store.js';
+import { state, canvasOf, tidyMedia, boot, onChange, onTick, emit, commit, undo, redo, canUndo, canRedo, saveNow, setSaveErrHandler, newProject, openProject, listProjects, deleteProject } from './core/store.js';
 import { showMenu, closeMenu, cmdItem, toast, dialog, confirmBox, palette, busy, setErrUi } from './ui/overlay.js';
 import { errLog, errClear, errText, logErr, noteDetail } from './core/errlog.js';
-import { renderDock, updatePanels, togglePanel, hasPanel, resetLayout } from './ui/dock.js';
+import { renderDock, updatePanels, isRendering, togglePanel, hasPanel, resetLayout } from './ui/dock.js';
 import { PANELS } from './ui/panels.js';
 import { imageRoom, registerImageCmds, setMenuItem } from './rooms/image.js';
 import { cutRoom, registerCutCmds } from './rooms/cut.js';
@@ -53,7 +53,7 @@ function registerCmds() {
         if (r.pages) settings.set('room', 'cut'); }
       catch (e) { b.done(e.message || '가져오지 못했어요.', 'err'); } };
     i.click(); } });
-  addCmd({ id: 'file.save', title: '지금 저장', menu: '파일', keys: 'Ctrl+S', run: async () => { await saveNow(); toast('저장했어요. 평소에는 고칠 때마다 알아서 저장돼요.'); } });
+  addCmd({ id: 'file.save', title: '지금 저장', menu: '파일', keys: 'Ctrl+S', run: async () => { if (await saveNow()) toast('저장했어요. 평소에는 고칠 때마다 알아서 저장돼요.'); else toast('저장하지 못했어요. 저장 공간이 모자라거나 막혀 있을 수 있어요. 파일 메뉴의 백업으로 작업을 따로 남겨 두세요. (' + state.saveErr + ')', 'err'); } });
   addCmd({ id: 'edit.undo', title: '되돌리기', menu: '편집', keys: 'Ctrl+Z', enabled: canUndo, run: undo });
   addCmd({ id: 'edit.redo', title: '다시 하기', menu: '편집', keys: 'Ctrl+Shift+Z', enabled: canRedo, run: redo });
   addCmd({ id: 'app.settings', title: '설정…', menu: '편집', keys: 'Ctrl+,', run: () => settingsDialog() });
@@ -137,7 +137,7 @@ function renderStatus() {
     settings.get('hints') ? h('span.st-hint', null, r.hint ? r.hint() : '') : h('span.grow'),
     ...parts,
     zoom && h('button.st-cell.st-btn', { title: '화면에 맞추기', onclick: () => run('view.fit') }, zoom),
-    h('span.st-cell' + (state.saved ? '' : '.dirty'), null, state.saved ? '저장됨' : '저장하는 중'),
+    h('span.st-cell' + (state.saved ? '' : '.dirty'), null, state.saved ? '저장됨' : state.saveErr ? '저장 못 함' : '저장하는 중'),
     h('button.st-cell.st-btn', { title: '2.0에서 달라지는 것', onclick: () => run('help.plan') }, VERSION),
   ].filter(Boolean));
 }
@@ -280,10 +280,13 @@ function adultDialog(then) {
     ], onClose: () => then && then() });
 }
 
+// 단축키를 바꾸려고 새 키를 기다리는 중이면, 그 기다림을 그만두는 함수예요 (한 번에 하나만)
+let keyWait = null;
+const stopKeyWait = () => { if (keyWait) { const f = keyWait; keyWait = null; f(); } };
 function settingsDialog(tab = 'screen') {
   const TABS = [['screen', '화면'], ['api', 'AI와 API'], ['packs', 'AI 팩'], ['keys', '단축키'], ['about', '정보']];
   const nav = h('div.set-nav', { role: 'tablist' }), pane = h('div.set-pane');
-  const d = dialog({ title: '설정', wide: true, body: h('div.set', null, nav, pane), buttons: [{ label: '닫기', primary: true }] });
+  const d = dialog({ title: '설정', wide: true, body: h('div.set', null, nav, pane), buttons: [{ label: '닫기', primary: true }] , onClose: stopKeyWait });
   const radio = (name, cur, opts, on) => h('div.choice', { role: 'radiogroup' }, opts.map(([v, title, desc]) => h('label.choice-item' + (v === cur ? '.on' : ''), null,
     h('input', { type: 'radio', name, checked: v === cur, onchange: () => { on(v); show(tab); } }), h('span', null, h('b', null, title), h('small', null, desc)))));
   const P = {
@@ -331,7 +334,7 @@ function settingsDialog(tab = 'screen') {
     keys: () => [
       h('p.set-note', null, '바꿀 줄을 누른 다음 새 키를 누르세요. Esc는 취소, Backspace는 단축키 없애기예요.'),
       h('div.keys', null, cmds().filter(c => c.title).map(c => {
-        const b = h('button.key-btn', { onclick: () => { b.textContent = '새 키를 누르세요'; b.classList.add('wait'); const f = e => { e.preventDefault(); e.stopPropagation(); if (e.key === 'Escape') { /* 그대로 */ } else if (e.key === 'Backspace') settings.set('keys', { ...settings.get('keys'), [c.id]: '' }); else { const k = keyName(e); if (!k) return; const clash = cmds().find(o => o.id !== c.id && keysOf(o.id) === k); if (clash) toast(`'${clash.title}'에서 쓰던 키예요. 그쪽 단축키는 비웠어요.`); settings.set('keys', { ...settings.get('keys'), ...(clash ? { [clash.id]: '' } : {}), [c.id]: k }); } removeEventListener('keydown', f, true); show('keys'); }; addEventListener('keydown', f, true); } }, fmtKeys(keysOf(c.id)) || '없음');
+        const b = h('button.key-btn', { onclick: () => { stopKeyWait(); b.textContent = '새 키를 누르세요'; b.classList.add('wait'); const f = e => { e.preventDefault(); e.stopPropagation(); if (e.key === 'Escape') { /* 그대로 */ } else if (e.key === 'Backspace') settings.set('keys', { ...settings.get('keys'), [c.id]: '' }); else { const k = keyName(e); if (!k) return; const clash = cmds().find(o => o.id !== c.id && keysOf(o.id) === k); if (clash) toast(`'${clash.title}'에서 쓰던 키예요. 그쪽 단축키는 비웠어요.`); settings.set('keys', { ...settings.get('keys'), ...(clash ? { [clash.id]: '' } : {}), [c.id]: k }); } stopKeyWait(); show('keys'); }; addEventListener('keydown', f, true); keyWait = () => { removeEventListener('keydown', f, true); b.classList.remove('wait'); b.textContent = fmtKeys(keysOf(c.id)) || '없음'; }; } }, fmtKeys(keysOf(c.id)) || '없음');
         return h('div.key-row', null, h('span.key-menu', null, c.menu || ''), h('span.key-title', null, c.title), b);
       })),
       h('button.btn', { onclick: () => { settings.set('keys', {}); show('keys'); } }, '모든 단축키 처음으로'),
@@ -362,7 +365,9 @@ async function start() {
   addEventListener('error', e => logErr('알 수 없는 오류', e.message, `${e.filename || ''}:${e.lineno || ''} ${e.error && e.error.stack ? String(e.error.stack).split('\n').slice(0, 4).join(' | ') : ''}`));
   addEventListener('unhandledrejection', e => { const r = e.reason || {}; logErr('알 수 없는 오류', r.message || String(r), (r.code ? r.code + ' / ' : '') + (r.detail ? r.detail + ' / ' : '') + String(r.stack || '').split('\n').slice(0, 4).join(' | ')); });
   registerCmds(); build();
-  await boot(); tidyMedia();   // 작업을 열 때 안 쓰는 그림을 치워요
+  setSaveErrHandler(why => toast('작업을 저장하지 못하고 있어요. 저장 공간이 모자라거나 막혀 있을 수 있어요. 파일 메뉴의 백업으로 작업을 따로 남겨 두세요. (' + why + ')', 'err'));
+  const bootErr = await boot(); tidyMedia().catch(() => {});
+  if (bootErr) setTimeout(() => toast('마지막 작업을 열지 못해서 새 작업으로 시작했어요. 파일 메뉴의 작업 목록에서 다시 열어 볼 수 있어요. (' + bootErr + ')', 'err'), 300);   // 작업을 열 때 안 쓰는 그림을 치워요
   renderChrome(); mountRoom(); refresh();
   onChange(refresh); onTick(renderStatus);
   settings.on(k => {
@@ -371,8 +376,8 @@ async function start() {
     if (k === 'layouts') renderDock(els.work, els.center);
     refresh();
   });
-  addEventListener('keydown', e => { if (document.querySelector('.dlg-back') && !/^Ctrl\+K$/.test(keyName(e))) return; if (handleKey(e)) closeMenu(); });
-  document.addEventListener('focusout', e => { if (e.target.closest && e.target.closest('.zone-body')) setTimeout(() => updatePanels()); });
+  addEventListener('keydown', e => { if (document.querySelector('.dlg-back') && (!/^Ctrl\+K$/.test(keyName(e)) || document.querySelector('.pal-dlg'))) return; if (handleKey(e)) closeMenu(); });
+  document.addEventListener('focusout', e => { if (!isRendering() && e.target.closest && e.target.closest('.zone-body')) setTimeout(() => updatePanels()); });
   addEventListener('beforeunload', () => { if (!state.saved) saveNow(); });
   document.addEventListener('contextmenu', e => { if (!e.target.closest('input, textarea, .viewport, .layer')) e.preventDefault(); });
   if (!settings.get('askedAdult')) adultDialog();
