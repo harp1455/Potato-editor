@@ -11,6 +11,7 @@ import { generate } from '../api/gemini.js';
 import { dialog, toast, busy, showMenu, askText } from '../ui/overlay.js';
 import { SHAPES, LINES, TAILS, PRESETS, drawBubbles, inBubble, insetOf } from '../core/bubble.js';
 import { TEXT_STYLES, SFX_PRESETS, LOOK_KEYS, drawLettering } from '../core/lettering.js';
+import { FX, FX_KEYS, MOODS, hasFx, imageFilter, drawPanelFx } from '../core/panelfx.js';
 
 const SIZES = [[800, 4000, '웹툰 세로 스크롤 (800 × 4000)'], [800, 1280, '웹툰 한 화면 (800 × 1280)'], [1000, 1414, '만화 페이지 (1000 × 1414)'], [1080, 1350, '인스타툰 세로 (1080 × 1350)'], [1080, 1920, '세로 (1080 × 1920)'], [1600, 2260, '만화 원고 (1600 × 2260)'], [1920, 1080, '가로 (1920 × 1080)'], [1080, 1080, '정사각형 (1080 × 1080)']];
 const LAYOUTS = [['1', '한 컷', [[0, 0, 1, 1]]], ['2', '위아래 2컷', [[0, 0, 1, .5], [0, .5, 1, .5]]], ['3', '위아래 3컷', [[0, 0, 1, 1 / 3], [0, 1 / 3, 1, 1 / 3], [0, 2 / 3, 1, 1 / 3]]], ['4', '4컷 (2 × 2)', [[0, 0, .5, .5], [.5, 0, .5, .5], [0, .5, .5, .5], [.5, .5, .5, .5]]], ['t', '위 큰 컷 + 아래 2컷', [[0, 0, 1, .6], [0, .6, .5, .4], [.5, .6, .5, .4]]]];
@@ -138,7 +139,8 @@ function drawEl0(g, e) {
     const b = e.mediaId && state.bitmaps.get(e.mediaId);
     g.fillStyle = e.bgc || (b ? '#ffffff' : '#e9e9e9'); g.fillRect(e.x, e.y, e.w, e.h);
     if (e.mediaId && !b) ensureBitmap(e.mediaId);
-    if (b) { const k = Math.max(e.w / b.width, e.h / b.height) * (e.is || 1), dw = b.width * k, dh = b.height * k; g.imageSmoothingQuality = 'high'; g.globalAlpha *= e.io ?? 1; g.translate(e.x + e.w / 2 + (e.ix || 0), e.y + e.h / 2 + (e.iy || 0)); if (e.ir) g.rotate(e.ir * Math.PI / 180); if (e.ifx) g.scale(-1, 1); g.drawImage(b, -dw / 2, -dh / 2, dw, dh); }
+    if (b) { const k = Math.max(e.w / b.width, e.h / b.height) * (e.is || 1), dw = b.width * k, dh = b.height * k; g.save(); if (hasFx(e)) { const t = g.getTransform(), f = imageFilter(e, Math.hypot(t.a, t.b) || 1); if (f !== 'none') g.filter = f; } g.imageSmoothingQuality = 'high'; g.globalAlpha *= e.io ?? 1; g.translate(e.x + e.w / 2 + (e.ix || 0), e.y + e.h / 2 + (e.iy || 0)); if (e.ir) g.rotate(e.ir * Math.PI / 180); if (e.ifx) g.scale(-1, 1); g.drawImage(b, -dw / 2, -dh / 2, dw, dh); g.restore(); }
+    if (hasFx(e)) drawPanelFx(g, e);   // 분위기·스크린톤·효과선은 컷 모양 안쪽에만
     g.restore();
     if (e.bw) { g.lineWidth = e.bw; g.strokeStyle = e.bc || '#111'; g.lineJoin = 'miter'; shape(); g.stroke(); }
   } else if (e.type === 'pic') {   // 스티커: 효과음 그림처럼 컷 밖에 자유롭게 놓는 그림. 색 입히기·테두리·뒤집기
@@ -633,6 +635,25 @@ export const cutRoom = {
           e.mediaId && h('div.field-row', null, h('label.field', null, h('span.field-name.w', null, '진하기 %'), h('input.num', { type: 'number', min: 0, max: 100, step: 5, value: Math.round((e.io ?? 1) * 100), 'aria-label': '그림 진하기', onchange: ev => { e.io = clamp((parseFloat(ev.target.value) || 0) / 100, 0, 1); commit('그림 진하기'); } })), chk('좌우 뒤집기', 'ifx')),
           h('div.btn-row', null, h('button.btn.small' + (V.pan === e.id ? '.primary' : ''), { disabled: !e.mediaId, title: '켜 두면 컷 안의 그림을 끌어 옮기고 휠로 키워요. 컷을 두 번 눌러도 돼요.', onclick: () => { V.pan = V.pan === e.id ? null : e.id; emit(); } }, V.pan === e.id ? '그림 옮기기 끝내기' : '그림 옮기기'), h('button.btn.small', { disabled: !e.mediaId, onclick: () => { e.mediaId = null; commit('그림 빼기'); } }, '그림 빼기')),
           e.poly && h('div.btn-row', null, h('button.btn.small', { title: '선으로 잘라 비스듬해진 컷을 다시 네모로 만들어요', onclick: () => { delete e.poly; commit('사각형으로 되돌리기'); } }, '사각형으로 되돌리기')),
+          h('h3.sec', null, '분위기와 효과'),
+          h('label.field', null, h('span.field-name.w', null, '분위기'), h('select.text', { 'aria-label': '분위기', onchange: ev => { const m = MOODS[+ev.target.value]; if (!m) return; FX_KEYS.forEach(k => { delete e[k]; }); Object.assign(e, m[1]); commit('분위기: ' + m[0]); } }, [h('option', { value: -1, selected: true }, hasFx(e) ? '고쳐 쓰는 중' : '없음'), ...MOODS.map(([n], i) => h('option', { value: i }, n))])),
+          h('details.sec-fold', { open: hasFx(e) }, h('summary', null, '보정·톤·효과선 직접 맞추기'),
+            h('div.field-row', null, num('밝기', 'bright', e, 5, { min: 20, max: 200, def: 100 }), num('대비', 'contrast', e, 5, { min: 20, max: 200, def: 100 })),
+            h('div.field-row', null, num('채도', 'saturate', e, 5, { min: 0, max: 200, def: 100 }), num('흐림', 'blur', e, 0.5, { min: 0, max: 20 })),
+            h('div.field-row', null, chk('흑백', 'gray'), num('빛바랜 색', 'sepia', e, 5, { min: 0, max: 100 })),
+            h('div.field-row', null, chk('색 입히기', 'tintOn'), e.tintOn ? col('입힐 색', 'tintColor', FX.tintColor) : h('span')),
+            e.tintOn ? h('div.field-row', null, num('색 세기', 'tintA', e, 5, { min: 0, max: 100, def: FX.tintA }), sel('섞는 법', 'tintMode', [['multiply', '어둡게'], ['screen', '밝게'], ['soft-light', '은은하게'], ['source-over', '덮기']], 'multiply')) : null,
+            h('div.field-row', null, chk('한쪽에서 물들이기', 'gradOn'), e.gradOn ? col('물들일 색', 'gradColor', FX.gradColor) : h('span')),
+            e.gradOn ? h('div.field-row', null, sel('어느 쪽', 'gradDir', [['bottom', '아래'], ['top', '위'], ['left', '왼쪽'], ['right', '오른쪽']], 'bottom'), num('물드는 세기', 'gradA', e, 5, { min: 0, max: 100, def: FX.gradA })) : null,
+            h('div.field-row', null, chk('가장자리 어둡게', 'vigOn'), e.vigOn ? col('가장자리 색', 'vigColor', FX.vigColor) : h('span')),
+            e.vigOn ? h('div.field-row', null, num('가장자리 세기', 'vigA', e, 5, { min: 0, max: 100, def: FX.vigA }), num('가운데 크기', 'vigSize', e, 5, { min: 10, max: 100, def: FX.vigSize })) : null,
+            h('div.field-row', null, chk('스크린톤', 'toneOn'), e.toneOn ? sel('톤 무늬', 'toneType', [['dot', '망점'], ['line', '줄'], ['cross', '그물'], ['sand', '모래']], 'dot') : h('span')),
+            e.toneOn ? h('div.field-row', null, num('톤 간격', 'toneGap', e, 1, { min: 3, max: 60, def: FX.toneGap }), num('톤 굵기', 'toneSize', e, 5, { min: 5, max: 100, def: FX.toneSize })) : null,
+            e.toneOn ? h('div.field-row', null, num('톤 세기', 'toneA', e, 5, { min: 0, max: 100, def: FX.toneA }), sel('옅어지는 쪽', 'toneFade', [['none', '고르게'], ['top', '위로 갈수록'], ['bottom', '아래로 갈수록'], ['left', '왼쪽으로'], ['right', '오른쪽으로'], ['center', '가운데로'], ['edge', '가장자리로']], 'none')) : null,
+            h('div.field-row', null, h('label.field', null, h('span.field-name.w', null, '효과선'), h('select.text', { 'aria-label': '효과선', onchange: ev => { const v = ev.target.value; if (v) { e.lineOn = true; e.lineType = v; } else delete e.lineOn; commit('효과선'); } }, [['', '없음'], ['focus', '집중선'], ['speed', '속도선']].map(([v, t]) => h('option', { value: v, selected: (e.lineOn ? (e.lineType || 'focus') : '') === v }, t)))), e.lineOn ? col('선 색', 'lineColor', FX.lineColor) : h('span')),
+            e.lineOn ? h('div.field-row', null, num('선 수', 'lineN', e, 10, { min: 4, max: 600, def: FX.lineN }), num('선 굵기', 'lineW', e, 1, { min: 1, max: 30, def: FX.lineW })) : null,
+            e.lineOn ? h('div.field-row', null, num('가운데 비움', 'lineIn', e, 5, { min: 0, max: 95, def: FX.lineIn }), (e.lineType || 'focus') === 'speed' ? num('선 방향', 'lineAng', e, 15, { min: -180, max: 180 }) : num('선 세기', 'lineA', e, 5, { min: 0, max: 100, def: FX.lineA })) : null,
+            h('div.btn-row', null, h('button.btn.small', { title: '이 컷의 분위기와 효과를 기억해 둬요', onclick: () => { V.fxClip = Object.fromEntries(FX_KEYS.filter(k => e[k] !== undefined).map(k => [k, e[k]])); toast('이 컷의 효과를 복사했어요. 다른 컷을 고르고 붙여넣으세요.'); emit(); } }, '효과 복사'), h('button.btn.small', { disabled: !V.fxClip, onclick: () => { for (const o of group().filter(x => x.type === 'panel')) { FX_KEYS.forEach(k => { delete o[k]; }); Object.assign(o, V.fxClip); } commit('효과 붙여넣기'); } }, '효과 붙여넣기'), h('button.btn.small', { disabled: !hasFx(e), onclick: () => { FX_KEYS.forEach(k => { delete e[k]; }); commit('효과 없애기'); } }, '효과 없애기'))),
         h('p.panel-note', null, '컷을 두 번 누르면 그림 옮기기로 들어가요(빈 컷이면 그림을 골라요). Alt를 누른 채 끌거나 휠을 돌려도 돼요.')] : []),
         ...(e.type === 'pic' ? [h('div.field-row', null, h('label.field', null, h('span.field-name.w', null, '진하기 %'), h('input.num', { type: 'number', min: 0, max: 100, step: 5, value: Math.round((e.op ?? 1) * 100), 'aria-label': '진하기', onchange: ev => { e.op = clamp((parseFloat(ev.target.value) || 0) / 100, 0, 1); commit('진하기'); } })), chk('좌우 뒤집기', 'fx')),
           h('div.field-row', null, h('label.check', { title: '효과음 그림의 색을 한 가지 색으로 바꿔요' }, h('input', { type: 'checkbox', checked: !!e.tint, 'aria-label': '색 입히기', onchange: ev => { e.tint = ev.target.checked ? '#e0458f' : ''; commit('색 입히기'); } }), e.tint ? h('input', { type: 'color', value: e.tint, 'aria-label': '입힐 색', onchange: ev => { e.tint = ev.target.value; commit('색 입히기'); } }) : '색 입히기'), num('테두리', 'ol', e, 1, { min: 0, max: 10 })),

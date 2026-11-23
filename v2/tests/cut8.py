@@ -80,6 +80,14 @@ with sync_playwright() as pw:
     P(page, "(() => { __potato.picked.clear(); __potato.picked.add(__potato.state.project.media[0].id); __potato.emit(); })()"); P(page, "__potato.run('cut.addPic')")
     page.check('.vid-side input[aria-label="색 입히기"]'); page.fill('.vid-side input[aria-label="테두리"]', '4'); page.keyboard.press('Tab'); pc = P(page, ELS + ".at(-1)"); assert pc['type'] == 'pic' and pc['tint'] and pc['ol'] == 4
     page.wait_for_timeout(200); shot(page, '95-handles')
+    # 컷 분위기: 견본을 고르면 값이 들어가고 그림이 달라져요. 효과 복사·붙여넣기, 없애기
+    page.keyboard.press('Escape'); pp = P(page, ELS + ".filter(e => e.type === 'panel')"); P(page, "__potato.cut.pick('%s')" % pp[0]['id']); page.wait_for_timeout(100)
+    hsh = "(() => { const c = document.querySelector('canvas.viewport'), d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let s = 0; for (let i = 0; i < d.length; i += 16) s = (s * 31 + d[i] + d[i + 1] * 3 + d[i + 2] * 7) >>> 0; return s; })()"
+    h0 = P(page, hsh); page.select_option('.vid-side select[aria-label="분위기"]', label='흑백 톤'); page.wait_for_timeout(150); m1 = P(page, ELS + ".find(e => e.id === '%s')" % pp[0]['id'])
+    assert m1['gray'] is True and m1['toneOn'] is True and P(page, hsh) != h0, m1
+    page.click('.vid-side >> text=효과 복사'); P(page, "__potato.cut.pick('%s')" % pp[1]['id']); page.click('.vid-side summary >> text=보정·톤·효과선'); page.click('.vid-side >> text=효과 붙여넣기'); assert P(page, ELS + ".find(e => e.id === '%s').toneOn" % pp[1]['id']) is True
+    page.click('.vid-side >> text=효과 없애기'); assert 'toneOn' not in P(page, ELS + ".find(e => e.id === '%s')" % pp[1]['id'])
+    page.keyboard.press('Escape'); [page.keyboard.press('Control+z') for _ in range(3)]; page.wait_for_timeout(150); assert 'gray' not in P(page, ELS + ".find(e => e.id === '%s')" % pp[0]['id']) and not errs, errs
     # 가리기 도구: 끌면 모자이크 요소가 생기고, 그 밑의 그림이 실제로 뭉개져요. 요소 목록에서 숨기고 잠가요
     page.keyboard.press('Escape'); n3 = P(page, ELS + ".length"); bigp = P(page, ELS + ".filter(e => e.type === 'panel').sort((a, b) => b.h - a.h)[0]")
     px = "(() => { const c = document.querySelector('canvas.viewport'), r = c.getBoundingClientRect(), k = c.width / r.width, d = c.getContext('2d').getImageData(Math.round((%f - r.left) * k), Math.round((%f - r.top) * k), 1, 1).data; return [d[0], d[1], d[2]]; })()"
