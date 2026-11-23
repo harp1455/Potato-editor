@@ -10,6 +10,7 @@ import { saveFiles, download } from '../core/files.js';
 import { generate } from '../api/gemini.js';
 import { dialog, toast, busy, showMenu, askText } from '../ui/overlay.js';
 import { SHAPES, LINES, TAILS, PRESETS, drawBubbles, inBubble, insetOf } from '../core/bubble.js';
+import { TEXT_STYLES, SFX_PRESETS, LOOK_KEYS, drawLettering } from '../core/lettering.js';
 
 const SIZES = [[800, 4000, '웹툰 세로 스크롤 (800 × 4000)'], [800, 1280, '웹툰 한 화면 (800 × 1280)'], [1000, 1414, '만화 페이지 (1000 × 1414)'], [1080, 1350, '인스타툰 세로 (1080 × 1350)'], [1080, 1920, '세로 (1080 × 1920)'], [1600, 2260, '만화 원고 (1600 × 2260)'], [1920, 1080, '가로 (1920 × 1080)'], [1080, 1080, '정사각형 (1080 × 1080)']];
 const LAYOUTS = [['1', '한 컷', [[0, 0, 1, 1]]], ['2', '위아래 2컷', [[0, 0, 1, .5], [0, .5, 1, .5]]], ['3', '위아래 3컷', [[0, 0, 1, 1 / 3], [0, 1 / 3, 1, 1 / 3], [0, 2 / 3, 1, 1 / 3]]], ['4', '4컷 (2 × 2)', [[0, 0, .5, .5], [.5, 0, .5, .5], [0, .5, .5, .5], [.5, .5, .5, .5]]], ['t', '위 큰 컷 + 아래 2컷', [[0, 0, 1, .6], [0, .6, .5, .4], [.5, .6, .5, .4]]]];
@@ -29,7 +30,7 @@ const pages = () => state.project.pages || (state.project.pages = []);
 export const pageOf = () => pages().find(p => p.id === state.project.activePage) || pages()[0] || null;
 // 모양 묶음: 말풍선·글자의 생김새를 이름 붙여 두고 다른 요소에 입혀요 (작업이 달라도 같이 써요)
 const LOOK = ['line', 'bw', 'bc', 'fill', 'fill2', 'fop', 'soft', 'sh', 'dbl'];   // 이어 붙인 말풍선끼리 같이 쓰는 생김새
-const STYLE_KEYS = { bubble: ['shape', 'size', 'color', 'bold', 'vert', 'font', 'sw', 'sc', 'tailKind', 'tailW', 'tailBend', 'wob', ...LOOK], text: ['size', 'color', 'sw', 'sc', 'bold', 'vert', 'font', 'rot'] };
+const STYLE_KEYS = { bubble: ['shape', 'size', 'color', 'bold', 'vert', 'font', 'sw', 'sc', 'tailKind', 'tailW', 'tailBend', 'wob', ...LOOK], text: [...LOOK_KEYS, 'rot'] };
 const styles = () => settings.get('cutStyles') || [];
 // 페이지 한눈에 보기: 모든 페이지를 작게 늘어놓고, 눌러서 가거나 순서를 바꿔요
 function overview() {
@@ -154,7 +155,7 @@ function drawEl0(g, e) {
     }
     g.fill(); g.restore();
   } else if (e.type === 'text') {
-    const m = drawText(g, e, e.x + e.w / 2, e.y + e.h / 2, 0); e.w = Math.ceil(m.w) + 8; e.h = Math.ceil(m.h);
+    const cx = e.x + e.w / 2, cy = e.y + e.h / 2, m = drawLettering(g, e, cx, cy); if (Math.abs(m.w - e.w) > 0.01 || Math.abs(m.h - e.h) > 0.01) { e.w = m.w; e.h = m.h; e.x = cx - m.w / 2; e.y = cy - m.h / 2; }
   }
 }
 // 이어 붙인 말풍선(join이 같은 것)은 맨 아래 것의 차례에 한 덩어리로 그려요
@@ -384,6 +385,13 @@ function sliceCut(a, b) {
   if (made.length) { setSel(made); commit('선으로 컷 자르기'); } else toast('선이 지나간 컷이 없어요. 컷을 가로질러 그어 주세요.');
   return made.length;
 }
+// 글자 모양 입히기: 고른 글자들에 견본을 입혀요. 효과음 견본의 크기는 800 폭 기준이라 페이지 폭에 맞춰 바꿔요
+function applyTextLook(p) { const pg = pageOf(), ts = group().filter(e => e.type === 'text'); if (!ts.length) return; for (const e of ts) Object.assign(e, p, p.size ? { size: Math.round(p.size * pg.w / 800) } : {}, p.sw ? { sw: Math.max(1, Math.round(p.sw * (p.size ? pg.w / 800 : 1))) } : {}, p.sw2 ? { sw2: Math.max(1, Math.round(p.sw2 * (p.size ? pg.w / 800 : 1))) } : {}); commit('글자 모양'); }
+function addSfxText(i) {
+  const pg = pageOf(), sp = SFX_PRESETS[i] || SFX_PRESETS[0]; if (!pg) return; const c = viewCenter(), k = pg.w / 800;
+  const t = { id: uid('e'), type: 'text', x: Math.round(c.x - 60), y: Math.round(c.y - 40), w: 120, h: 80, text: sp.text, font: '', color: '#111111', sc: '#ffffff', ...sp.p, size: Math.round(sp.p.size * k), sw: Math.max(1, Math.round((sp.p.sw || 0) * k)), sw2: Math.round((sp.p.sw2 || 0) * k), seed: 1 + Math.floor(Math.random() * 999), rot: i === 0 ? -12 : 0 };
+  pg.els.push(t); V.sel = t.id; V.more = null; V.tool = 'pick'; commit('효과음 넣기');
+}
 // 화면 가운데에 곧바로 넣기 (위쪽 줄의 단추)
 function addAtCenter(kind) {
   const pg = pageOf(); if (!pg) return; const c = viewCenter(); let n;
@@ -530,7 +538,7 @@ export const cutRoom = {
         tb('컷 나누기', '컷 모양을 골라 이 페이지에 넣거나, 고른 컷을 둘·셋·넷으로 나눠요.', ev => showMenu([{ head: '모양 골라서 넣기' }, ...LAYOUTS.map(([k, t]) => ({ label: t, run: () => applyLayout(k) })), '-', { label: '선을 그어 자르기 (비스듬히도)', keys: 'K', run: () => { V.tool = 'slice'; emit(); } }, '-', { head: '고른 컷 나누기' }, ...['cut.splitV', 'cut.splitH', 'cut.split3V', 'cut.split3H', 'cut.split4'].map(id => ({ label: { 'cut.splitV': '좌우 둘로', 'cut.splitH': '위아래 둘로', 'cut.split3V': '좌우 셋으로', 'cut.split3H': '위아래 셋으로', 'cut.split4': '넷으로' }[id], disabled: !(e && e.type === 'panel'), run: () => run(id) }))], ev.clientX, ev.clientY + 14)),
         tb('말풍선', '화면 가운데에 말풍선을 넣고 바로 대사를 적어요. 종류는 오른쪽 견본에서 골라요.', () => addAtCenter('bubble'), 'bubble'),
         tb('글자', '화면 가운데에 글자를 넣고 바로 적어요.', () => addAtCenter('text'), 'text'),
-        tb('효과음', '크고 기울어진 효과음 글자를 넣어요.', () => run('cut.sfx')),
+        tb('효과음', '효과음 글자를 견본에서 골라 넣어요. 그림으로 된 효과음은 왼쪽 효과음 탭에 있어요.', ev => showMenu([{ head: '글자로 만드는 효과음' }, ...SFX_PRESETS.map((sp, i) => ({ label: sp.n, run: () => addSfxText(i) }))], ev.clientX, ev.clientY + 14)),
         tb('집중선', '끌어서 집중선을 넣는 도구로 바꿔요.', () => { V.tool = 'lines'; emit(); }, 'lines'),
         h('span.tool-vsep'),
         tb('세로로 자동 배치', '보관함 그림을 페이지 폭에 맞춰 위에서 아래로 쌓아요 (웹툰).', stackDialog),
@@ -599,7 +607,32 @@ export const cutRoom = {
           h('p.panel-note', null, '꼬리 끝의 노란 점을 끌어 말하는 사람 쪽으로 돌려요. 말풍선 여럿을 Shift로 함께 고르면 이어 붙일 수 있어요.'),
           (group().filter(isB).length > 1 || e.join) && h('div.btn-row', null, h('button.btn.small', { disabled: group().filter(isB).length < 2, onclick: () => run('cut.join') }, '이어 붙이기'), h('button.btn.small', { disabled: !e.join, onclick: () => run('cut.unjoin') }, '떼어 내기'))] : []),
         ...(e.type === 'lines' ? [h('div.field-row', null, num('선 수', 'count'), num('굵기', 'thick', e, 0.1)), h('div.field-row', null, num('가운데 빈 곳 %', 'hole'), col('색', 'color', '#111111')), h('div.btn-row', null, h('button.btn.small', { onclick: () => { e.seed = 1 + Math.floor(Math.random() * 99999); commit('집중선 다시 뿌리기'); } }, '다르게 뿌리기'))] : []),
-        ...(e.type === 'text' ? [...textBox(), h('div.field-row', null, num('테두리', 'sw'), col('테두리색', 'sc', '#ffffff'))] : []),
+        ...(e.type === 'text' ? [
+          h('div.bub-grid.txt-grid', { role: 'group', 'aria-label': '글자 모양' }, [...TEXT_STYLES, ...SFX_PRESETS].map((st, i) => {
+            const c = h('canvas'), g2 = c.getContext('2d'); c.width = 112; c.height = 64; const smp = { id: 'th' + i, text: st.text || '가나', size: 40, color: '#111111', sc: '#ffffff', sw: 3, bold: true, ...st.p, ...(st.p.size ? { size: 40, sw: Math.round((st.p.sw || 0) * 40 / st.p.size), sw2: Math.round((st.p.sw2 || 0) * 40 / st.p.size) } : {}), vert: false, arc: st.p.arc ? 30 : 0 };
+            g2.save(); g2.translate(56, 32); g2.scale(0.9, 0.9); try { drawLettering(g2, smp, 0, 0); } catch (_) { /* 견본만 비어요 */ } g2.restore();
+            return h('button.bub-pre', { title: st.n + (st.text ? ' (효과음)' : ''), 'aria-label': st.n + ' 글자 모양', onclick: () => applyTextLook(st.text ? st.p : { ...st.p }) }, c); })),
+          ...textBox(),
+          h('div.field-row', null, chk('기울임', 'italic'), sel('정렬', 'align', [['center', '가운데'], ['left', '왼쪽'], ['right', '오른쪽']], 'center')),
+          h('div.field-row', null, num('줄 간격', 'lh', e, 0.05, { min: 0.6, max: 3, def: 1.3 }), num('글자 간격', 'sp', e, 1, { min: -40, max: 200 })),
+          h('details.sec-fold', { open: true }, h('summary', null, '테두리와 색'),
+            h('div.field-row', null, num('테두리', 'sw', e, 1, { min: 0, max: 80 }), col('테두리색', 'sc', '#ffffff')),
+            h('div.field-row', null, num('바깥 테두리', 'sw2', e, 1, { min: 0, max: 80 }), col('바깥색', 'sc2', '#111111')),
+            h('div.field-row', null, chk('색 번짐', 'fillGrad'), e.fillGrad ? col('끝 색', 'fill2', '#ffb300') : h('span')),
+            e.fillGrad ? sel('번지는 방향', 'gradDir', [['v', '위에서 아래로'], ['h', '왼쪽에서 오른쪽으로']], 'v') : null,
+            num('진하기 %', 'op', e, 5, { min: 0, max: 100, def: 100 })),
+          h('details.sec-fold', { open: !!(e.jit || e.grow || e.skew || e.rough || e.arc || e.ext) }, h('summary', null, '효과음 모양'),
+            h('div.field-row', null, num('흔들림', 'jit', e, 5, { min: 0, max: 100 }), num('점점 크게', 'grow', e, 5, { min: -80, max: 80 })),
+            h('div.field-row', null, num('기울기', 'skew', e, 2, { min: -45, max: 45 }), num('거칠게', 'rough', e, 5, { min: 0, max: 100 })),
+            h('div.field-row', null, num('휘기', 'arc', e, 5, { min: -100, max: 100 }), num('입체', 'ext', e, 2, { min: 0, max: 60 })),
+            e.ext ? h('div.field-row', null, num('입체 방향', 'extAng', e, 15, { min: 0, max: 360 }), col('입체 색', 'extColor', '#111111')) : null,
+            h('div.btn-row', null, h('button.btn.small', { title: '흔들림과 거친 모양을 다르게 뽑아요', onclick: () => { e.seed = 1 + Math.floor(Math.random() * 9999); commit('다르게 흔들기'); } }, '다르게 흔들기'))),
+          h('details.sec-fold', { open: !!(e.glow || e.shA || e.boxOn) }, h('summary', null, '후광·그림자·배경 띠'),
+            h('div.field-row', null, num('후광', 'glow', e, 5, { min: 0, max: 100 }), col('후광 색', 'glowColor', '#ffe25c')),
+            h('div.field-row', null, num('그림자 %', 'shA', e, 5, { min: 0, max: 100 }), col('그림자 색', 'shColor', '#000000')),
+            e.shA ? h('div.field-row', null, num('거리', 'shDist', e, 1, { min: 0, max: 60, def: 6 }), num('번짐', 'shBlur', e, 1, { min: 0, max: 60, def: 12 })) : null,
+            h('div.field-row', null, chk('배경 띠', 'boxOn'), e.boxOn ? col('띠 색', 'boxColor', '#000000') : h('span')),
+            e.boxOn ? h('div.field-row', null, num('띠 진하기', 'boxA', e, 5, { min: 0, max: 100, def: 65 }), num('띠 여백', 'boxPad', e, 5, { min: 0, max: 120, def: 30 })) : null)] : []),
         ...(e.type === 'bubble' || e.type === 'text' ? [h('h3.sec', null, '모양 묶음'),
           h('div.btn-row', null, h('select.text', { 'aria-label': '모양 묶음', style: 'flex:1;width:auto', onchange: ev => { const st = styles().filter(x => x.type === e.type)[+ev.target.value]; if (st) { Object.assign(e, st.props); commit('모양 묶음 입히기'); } } }, [h('option', { value: -1, selected: true }, styles().some(x => x.type === e.type) ? '저장한 모양 고르기' : '저장한 모양이 없어요'), ...styles().filter(x => x.type === e.type).map((x, i) => h('option', { value: i }, x.name))]),
             h('button.btn.small', { title: '지금 이 요소의 글자 크기·색·테두리·모양을 이름 붙여 저장해요', onclick: async () => { const name = await askText('모양 묶음 이름', e.type === 'bubble' ? '기본 말풍선' : '기본 글자', '저장'); if (!name) return; const props = {}; STYLE_KEYS[e.type].forEach(k => { if (e[k] !== undefined) props[k] = e[k]; }); settings.set('cutStyles', [...styles().filter(x => !(x.type === e.type && x.name === name)), { name, type: e.type, props }]); emit(); toast(`'${name}' 모양을 저장했어요.`); } }, '지금 모양 저장'))] : []),
@@ -679,7 +712,7 @@ export function registerCutCmds() {
   addCmd({ id: 'cut.dup', title: '요소 복제', menu: '컷', group: 'el', keys: 'Ctrl+D', enabled: has, run: () => { const pg = pageOf(), jm = {}, ns = group().map(e => ({ ...JSON.parse(JSON.stringify(e)), id: uid('e'), x: e.x + 24, y: e.y + 24, ...(isB(e) ? { tx: e.tx + 24, ty: e.ty + 24 } : {}) })); ns.forEach(n => { if (n.join) n.join = jm[n.join] || (jm[n.join] = uid('j')); if (n.gid) n.gid = jm[n.gid] || (jm[n.gid] = uid('g')); }); ns.forEach(n => { if (n.join && ns.filter(o => o.join === n.join).length < 2) delete n.join; }); pg.els.push(...ns); setSel(ns.map(n => n.id)); commit(ns.length > 1 ? `요소 ${ns.length}개 복제` : '요소 복제'); } });
   addCmd({ id: 'cut.delete', title: '요소 지우기', menu: '컷', group: 'el', enabled: has, run: () => { const pg = pageOf(), g = new Set(group().map(e => e.id)); pg.els = pg.els.filter(e => !g.has(e.id)); V.sel = null; commit(g.size > 1 ? `요소 ${g.size}개 지우기` : '요소 지우기'); } });
   addCmd({ id: 'cut.overview', title: '페이지 한눈에 보기…', menu: '컷', words: '전체 목록 순서', enabled: () => pages().length > 0, run: overview });
-  addCmd({ id: 'cut.sfx', title: '효과음 글자 넣기', menu: '컷', group: 'el', words: '의성어 쾅 sfx', enabled: on, run: () => { const pg = pageOf(), size = Math.round(pg.w / 7), t = { id: uid('e'), type: 'text', x: Math.round(pg.w / 2 - size), y: Math.round(pg.h / 2 - size / 2), w: size * 2, h: size, text: '쾅!', size, color: '#ffffff', sw: Math.max(4, Math.round(size / 12)), sc: '#111111', bold: true, rot: -12 }; pg.els.push(t); V.sel = t.id; V.tool = 'pick'; commit('효과음 넣기'); } });
+  addCmd({ id: 'cut.sfx', title: '효과음 글자 넣기', menu: '컷', group: 'el', words: '의성어 쾅 sfx', enabled: on, run: () => addSfxText(0) });
   addCmd({ id: 'cut.draft', title: '대사 초안… (제미나이)', menu: '컷', group: 'ai', words: '대본 글쓰기 write', enabled: () => !!pageOf(), run: draftDialog });
   addCmd({ id: 'cut.translate', title: '대사 번역… (제미나이)', menu: '컷', group: 'ai', words: 'translate 번역', enabled: () => !!pageOf(), run: translateDialog });
   addCmd({ id: 'cut.export', title: '이 페이지를 PNG로', menu: '컷', group: 'out', enabled: () => !!pageOf(), run: async () => { const pg = pageOf(), c = await pageCanvas(pg); download(await new Promise(r => c.toBlob(r, 'image/png')), pg.name + '.png'); toast(`'${pg.name}.png'로 저장했어요.`); } });

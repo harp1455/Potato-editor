@@ -80,6 +80,13 @@ with sync_playwright() as pw:
     P(page, "(() => { __potato.picked.clear(); __potato.picked.add(__potato.state.project.media[0].id); __potato.emit(); })()"); P(page, "__potato.run('cut.addPic')")
     page.check('.vid-side input[aria-label="색 입히기"]'); page.fill('.vid-side input[aria-label="테두리"]', '4'); page.keyboard.press('Tab'); pc = P(page, ELS + ".at(-1)"); assert pc['type'] == 'pic' and pc['tint'] and pc['ol'] == 4
     page.wait_for_timeout(200); shot(page, '95-handles')
+    # 글자 꾸밈: 효과음 견본으로 넣고, 글자 모양 견본을 입히고, 값을 바꿔요 (되돌리면 그대로)
+    page.keyboard.press('Escape'); n2 = P(page, ELS + ".length"); page.click('.cut-bar >> text=효과음'); page.click('.menu-item >> text=두근 설렘'); sx = P(page, ELS + ".at(-1)")
+    assert P(page, ELS + ".length") == n2 + 1 and sx['text'] == '두근' and sx['sw2'] > 0 and sx['jit'] == 22 and sx['w'] > 100, sx
+    assert page.locator('.txt-grid .bub-pre').count() == 16; page.click('.txt-grid .bub-pre[aria-label="네온 글자 모양"]'); nx = P(page, ELS + ".at(-1)"); assert nx['glow'] == 45 and nx['jit'] == 0 and nx['text'] == '두근'
+    page.click('.vid-side summary >> text=효과음 모양'); page.fill('.vid-side input[aria-label="휘기"]', '40'); page.keyboard.press('Tab'); assert P(page, ELS + ".at(-1).arc") == 40
+    page.wait_for_timeout(200); shot(page, '98-lettering'); assert not errs, errs
+    page.keyboard.press('Control+z'); page.keyboard.press('Control+z'); page.keyboard.press('Control+z'); assert P(page, ELS + ".length") == n2
     # 선으로 자르기: 비스듬히 그으면 컷이 두 조각이 되고, 사이가 벌어지고, 그림은 제자리에 이어져요
     page.keyboard.press('Escape'); big = P(page, ELS + ".filter(e => e.type === 'panel').sort((a, b) => b.h - a.h)[0]"); np0 = P(page, ELS + ".filter(e => e.type === 'panel').length")
     page.keyboard.press('k'); page.mouse.move(SX(big['x'] - 30), SY(big['y'] + big['h'] * 0.3)); page.mouse.down(); page.mouse.move(SX(big['x'] + big['w'] + 30), SY(big['y'] + big['h'] * 0.6), steps=4); page.mouse.up()
