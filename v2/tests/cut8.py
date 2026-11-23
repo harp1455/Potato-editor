@@ -59,6 +59,27 @@ with sync_playwright() as pw:
     page.mouse.move(SX(-20), SY(-10)); page.mouse.down(); page.mouse.move(SX(pg['w'] + 20), SY(pg['h'] + 10), steps=4); page.mouse.up()
     assert P(page, "__potato.cut.selected().length") == len(pg['els']), P(page, "__potato.cut.selected()")
     shot(page, '93-cut8')
+    # 손잡이: 변을 끌면 한쪽만, 돌리기 손잡이로 돌리고, 돌린 요소도 눌러서 골라져요
+    page.keyboard.press('Escape'); P(page, "__potato.cut.pick(%s[0].id)" % ELS); page.wait_for_timeout(100); e = P(page, ELS + "[0]")
+    page.mouse.move(SX(e['x'] + e['w']), SY(e['y'] + e['h'] / 2)); page.mouse.down(); page.mouse.move(SX(e['x'] + e['w'] - 100), SY(e['y'] + e['h'] / 2), steps=3); page.mouse.up()
+    e2 = P(page, ELS + "[0]"); assert abs(e2['w'] - (e['w'] - 100)) < 4 and e2['h'] == e['h'] and e2['x'] == e['x'], (e, e2)
+    kz = P(page, "__potato.cut.view().zoom"); page.mouse.move(SX(e2['x'] + e2['w'] / 2), SY(e2['y']) - 24); page.mouse.down(); page.mouse.move(SX(e2['x'] + e2['w'] / 2 + 200), SY(e2['y'] + e2['h'] / 2), steps=4); page.mouse.up()
+    assert P(page, ELS + "[0].rot") == 90, P(page, ELS + "[0].rot")
+    P(page, "__potato.run('cut.front')"); page.keyboard.press('Escape'); page.mouse.click(SX(e2['x'] + e2['w'] / 2), SY(e2['y'] + e2['h'] / 2 + e2['w'] / 2 - 6)); assert P(page, "__potato.cut.sel()") == e2['id']   # 돌려서 세로로 길어진 자리
+    page.keyboard.press('Control+z'); page.keyboard.press('Control+z'); page.keyboard.press('Control+z')
+    # 컷 안 그림: 전체 보이기, 좌우 뒤집기, 두 번 눌러 그림 옮기기
+    P(page, "__potato.cut.pick(%s[0].id)" % ELS); page.click('.vid-side >> text=전체 보이기'); assert P(page, ELS + "[0].is") <= 1
+    page.check('.vid-side label:has-text("좌우 뒤집기") input'); assert P(page, ELS + "[0].ifx") is True
+    e = P(page, ELS + "[0]"); page.mouse.dblclick(SX(e['x'] + 20), SY(e['y'] + 20)); page.wait_for_selector('.vid-side >> text=그림 옮기기 끝내기')
+    page.mouse.move(SX(e['x'] + 60), SY(e['y'] + 60)); page.mouse.down(); page.mouse.move(SX(e['x'] + 110), SY(e['y'] + 60), steps=3); page.mouse.up()
+    assert abs(P(page, ELS + "[0].ix") - 50) < 4 and P(page, ELS + "[0].x") == e['x']; page.keyboard.press('Escape')
+    # 글자는 모서리를 끌면 글자 크기가 바뀌어요. 스티커는 색을 입히고 테두리를 둘러요
+    page.click('.cut-bar >> text=글자'); page.wait_for_selector('textarea.cut-edit'); page.keyboard.press('Escape'); page.wait_for_timeout(150); t = P(page, ELS + ".at(-1)")
+    page.mouse.move(SX(t['x'] + t['w']), SY(t['y'] + t['h'])); page.mouse.down(); page.mouse.move(SX(t['x'] + t['w'] * 1.5 + 0), SY(t['y'] + t['h'] * 1.5), steps=3); page.mouse.up()
+    assert P(page, ELS + ".at(-1).size") > t['size'] * 1.5, (t, P(page, ELS + ".at(-1)"))
+    P(page, "(() => { __potato.picked.clear(); __potato.picked.add(__potato.state.project.media[0].id); __potato.emit(); })()"); P(page, "__potato.run('cut.addPic')")
+    page.check('.vid-side input[aria-label="색 입히기"]'); page.fill('.vid-side input[aria-label="테두리"]', '4'); page.keyboard.press('Tab'); pc = P(page, ELS + ".at(-1)"); assert pc['type'] == 'pic' and pc['tint'] and pc['ol'] == 4
+    page.wait_for_timeout(200); shot(page, '95-handles')
     # 내보내기 창: JPG, 세로로 잘라 여러 장
     page.keyboard.press('Escape'); P(page, "window.showDirectoryPicker = undefined"); page.click('.cut-bar >> text=내보내기'); page.wait_for_selector('.dlg >> text=세로로 자르기')
     page.select_option('.dlg select[aria-label="파일"]', 'jpeg'); page.fill('.dlg input[aria-label="세로로 자르기"]', '300'); page.keyboard.press('Tab'); shot(page, '94-export')
