@@ -138,7 +138,8 @@ export function registerAiCmds(openPacks) {
   addCmd({ id: 'help.iopaint', title: 'IOPaint 켜는 법', menu: '도움말', words: '채우기 그려 넣기 설치', run: () => iopHelp() });
   addCmd({ id: 'ai.censor', title: '자동 흰칠', menu: 'AI', group: 'cz', keys: 'Ctrl+Shift+W', words: '가리기 모자이크 검열 성기', enabled: hasLayer, run: () => { const k = censorCfg(); return job('자동 흰칠', ['deep', 'deepn', k.model === 'precise' ? 'segM' : 'segN', 'samE', 'samD'], async (j, say) => {
     const l = layerOf(), bmp = await layerPic(l), r = await censorMask(bmp, j, say);
-    if (!r.found) { toast('가릴 곳을 찾지 못했어요. 설정에서 민감도를 올려 볼 수 있어요.'); return; }
+    if (!r.found) { toast('가릴 곳을 찾지 못했어요. 수동 흰칠(가리기 붓)로 직접 가릴 수 있어요.'); return; }
+    if (r.retried) toast('처음에는 못 찾아서 더 꼼꼼히 찾았어요. 가린 자리가 맞는지 확인해 주세요.');
     const n = await overlay(l, r.canvas, l.name + ' 흰칠'); if (n) n.paint = true;   // 지우개와 가리기 붓으로 고칠 수 있게
     commit('자동 흰칠');
   }); } });
@@ -212,20 +213,27 @@ export async function packsPane(redraw) {
 }
 
 // ---- 자동 흰칠 ----
-const CZ_DEF = { model: 'fast', shape: 'contour', pad: 3, sens: 50, male: true, female: true, anus: false, color: '#ffffff' };
+const CZ_DEF = { model: 'fast', shape: 'contour', pad: 3, sens: 50, male: true, female: true, anus: false, small: false, color: '#ffffff' };
 export const censorCfg = () => ({ ...CZ_DEF, ...(settings.get('censor') || {}) });
 // 그림(비트맵·캔버스) → { canvas(가릴 곳만 색칠, 나머지 투명), found }. 그림은 이 컴퓨터 안에서만 처리해요
 export async function censorMask(src, job, say) {
   const A = legacyAi(), k = censorCfg(), ds = Math.min(1, 4096 / Math.max(src.width, src.height)), W = Math.round(src.width * ds), Hh = Math.round(src.height * ds);
-  Object.assign(A.czCfg, { model: k.model, shape: k.shape, pad: k.pad, sens: k.sens, male: k.male, female: k.female, anus: k.anus, color: k.color });
   const cv = mk(W, Hh), g = cv.getContext('2d', { willReadFrequently: true }); g.fillStyle = '#fff'; g.fillRect(0, 0, W, Hh); g.drawImage(src, 0, 0, W, Hh);
-  const st = A.czNewState(W, Hh, k.pad * Math.max(W, Hh) / 1000);
-  await A.czAnalyze(cv, st, job, t => say && say(String(t).replace('…', ''), 0.5));
-  let M = A.czComposeMask(st); const pad = Math.round(k.pad * Math.max(W, Hh) / 1000); if (pad > 0) M = A.czDilate(M, W, Hh, pad);
+  const pass = async (sens, small) => {
+    Object.assign(A.czCfg, { model: k.model, shape: k.shape, pad: k.pad, sens, male: k.male, female: k.female, anus: k.anus, small, color: k.color });
+    const st = A.czNewState(W, Hh, k.pad * Math.max(W, Hh) / 1000);
+    await A.czAnalyze(cv, st, job, t => say && say(String(t).replace('…', ''), 0.5));
+    let M = A.czComposeMask(st); const pad = Math.round(k.pad * Math.max(W, Hh) / 1000); if (pad > 0) M = A.czDilate(M, W, Hh, pad);
+    return M;
+  };
+  const any = M => { for (let i = 0; i < M.length; i++) if (M[i]) return true; return false; };
+  // 못 찾으면 한 번 더: 작게 나온 것까지 잘게 나눠 보고, 민감도도 올려서 찾아요 (손에 가려졌거나 멀리 그려진 것)
+  let M = await pass(k.sens, !!k.small), retried = false;
+  if (!any(M) && !(job && job.stop) && (k.sens < 85 || !k.small)) { if (say) say('더 꼼꼼히 찾는 중', 0.6); M = await pass(Math.max(k.sens, 85), true); retried = any(M); }
   const out = mk(W, Hh), og = out.getContext('2d'), id = og.createImageData(W, Hh), col = [1, 3, 5].map(i => parseInt(k.color.slice(i, i + 2), 16)); let found = 0;
   for (let i = 0; i < M.length; i++) if (M[i]) { id.data[i * 4] = col[0]; id.data[i * 4 + 1] = col[1]; id.data[i * 4 + 2] = col[2]; id.data[i * 4 + 3] = 255; found++; }
   og.putImageData(id, 0, 0);
-  return { canvas: out, found };
+  return { canvas: out, found, retried };
 }
 function censorDialog() {
   const k = censorCfg(), set = (key, v) => { k[key] = v; settings.set('censor', k); draw(); }, box = H('div.vid-form');
@@ -235,6 +243,7 @@ function censorDialog() {
     H('p.dlg-text', null, '그림 속 성기를 찾아 그 모양대로 가려요. 결과는 새 레이어로 올라가서 끄고 켜거나 지울 수 있어요. 그림은 이 컴퓨터 안에서만 처리해요.'),
     H('div.choice', { role: 'radiogroup' }, [['fast', '빠르게', '가벼운 모델로 모양을 따요. 대부분 이걸로 충분해요.'], ['precise', '정밀하게', '큰 모델이라 모양이 더 정확하고 항문도 잘 찾아요. 몇 배 느려요.']].map(([v, t, d]) => H('label.choice-item' + (k.model === v ? '.on' : ''), null, H('input', { type: 'radio', name: 'czm', checked: k.model === v, onchange: () => set('model', v) }), H('span', null, H('b', null, t), H('small', null, d))))),
     H('div.btn-row', null, chk('male', '남성 성기'), chk('female', '여성 성기'), chk('anus', '항문')),
+    H('label.check', { title: '멀리서 그린 장면이나 손에 가려 작게 나온 것을 더 잘 찾아요. 시간은 몇 배 걸려요. 꺼 두어도, 하나도 못 찾았을 때는 알아서 한 번 더 꼼꼼히 찾아요.' }, H('input', { type: 'checkbox', checked: !!k.small, onchange: e => set('small', e.target.checked) }), '작게 나온 것도 찾기 (느려요)'),
     H('label.field', null, H('span.field-name.w', null, '모양'), H('select.text', { 'aria-label': '모양', onchange: e => set('shape', e.target.value) }, [['contour', '윤곽을 따라'], ['ellipse', '타원으로']].map(([v, t]) => H('option', { value: v, selected: k.shape === v }, t)))),
     rng('sens', '민감도', 0, 100, ''), rng('pad', '여유', 0, 12, ''),
     H('label.field', null, H('span.field-name.w', null, '색'), H('input', { type: 'color', value: k.color, 'aria-label': '가리는 색', onchange: e => set('color', e.target.value) })));
