@@ -80,6 +80,16 @@ with sync_playwright() as pw:
     P(page, "(() => { __potato.picked.clear(); __potato.picked.add(__potato.state.project.media[0].id); __potato.emit(); })()"); P(page, "__potato.run('cut.addPic')")
     page.check('.vid-side input[aria-label="색 입히기"]'); page.fill('.vid-side input[aria-label="테두리"]', '4'); page.keyboard.press('Tab'); pc = P(page, ELS + ".at(-1)"); assert pc['type'] == 'pic' and pc['tint'] and pc['ol'] == 4
     page.wait_for_timeout(200); shot(page, '95-handles')
+    # 펜: 두 번 그으면 한 손그림에 획이 둘. 말풍선은 글자에 맞춰 저절로 커져요. 컷 모양 12가지 창
+    page.keyboard.press('Escape'); n5 = P(page, ELS + ".length"); page.keyboard.press('p')
+    for yy in (700, 760): page.mouse.move(SX(120), SY(yy)); page.mouse.down(); page.mouse.move(SX(300), SY(yy + 20), steps=5); page.mouse.up()
+    dr = P(page, ELS + ".at(-1)"); assert P(page, ELS + ".length") == n5 + 1 and dr['type'] == 'draw' and len(dr['strokes']) == 2 and dr['w'] > 150, dr
+    page.keyboard.press('v'); page.click('.vid-side >> text=마지막 획 지우기'); assert len(P(page, ELS + ".at(-1).strokes")) == 1
+    page.keyboard.press('Escape'); page.click('.cut-bar >> text=말풍선'); page.wait_for_selector('textarea.cut-edit'); page.keyboard.press('Escape'); page.wait_for_timeout(100)
+    page.check('.vid-side label:has-text("글자에 맞춰 크기 자동 조절") input'); w1 = P(page, ELS + ".at(-1).w"); page.fill('.vid-side textarea[aria-label="대사"]', '아주 길고 긴 대사를 적으면 말풍선이 저절로 커져요'); page.keyboard.press('Tab'); assert P(page, ELS + ".at(-1).w") > w1 * 1.3
+    page.keyboard.press('Escape'); page.click('.cut-bar >> text=컷 나누기'); page.click('.menu-item >> text=모양 골라서 나누기'); page.wait_for_selector('.tpl-item'); assert page.locator('.tpl-item').count() == 12; shot(page, '100-templates')
+    np1 = P(page, ELS + ".filter(e => e.type === 'panel').length"); page.click('.tpl-item >> text=엇갈림'); assert P(page, ELS + ".filter(e => e.type === 'panel').length") == np1 + 6
+    page.keyboard.press('Escape'); [page.keyboard.press('Control+z') for _ in range(7)]; assert P(page, ELS + ".length") == n5 and not errs, (P(page, ELS + ".length"), n5, errs)
     # 컷 분위기: 견본을 고르면 값이 들어가고 그림이 달라져요. 효과 복사·붙여넣기, 없애기
     page.keyboard.press('Escape'); pp = P(page, ELS + ".filter(e => e.type === 'panel')"); P(page, "__potato.cut.pick('%s')" % pp[0]['id']); page.wait_for_timeout(100)
     hsh = "(() => { const c = document.querySelector('canvas.viewport'), d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let s = 0; for (let i = 0; i < d.length; i += 16) s = (s * 31 + d[i] + d[i + 1] * 3 + d[i + 2] * 7) >>> 0; return s; })()"

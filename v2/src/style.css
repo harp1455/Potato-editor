@@ -334,6 +334,7 @@ label.batch-row { cursor: pointer; } .batch-row input[type=checkbox] { accent-co
 .el-row { display: grid; grid-template-columns: 24px 1fr 24px; align-items: center; background: var(--panel); } .el-row.off .el-name { color: var(--faint); }
 .el-row .icon-btn { width: 24px; height: 24px; color: var(--faint); } .el-row .icon-btn.on { color: var(--text); }
 .el-name { text-align: left; padding: 3px 4px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; } .el-name small { color: var(--faint); margin-right: 6px; } .el-name:hover { background: var(--raise); }
+.tpl-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; } .tpl-item { display: grid; gap: 4px; justify-items: center; padding: 6px; border: 1px solid var(--line); border-radius: var(--r); background: var(--raise); color: var(--dim); font-size: 11px; cursor: pointer; } .tpl-item canvas { width: 100%; height: auto; } .tpl-item:hover { border-color: var(--potato); color: var(--text); }
 .bub-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; align-self: stretch; }
 .bub-pre { padding: 0; border: 1px solid var(--line); border-radius: var(--r); background: #8d8d8d; cursor: pointer; display: block; overflow: hidden; }
 .bub-pre canvas { width: 100%; height: auto; display: block; }

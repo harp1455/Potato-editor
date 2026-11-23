@@ -177,7 +177,7 @@ export async function tidyMedia() {
   state.saved = false; scheduleSave(); return { n: dead.length, bytes };
 }
 // 작업 하나에 딸린 저장 조각들: 그림과 미리보기, 영상 작업실의 소리·클립, 영상
-export const blobKeys = p => [...(p.media || []).flatMap(m => [m.id, 't:' + m.id]), ...(p.sequences || []).flatMap(s => [...(s.audio ? [s.audio] : []), ...(s.audios || [])].map(a => 'aud:' + a.id).concat([...new Set((s.scenes || []).filter(x => x.clip).map(x => 'clip:' + x.clip))])), ...(p.videos || []).map(v => 'vid:' + v.id)];
+export const blobKeys = p => [...(p.media || []).flatMap(m => [m.id, 't:' + m.id]), ...(p.sequences || []).flatMap(s => [...(s.audio ? [s.audio] : []), ...(s.audios || [])].map(a => 'aud:' + a.id).concat([...new Set((s.scenes || []).filter(x => x.clip).map(x => 'clip:' + x.clip))])), ...(p.videos || []).map(v => 'vid:' + v.id), ...(p.fonts || []).map(f => 'font:' + f.id)];
 export async function deleteProject(id) {
   const p = await idb.get('projects', id);
   if (p) for (const k of blobKeys(p)) await idb.del('blobs', k);
