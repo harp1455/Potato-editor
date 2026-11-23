@@ -110,7 +110,7 @@ function pick(file, names) {
   const text = read(file), ast = parse(text, { ecmaVersion: 2023, sourceType: 'script', allowAwaitOutsideFunction: true, allowReturnOutsideFunction: true });
   return names.map(n => { const f = ast.body.find(x => x.type === 'FunctionDeclaration' && x.id.name === n); if (!f) throw new Error(`${file}에 ${n}이 없어요`); return text.slice(f.start, f.end); }).join('\n');
 }
-const helpers = [pick('cz.js', ['czDeepest', 'czLargest']), pick('depth.js', ['dpBox', 'dpNormBlur', 'dpFill']), pick('ai.js', ['aiMask'])].join('\n');
+const helpers = [pick('cz.js', ['czDeepest', 'czLargest']), pick('depth.js', ['dpBox', 'dpGuided', 'dpNormBlur', 'dpFill']), pick('ai.js', ['aiMask'])].join('\n');
 
 const DEPS = ['$', '$$', 'clamp', 'esc', 'uid', 'newCanvas', 'toast', 'modal', 'closeModal', 'czLoad', 'czCall', 'cz', 'czIsApp', 'czPacksReady', 'czPackState', 'czProgress', 'czErrText', 'idb', 'safeName', 'saveFiles', 'naiFill'];
 writeFileSync(join(out, 'rig.gen.js'), `// 자동으로 만든 파일이에요. 고치지 마세요 (tools/legacy.mjs가 8.x의 src/rig.js에서 만들어요)

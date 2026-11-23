@@ -847,7 +847,7 @@ async function rgPrepare(src, sw, sh0, tk) {
   const px = cg.getImageData(0, 0, W, H).data, n = W * H, g = Math.max(W, H) / 120, sh = { W, H, gw: Math.max(8, Math.round(W / g)), gh: Math.max(8, Math.round(H / g)), src: c, bg: null, uid: uid() };
   const stopQ = () => { if (tk && tk.stop) throw new Error('stop'); }, soft = async (fn, def) => { try { return await fn(); } catch (e) { if (String(e && e.message) === 'stop') throw e; console.warn('rgPrepare', e); return def; } };
   tk && tk.set('캐릭터를 따내는 중…', 0.06);
-  const A0 = await aiMask(c, W, H, tk); stopQ();
+  const A0 = rgPolish(await aiMask(c, W, H, tk), px, W, H); stopQ(); // 딴 그대로는 가장자리가 거칠어서 그림의 선에 맞춰 다듬어요
   const bin = new Uint8Array(n); let tot = 0; for (let i = 0; i < n; i++) { bin[i] = A0[i] > 100 ? 1 : 0; tot += bin[i]; }
   const big = czLargest(bin, W, H); if (!big || big.n < n * 0.004) throw new Error('nochar');
   // 사람이 여럿인지
@@ -944,7 +944,23 @@ function rgEnclosedGrid(rig, rem, M) {
   const d = g2.getImageData(0, 0, W, H).data, out = new Float32Array(W * H); for (let i = 0; i < W * H; i++) out[i] = M[i] > 0 ? clamp((d[i * 4 + 3] / 255 - 0.25) * 2, 0, 1) : 0;
   return out;
 }
+// 마스크 다듬기: AI가 딴 모양은 256~1024칸짜리를 키운 것이라 가장자리가 들쭉날쭉하고 안에 점 같은 구멍이 남아요.
+// 안쪽의 작은 구멍을 메우고, 떨어진 부스러기를 지우고, 가장자리를 그림의 선·색 경계에 맞춰요. M: 0~255, px: 그림(RGBA) → 새 M
+function rgPolish(M, px, W, H) {
+  const n = W * H, bin = new Uint8Array(n); let area = 0; for (let i = 0; i < n; i++) if (M[i] > 127) { bin[i] = 1; area++; } if (area < 40) return M;
+  const lab = new Int32Array(n), st = [];
+  const flood = (s0, id, v) => { let c = 0, edge = false; st.push(s0); lab[s0] = id; while (st.length) { const i = st.pop(), x = i % W, y = (i / W) | 0; c++; if (x === 0 || y === 0 || x === W - 1 || y === H - 1) edge = true; if (x > 0 && !lab[i - 1] && bin[i - 1] === v) { lab[i - 1] = id; st.push(i - 1); } if (x < W - 1 && !lab[i + 1] && bin[i + 1] === v) { lab[i + 1] = id; st.push(i + 1); } if (y > 0 && !lab[i - W] && bin[i - W] === v) { lab[i - W] = id; st.push(i - W); } if (y < H - 1 && !lab[i + W] && bin[i + W] === v) { lab[i + W] = id; st.push(i + W); } } return { c, edge }; };
+  const info = [null]; let big = 0; for (let i = 0; i < n; i++) if (!lab[i]) { const r = flood(i, info.length, bin[i]); r.v = bin[i]; info.push(r); if (r.v && r.c > big) big = r.c; }
+  const holeMax = Math.max(12, area * 0.004), dustMax = Math.max(8, big * 0.012);
+  for (let i = 0; i < n; i++) { const r = info[lab[i]]; if (!r.v && !r.edge && r.c <= holeMax) bin[i] = 1; else if (r.v && r.c <= dustMax) bin[i] = 0; }
+  const P = Float32Array.from(bin), G = new Float32Array(n); for (let i = 0; i < n; i++) G[i] = (px[i * 4] * 0.299 + px[i * 4 + 1] * 0.587 + px[i * 4 + 2] * 0.114) / 255;
+  const r = Math.max(2, Math.round(Math.max(W, H) / 220)), g = dpGuided(G, P, W, H, r, 1.5e-3), near = dpBox(P, W, H, r + 1), out = new Uint8ClampedArray(n);
+  for (let i = 0; i < n; i++) out[i] = near[i] <= 0.001 ? 0 : near[i] >= 0.999 ? 255 : Math.round(clamp((g[i] - 0.5) * 3.2 + 0.5, 0, 1) * 255); // 가장자리 띠에서만 선에 맞추고, 안쪽·바깥쪽은 그대로
+  return out;
+}
+const rgSrcPx = rig => rig.src.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, rig.W, rig.H).data;
 async function rgSplit(rig, L, M, name, tk, chars) {
+  M = rgPolish(M, rgSrcPx(rig), rig.W, rig.H);
   const { W, H } = rig, n = W * H, id = rgTexPx(L, W, H), d = id.data, part = new ImageData(W, H), pd = part.data, rem = new Uint8Array(n); let cnt = 0;
   // 남는 그림 쪽은 떼어 낸 모양보다 조금 더 넓게 지워요: 부위의 테두리 선이 점선처럼 남지 않게 (넓힌 띠는 둘레에 맞게 다시 메워요)
   const M0 = M, m01 = new Float32Array(n); for (let i = 0; i < n; i++) m01[i] = M0[i] > 96 ? 1 : 0;
