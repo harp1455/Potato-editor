@@ -1,0 +1,22 @@
+# 2.0의 애니 탐지 팩(deepghs 사람·머리·손)을 받아 묶어서 팩 릴리스에 올려요
+name: packs-v2-detect
+on:
+  push:
+    branches: [v2]
+    paths: ['v2/tools/make_detect_pack.py', '.github/workflows/packs-v2-detect.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONIOENCODING: utf-8
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python v2/tools/make_detect_pack.py detect
+      - run: gh release upload packs-7 detect/* --clobber -R "${{ github.repository }}"

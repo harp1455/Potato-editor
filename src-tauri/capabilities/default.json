@@ -18,9 +18,39 @@
     "fs:allow-exists",
     "fs:allow-stat",
     "fs:allow-read-dir",
+    "fs:allow-read-file",
+    "fs:allow-copy-file",
+    {
+      "identifier": "fs:scope",
+      "allow": [
+        {
+          "path": "**"
+        },
+        {
+          "path": "$HOME/**"
+        }
+      ]
+    },
     "dialog:default",
     "upload:default",
     "process:default",
-    "updater:default"
+    "updater:default",
+    {
+      "identifier": "http:default",
+      "allow": [
+        {
+          "url": "http://127.0.0.1:*"
+        },
+        {
+          "url": "http://127.0.0.1:*/*"
+        },
+        {
+          "url": "http://localhost:*"
+        },
+        {
+          "url": "http://localhost:*/*"
+        }
+      ]
+    }
   ]
 }

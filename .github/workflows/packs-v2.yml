@@ -1,0 +1,37 @@
+# 2.0의 정밀 윤곽 팩(SAM 2.1)을 만들어 팩 릴리스에 올려요. 이 파일이나 만드는 도구가 바뀌면 다시 돌아요
+name: packs-v2
+on:
+  push:
+    branches: [v2]
+    paths: ['v2/tools/make_outline_pack.py', 'v2/tools/make_people_pack.py', '.github/workflows/packs-v2.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  outline:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONIOENCODING: utf-8
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install onnx==1.23.2 numpy
+      - run: python v2/tools/make_outline_pack.py outline
+      - run: gh release upload packs-7 outline/* --clobber -R "${{ github.repository }}"
+  people:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONIOENCODING: utf-8
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cpu
+      - run: pip install onnx==1.17.0 "numpy<2" mmengine==0.10.7 mmcv-lite==2.1.0 mmdet==3.3.0
+      - run: python v2/tools/make_people_pack.py people
+      - run: gh release upload packs-7 people/* --clobber -R "${{ github.repository }}"

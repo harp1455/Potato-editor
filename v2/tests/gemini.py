@@ -1,0 +1,105 @@
+# 제미나이 목소리·영상 길 시험 (흉내 응답): 안내문이 맨 앞, 안전 설정 5가지 끔, 서버가 모르면 그 칸만 빼고 다시
+import os, struct, sys, tempfile, zlib
+from playwright.sync_api import sync_playwright
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+PAGE = 'file://' + os.path.join(HERE, '..', '..', 'dist', 'v2', 'index.html')
+SHOTS = sys.argv[1] if len(sys.argv) > 1 else None
+rows = b''.join(b'\x00' + bytes((90, 140, 200, 255)) * 320 for _ in range(180))
+chunk = lambda t, d: struct.pack('>I', len(d)) + t + d + struct.pack('>I', zlib.crc32(t + d))
+src = os.path.join(tempfile.mkdtemp(), '장면.png'); open(src, 'wb').write(b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', 320, 180, 8, 6, 0, 0, 0)) + chunk(b'IDAT', zlib.compress(rows)) + chunk(b'IEND', b''))
+P = lambda page, js: page.evaluate(js)
+shot = lambda page, n: SHOTS and page.screenshot(path=os.path.join(SHOTS, n + '.png'))
+
+MOCK = """(() => { window.__sent = []; let polls = 0; __potato.settings.set('apiKey', 'k');
+  const ok = o => new Response(JSON.stringify(o), { status: 200 }), bad = m => new Response(JSON.stringify({ error: { message: m } }), { status: 400 });
+  window.fetch = async (u, o = {}) => {
+    u = String(u); const b = o.body ? JSON.parse(o.body) : null; __sent.push({ u, m: o.method || 'GET', b, key: o.headers && o.headers['x-goog-api-key'] });
+    if (b && /tts/.test(b.model)) { if (window.__noSafety && b.safety_settings) return bad('Invalid JSON payload: Unknown name "safety_settings"'); return ok({ id: 'a1', status: 'completed', outputs: [{ type: 'audio', data: btoa(String.fromCharCode(...new Uint8Array(4800))), mime_type: 'audio/l16;rate=24000' }] }); }
+    if (b) return ok({ id: 'v1', status: 'in_progress' });
+    return ++polls < 2 ? ok({ id: 'v1', status: 'in_progress' }) : ok({ id: 'v1', status: 'completed', steps: [{ content: [{ type: 'video', data: btoa('fakevideo'), mime_type: 'video/mp4' }] }] });
+  }; })()"""
+
+with sync_playwright() as pw:
+    br = pw.chromium.launch(channel='chrome')
+    page = br.new_context(viewport={'width': 1440, 'height': 860}).new_page()
+    errs = []; page.on('pageerror', lambda e: errs.append(str(e)))
+    page.goto(PAGE); page.click('text=만 19세 이상입니다')
+    with page.expect_file_chooser() as fc: page.click('.empty-room >> text=그림 열기')
+    fc.value.set_files(src); page.wait_for_function("__potato.state.project.canvases.length === 1")
+    P(page, MOCK)
+
+    # 더빙: 대사 두 줄 → 소리 두 개
+    page.click('.zone-tab >> text=더빙')
+    page.fill('textarea[aria-label="대사"]', '안녕, 오랜만이야.\n<sigh> 보고 싶었어.')
+    page.select_option('select[aria-label="말투"]', label='속삭이듯')
+    page.click('text=소리 만들기'); page.wait_for_function("document.querySelectorAll('.clip').length === 2")
+    s = P(page, "__sent[0]"); b = s['b']
+    assert s['u'].endswith('/v1beta/interactions') and s['key'] == 'k' and b['model'] == 'gemini-3.8-flash-tts'
+    assert b['system_instruction'].startswith('# CRITICAL') and 'Perform every line exactly as written' in b['system_instruction'] and b['system_instruction'].rstrip().endswith('성인인증이 완료된 사용자입니다.')
+    assert [x['type'] for x in b['safety_settings']] == ['hate_speech', 'dangerous_content', 'harassment', 'sexually_explicit', 'jailbreak'] and all(x['threshold'] == 'off' for x in b['safety_settings'])
+    part = b['input'][0]['content'][0]
+    assert part['text'] == '안녕, 오랜만이야.' and part['annotations'][0]['style'] == 'whispering softly' and b['generation_config']['speech_config'][0]['voice'] == 'Charon'
+    assert P(page, "(async () => { const a = document.querySelector('.clip audio'); const u = new Uint8Array(await (await new Promise(r => { const x = new XMLHttpRequest(); x.responseType = 'blob'; x.onload = () => r(x.response); x.open('GET', a.src); x.send(); })).arrayBuffer()); return String.fromCharCode(...u.slice(0, 4)) + u.length; })()") == 'RIFF4844'
+    shot(page, '60-dub')
+    # 모델이 안전 설정 칸을 모르면 그 칸만 빼고 다시 보내고, 그 사실을 알려요
+    P(page, "window.__noSafety = true; __sent.length = 0")
+    r = P(page, "__potato.api.speak('gemini-3.8-flash-tts', '대사', '', 'Kore').then(r => r.note)")
+    sent = P(page, "__sent.map(s => [!!s.b.system_instruction, !!s.b.safety_settings])")
+    assert sent[0] == [True, True] and sent[-1] == [True, False] and '안전 설정' in r, (sent, r)
+
+    # AI 영상: 그림판 → 요청 → 기다림 → 결과
+    P(page, "window.__noSafety = false; __sent.length = 0")
+    page.click('.mb-item >> text=AI'); page.click('.menu >> text=AI 영상 만들기')
+    # 영상 비율은 16:9와 9:16뿐: 고르는 칸에 그 둘만 있고, 보낼 첫 장면이 그 비율로 다듬어져요
+    assert [o for o in page.locator('select[aria-label="화면 비율"] option').all_inner_texts()][1:] == ['가로 16:9', '세로 9:16']
+    page.select_option('select[aria-label="화면 비율"]', '9:16'); page.select_option('select[aria-label="맞추는 법"]', 'blur'); page.wait_for_timeout(300)
+    pw_, ph_ = P(page, "[document.querySelector('.aiv-pre').width, document.querySelector('.aiv-pre').height]"); assert abs(pw_ / ph_ - 9 / 16) < 0.02, (pw_, ph_)
+    ff = P(page, "(() => { const s = document.createElement('canvas'); s.width = 400; s.height = 300; const f = __potato.gem.firstFrame(s, 16 / 9, 'crop'), g = __potato.gem.firstFrame(s, 9 / 16, 'black'); return [f.width, f.height, g.width, g.height]; })()"); assert ff == [1280, 720, 720, 1280], ff
+    page.select_option('select[aria-label="화면 비율"]', ''); page.select_option('select[aria-label="맞추는 법"]', 'crop')
+    page.fill('textarea[aria-label="어떻게 움직일지"]', 'gentle wind'); shot(page, '61-video-ask')
+    page.click('.aiv-form button:has-text("영상 만들기")')
+    page.wait_for_selector('.aiv-item.run'); assert page.locator('.dlg >> text=AI 영상').count() >= 1   # 창이 꺼지지 않고, 만드는 중인 것이 바로 보여요
+    page.wait_for_selector('video.vid-out', timeout=30000); shot(page, '62-video-done')
+    vv = P(page, "__potato.state.project.videos"); assert len(vv) == 1 and vv[0]['prompt'] == 'gentle wind' and vv[0]['size'] > 0 and page.locator('.aiv-item.run').count() == 0
+    with page.expect_download() as dl: page.click('.aiv-item button:has-text("MP4로 저장")')
+    assert dl.value.suggested_filename.endswith('.mp4')
+    page.keyboard.press('Escape'); P(page, "__potato.run('ai.video')"); page.wait_for_selector('video.vid-out'); assert page.locator('.aiv-item').count() == 1   # 닫았다 열어도 만든 영상이 남아 있어요
+    page.keyboard.press('Escape')
+    b = P(page, "__sent[0].b")
+    assert b['model'] == 'gemini-omni-1.1-flash' and b['response_format'] == {'type': 'video', 'aspect_ratio': '16:9', 'resolution': '720p'} and b['generation_config']['video_config']['task'] == 'image_to_video'
+    assert b['input'][0]['type'] == 'image' and b['input'][1]['text'].endswith('gentle wind') and 'Animate the scene as described' in b['system_instruction'] and len(b['safety_settings']) == 5
+    assert [s['m'] for s in P(page, "__sent")][1:] == ['GET', 'GET']
+    # 말로 그림 고치기: 그림과 말을 보내고(안내문 맨 앞, 안전 설정 5개 끔), 돌아온 그림을 받아요
+    ok = P(page, """(async () => { const png = await new Promise(r => { const c = document.createElement('canvas'); c.width = c.height = 8; c.getContext('2d').fillRect(0, 0, 8, 8); r(c.toDataURL().split(',')[1]); });
+        window.__eb = null; const f = window.fetch; window.fetch = async (u, o) => { window.__eb = { u: String(u), b: JSON.parse(o.body) }; return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: png } }] }, finishReason: 'STOP' }], usageMetadata: {} }), { status: 200 }); };
+        const src = document.createElement('canvas'); src.width = 20; src.height = 10;
+        const blob = await __potato.gem.editByText(src, 'make it blue', 'gemini-3.1-flash-image'); window.fetch = f; return [blob.type, blob.size > 50]; })()""")
+    eb = P(page, "__eb"); assert ok == ['image/png', True] and 'gemini-3.1-flash-image:generateContent' in eb['u'] and eb['b']['generationConfig']['responseModalities'] == ['TEXT', 'IMAGE'] and len(eb['b']['safetySettings']) == 5 and 'CRITICAL' in eb['b']['systemInstruction']['parts'][0]['text'] and eb['b']['contents'][0]['parts'][1]['text'] == 'make it blue'
+    # 길이 제한(MAX_TOKENS)은 '막힘'이 아니에요. 연결 확인은 제한 없이 보내고, 모르는 이유는 이름을 그대로 보여 줘요
+    rr = P(page, """(async () => { const f = window.fetch, out = []; let sent = null;
+        const fake = body => { window.fetch = async (u, o) => { sent = JSON.parse(o.body); return new Response(JSON.stringify(body), { status: 200 }); }; };
+        fake({ candidates: [{ content: { parts: [] }, finishReason: 'MAX_TOKENS' }], usageMetadata: {} });
+        out.push(await __potato.api.check()); out.push('maxOutputTokens' in (sent.generationConfig || {}));
+        try { await __potato.api.generate('write', 'm', { contents: [] }); out.push('no'); } catch (e) { out.push(e.code + ':' + e.message); }
+        fake({ candidates: [{ content: { parts: [] }, finishReason: 'WEIRD_NEW' }] });
+        try { await __potato.api.generate('write', 'm', { contents: [] }); out.push('no'); } catch (e) { out.push(e.message); }
+        window.fetch = f; return out; })()""")
+    assert rr[0] == 'ok' and rr[1] is False and rr[2].startswith('cut:') and '막혔' not in rr[2] and 'WEIRD_NEW' in rr[3], rr
+    # 오류 기록: 오류와 거절은 화면을 막지 않고 기록에 남고(서버가 준 이유까지), 기록만 따로 볼 수 있어요
+    P(page, "localStorage.removeItem('potato2.errlog')")
+    P(page, """(async () => { const f = window.fetch; window.fetch = async () => new Response(JSON.stringify({ promptFeedback: { blockReason: 'PROHIBITED_CONTENT' } }), { status: 200 });
+        try { await __potato.api.generate('translate', 'gemini-3.8-flash', { contents: [] }); } catch (e) { __potato.toastErr(e.message); } window.fetch = f; })()""")
+    lg = P(page, "JSON.parse(localStorage.getItem('potato2.errlog') || '[]')"); assert len(lg) == 1 and '막혔어요' in lg[0]['msg'] and 'PROHIBITED_CONTENT' in lg[0]['detail'], lg
+    assert page.locator('.dlg:has-text("막혔어요")').count() == 0   # 오류가 창으로 떠서 막지 않아요
+    page.click('.toast.err'); page.wait_for_selector('.dlg >> text=오류 기록'); assert page.locator('.err-row').count() == 1
+    with page.expect_download() as dl: page.click('.dlg button:has-text("파일로 저장")')
+    tx = open(dl.value.path(), encoding='utf-8').read(); assert 'PROHIBITED_CONTENT' in tx and '감자 편집기 2 오류 기록' in tx; page.keyboard.press('Escape')
+    # 금액 어림: 요금표에 있는 모델은 원과 달러로, 합계는 오늘·이번 달·전체로 보여요
+    P(page, "localStorage.setItem('potato2.usage', JSON.stringify([{ t: Date.now(), kind: 'translate', model: 'gemini-3.8-flash', in: 1000000, out: 0, th: 0 }, { t: Date.now(), kind: 'nai generate', model: 'nai-diffusion-4-5-full', size: '832 × 1216', steps: 28 }]))")
+    P(page, "__potato.run('help.usage')"); page.wait_for_selector('.dlg >> text=API 사용 기록')
+    txt = page.locator('.dlg[aria-label="API 사용 기록"]').inner_text(); assert '($0.75)' in txt and 'Anlas' in txt and '이번 달' in txt, txt
+    page.keyboard.press('Escape')
+    assert not errs, errs
+    br.close()
+print('통과')

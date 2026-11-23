@@ -7,6 +7,7 @@ pub fn run() {
         .plugin(tauri_plugin_upload::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_http::init())   // 이 PC 안의 IOPaint에 그림을 보낼 때만 써요
         .run(tauri::generate_context!())
         .expect("감자 편집기를 시작하지 못했어요");
 }

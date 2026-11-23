@@ -25,11 +25,18 @@
   - deepghs/anime_person_detection v1.1_n (애니 사람 찾기) : MIT License (https://huggingface.co/deepghs/anime_person_detection)  ※ 설치판 AI 캐릭터 뼈대 팩
       바꾼 점: 가중치를 16비트로 줄여 저장. Ultralytics YOLO 계열 구조
   - mp4-muxer 5.2.2 : Copyright (c) 2023 Vanilagy, MIT License (https://github.com/Vanilagy/mp4-muxer)  ※ 움짤 MP4 저장
+  - Mediabunny 1.66.0 : Copyright (c) 2026-present Vanilagy and contributors, Mozilla Public License 2.0 (https://github.com/Vanilagy/mediabunny, 전문 https://mozilla.org/MPL/2.0/)  ※ 영상 자막 번역의 '자막 입힌 영상 저장'. 고치지 않고 그대로 넣었어요
   - Animate.css 4.1.1 : Copyright (c) 2020 Daniel Eden, MIT License (https://github.com/animate-css/animate.css)  ※ 움짤 글자 움직임
       바꾼 점: @keyframes를 숫자 데이터로 옮겨 캔버스에서 계산
   - gl-transitions : Copyright (c) 2017-present gl-transitions contributors, MIT License (https://github.com/gl-transitions/gl-transitions)
       MIT로 공개된 장면 넘김 196가지 (지은이는 각 넘김에 적힌 대로)  ※ 움짤 특수 장면 넘김
-  참고: 두 찾기 모델은 Ultralytics YOLO 계열 구조예요. Ultralytics는 자기 도구로 학습한 모델에 AGPL-3.0이 적용된다고 보고 있어서,
+  - SAM 2.1 hiera base plus (정밀 윤곽) : Apache License 2.0 (https://github.com/facebookresearch/sam2), ONNX 변환: onnx-community/sam2.1-hiera-base-plus-ONNX. 바꾼 점: 파일 하나로 합침  ※ 정밀 윤곽 팩
+  - CartoonSegmentation RTMDet-L (애니 인물 나누기) : MIT License (https://github.com/CartoonSegmentation/CartoonSegmentation, https://huggingface.co/dreMaz/AnimeInstanceSegmentation). 바꾼 점: ONNX로 바꿈  ※ 인물 나누기 팩
+  - deepghs/anime_person_detection v1.3_s, anime_head_detection v2.0_s (MIT License), anime_hand_detection v1.0_s (OpenRAIL) (https://huggingface.co/deepghs)  ※ 애니 탐지 팩
+  - 함께 쓰는 따로 설치하는 프로그램 (이 프로그램에 들어 있지 않아요): IOPaint (Apache License 2.0, https://github.com/Sanster/IOPaint),
+      See-through 부위 모델 l2d_sam_iter2와 코드 (Apache License 2.0, https://github.com/shitagaki-lab/see-through, https://huggingface.co/24yearsold/l2d_sam_iter2).
+      부위 서버 파일(potato_parts_server.py)이 사용자 PC에서 처음 켤 때 받아요.
+  참고: 찾기 모델들(deepghs)은 Ultralytics YOLO 계열 구조예요. Ultralytics는 자기 도구로 학습한 모델에 AGPL-3.0이 적용된다고 보고 있어서,
         이 프로그램을 팔거나 상업 제품에 넣으려면 따로 확인이 필요해요.
 
   MIT License (위에서 MIT로 적힌 구성 요소마다, 각 저작권자)
