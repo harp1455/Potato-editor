@@ -8,7 +8,7 @@ import { settings } from '../core/settings.js';
 import { addCmd, run } from '../core/cmd.js';
 import { saveFiles, download } from '../core/files.js';
 import { generate } from '../api/gemini.js';
-import { dialog, toast, busy, showMenu, askText } from '../ui/overlay.js';
+import { dialog, toast, busy, showMenu, askText, confirmBox } from '../ui/overlay.js';
 import { SHAPES, LINES, TAILS, PRESETS, drawBubbles, inBubble, insetOf } from '../core/bubble.js';
 import { TEXT_STYLES, SFX_PRESETS, LOOK_KEYS, drawLettering } from '../core/lettering.js';
 import { FX, FX_KEYS, MOODS, hasFx, imageFilter, drawPanelFx } from '../core/panelfx.js';
@@ -575,6 +575,21 @@ function sliceCurve(raw) {
   return made.length;
 }
 const defLook = type => { const n = (settings.get('cutDef') || {})[type], st = n && styles().find(x => x.type === type && x.name === n); return st ? st.props : null; };
+// 대사 한꺼번에 넣기: 적어 둔 대사를 줄마다(빈 줄로 나누면 덩어리마다) 말풍선으로 만들어, 보이는 곳부터 아래로 좌우 번갈아 놓아요
+function scriptDialog() {
+  const pg = pageOf(); if (!pg) return; const ta = h('textarea.text.area', { rows: 10, 'aria-label': '대사들', placeholder: '안녕?\n오랜만이야.\n\n(빈 줄로 나누면 여러 줄짜리 대사 하나가 돼요)' }), O = { alt: true };
+  dialog({ title: '대사 한꺼번에 넣기', body: h('div.vid-form', null, h('p.dlg-text', null, '대사를 한 줄에 하나씩 적거나 붙여넣으세요. 줄마다 말풍선이 하나씩 생겨요. 빈 줄을 넣으면 그 사이의 여러 줄이 한 말풍선에 들어가요.'), ta,
+    h('label.check', null, h('input', { type: 'checkbox', checked: true, onchange: ev => { O.alt = ev.target.checked; } }), '좌우로 번갈아 놓기 (끄면 가운데에 한 줄로)')),
+    buttons: [{ label: '취소' }, { label: '말풍선으로 넣기', primary: true, run: () => {
+      const raw = ta.value.replace(/\r/g, ''), blocks = (/\n\s*\n/.test(raw) ? raw.split(/\n\s*\n/) : raw.split('\n')).map(t => t.trim()).filter(Boolean); if (!blocks.length) { toast('대사를 적어 주세요.'); return false; }
+      const top = Math.max(0, toPage(0, 40).y), gap = Math.round(pg.w * 0.03), made = []; let y = Math.round(top + gap);
+      blocks.slice(0, 80).forEach((text, i) => { const w = Math.round(pg.w * 0.3), b = newBubble(pg, { x: 0, y, w, h: Math.round(w * 0.58) }); b.text = text; b.auto = true; pg.els.push(b); fitText(b);
+        const cx = O.alt ? (i % 2 ? pg.w * 0.72 : pg.w * 0.28) : pg.w / 2; b.x = Math.round(clamp(cx - b.w / 2, 4, Math.max(4, pg.w - b.w - 4))); b.y = y; b.tx = Math.round(b.x + b.w * (O.alt && i % 2 ? 0.7 : 0.3)); b.ty = Math.round(b.y + b.h + Math.min(b.h * 0.3, pg.w * 0.06)); y += b.h + gap + Math.round(pg.w * 0.05); made.push(b.id); });
+      if (y > pg.h && pg.h > pg.w * 1.8) pg.h = y + gap;   // 긴 페이지(웹툰)는 모자라면 아래로 늘려요
+      setSel(made); commit(`대사 ${made.length}개 넣기`); toast(`말풍선 ${made.length}개를 넣었어요. 끌어서 자리를 잡고, 꼬리의 노란 점을 말하는 사람 쪽으로 돌려 주세요.`);
+    } }] });
+  setTimeout(() => ta.focus(), 30);
+}
 // 화면 가운데에 곧바로 넣기 (위쪽 줄의 단추)
 function addAtCenter(kind) {
   const pg = pageOf(); if (!pg) return; const c = viewCenter(); let n;
@@ -788,7 +803,7 @@ export const cutRoom = {
         h('label.field', { title: '선으로 자르거나 컷을 나눌 때 컷 사이를 띄우는 너비예요' }, h('span.field-name.w', null, '컷 사이 간격'), h('input.num', { type: 'number', min: 0, max: 400, value: settings.get('cutGap') ?? 12, 'aria-label': '컷 사이 간격', onchange: ev => settings.set('cutGap', clamp(parseFloat(ev.target.value) || 0, 0, 400)) })),
         h('h3.sec', null, '내보내기와 번역'),
         h('div.btn-row', null, h('button.btn.small', { onclick: exportDialog }, '내보내기…'), h('button.btn.small', { onclick: () => run('cut.export') }, '이 페이지 PNG'), h('button.btn.small', { onclick: () => run('cut.exportAll') }, '모든 페이지 저장')),
-        h('div.btn-row', null, h('button.btn.small', { onclick: () => run('cut.translate') }, '대사 번역…'), h('button.btn.small', { onclick: () => run('cut.sfx') }, '효과음 넣기')),
+        h('div.btn-row', null, h('button.btn.small', { title: '적어 둔 대사를 줄마다 말풍선으로 한 번에 만들어요', onclick: scriptDialog }, '대사 한꺼번에 넣기…'), h('button.btn.small', { onclick: () => run('cut.translate') }, '대사 번역…'), h('button.btn.small', { onclick: () => run('cut.sfx') }, '효과음 넣기')),
         h('h3.sec', null, '요소 목록'),
         pg.els.length ? h('div.el-list', { role: 'list' }, [...pg.els].reverse().map(o => h('div.el-row' + (o.hide ? '.off' : ''), { role: 'listitem' },
           h('button.icon-btn' + (o.hide ? '' : '.on'), { title: o.hide ? '보이기' : '숨기기', 'aria-label': `${nameOf(o)} ${o.hide ? '보이기' : '숨기기'}`, 'aria-pressed': String(!o.hide), onclick: () => { o.hide = !o.hide; if (!o.hide) delete o.hide; commit(o.hide ? '숨기기' : '보이기'); } }, icon('eye')),
@@ -947,7 +962,7 @@ export function registerCutCmds() {
   addCmd({ id: 'cut.stack', title: '세로로 자동 배치… (웹툰)', menu: '컷', group: 'page', enabled: on, run: stackDialog });
   addCmd({ id: 'cut.newPage', title: '새 페이지', menu: '컷', enabled: () => !!cv, run: () => { const c = pageOf(); newPage(c ? c.w : 800, c ? c.h : 1280, '1'); commit('새 페이지'); } });
   addCmd({ id: 'cut.dupPage', title: '페이지 복제', menu: '컷', enabled: on, run: () => { const pg = pageOf(), n = JSON.parse(JSON.stringify(pg)); n.id = uid('g'); n.name = pg.name + ' 복사'; n.els.forEach(e => { e.id = uid('e'); }); pages().splice(pages().indexOf(pg) + 1, 0, n); state.project.activePage = n.id; commit('페이지 복제'); } });
-  addCmd({ id: 'cut.deletePage', title: '페이지 지우기', menu: '컷', enabled: on, run: () => { const pg = pageOf(), i = pages().indexOf(pg); pages().splice(i, 1); state.project.activePage = (pages()[Math.min(i, pages().length - 1)] || {}).id || null; V.sel = null; V.fitted = null; commit('페이지 지우기'); } });
+  addCmd({ id: 'cut.deletePage', title: '페이지 지우기', menu: '컷', enabled: on, run: async () => { const pg = pageOf(), i = pages().indexOf(pg); if (pg.els.length && !await confirmBox('페이지 지우기', `'${pg.name}'에는 요소가 ${pg.els.length}개 있어요. 지울까요? 되돌리기로 돌아올 수 있어요.`, '지우기', true)) return; pages().splice(i, 1); state.project.activePage = (pages()[Math.min(i, pages().length - 1)] || {}).id || null; V.sel = null; V.fitted = null; commit('페이지 지우기'); } });
   addCmd({ id: 'cut.front', title: '맨 앞으로', menu: '컷', group: 'el', enabled: has, run: () => order(true) });
   addCmd({ id: 'cut.back', title: '맨 뒤로', menu: '컷', group: 'el', enabled: has, run: () => order(false) });
   // 묶기: 묶은 요소들은 하나를 누르면 함께 골라지고 함께 움직여요
@@ -986,6 +1001,7 @@ export function registerCutCmds() {
   addCmd({ id: 'cut.delete', title: '요소 지우기', menu: '컷', group: 'el', enabled: has, run: () => { const pg = pageOf(), g = new Set(group().map(e => e.id)); pg.els = pg.els.filter(e => !g.has(e.id)); V.sel = null; commit(g.size > 1 ? `요소 ${g.size}개 지우기` : '요소 지우기'); } });
   addCmd({ id: 'cut.overview', title: '페이지 한눈에 보기…', menu: '컷', words: '전체 목록 순서', enabled: () => pages().length > 0, run: overview });
   addCmd({ id: 'cut.sfx', title: '효과음 글자 넣기', menu: '컷', group: 'el', words: '의성어 쾅 sfx', enabled: on, run: () => addSfxText(0) });
+  addCmd({ id: 'cut.script', title: '대사 한꺼번에 넣기… (줄마다 말풍선)', menu: '컷', group: 'bubble', words: '대본 붙여넣기 여러 개 script', enabled: on, run: scriptDialog });
   addCmd({ id: 'cut.draft', title: '대사 초안… (제미나이)', menu: '컷', group: 'ai', words: '대본 글쓰기 write', enabled: () => !!pageOf(), run: draftDialog });
   addCmd({ id: 'cut.translate', title: '대사 번역… (제미나이)', menu: '컷', group: 'ai', words: 'translate 번역', enabled: () => !!pageOf(), run: translateDialog });
   addCmd({ id: 'cut.export', title: '이 페이지를 PNG로', menu: '컷', group: 'out', enabled: () => !!pageOf(), run: async () => { const pg = pageOf(), c = await pageCanvas(pg); download(await new Promise(r => c.toBlob(r, 'image/png')), pg.name + '.png'); toast(`'${pg.name}.png'로 저장했어요.`); } });

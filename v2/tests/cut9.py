@@ -60,6 +60,10 @@ with sync_playwright() as pw:
     page.click('.my-style button[aria-label="내 네온 기본으로"]'); page.keyboard.press('Escape'); page.click('.cut-bar >> text=글자'); page.wait_for_selector('textarea.cut-edit'); page.keyboard.press('Escape')
     assert P(page, ELS + ".at(-1).glow") == 45 and P(page, ELS + ".at(-1).sc") == '#ff3fa4'
     page.click('.my-style button[aria-label="내 네온 모양 지우기"]'); assert page.locator('.my-style').count() == 0
+    # 대사 한꺼번에 넣기: 줄마다 말풍선이 생기고 좌우로 번갈아 놓여요
+    page.keyboard.press('Escape'); nb = P(page, ELS + ".filter(e => e.type === 'bubble').length"); page.click('.vid-side >> text=대사 한꺼번에 넣기'); page.fill('.dlg textarea', '안녕?\n오랜만이야.\n잘 지냈어?'); page.click('.dlg-foot >> text=말풍선으로 넣기')
+    bs = P(page, ELS + ".filter(e => e.type === 'bubble')"); assert len(bs) == nb + 3 and [b['text'] for b in bs[-3:]] == ['안녕?', '오랜만이야.', '잘 지냈어?'] and bs[-3]['x'] < bs[-2]['x'] and bs[-2]['y'] > bs[-3]['y'] + bs[-3]['h'], bs[-3:]
+    page.wait_for_timeout(150); shot(page, '105-script')
     assert not errs, errs
     br.close()
 print('통과')
