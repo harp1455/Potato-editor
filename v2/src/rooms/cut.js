@@ -149,7 +149,8 @@ function drawEl0(g, e) {
     const b = e.mediaId && state.bitmaps.get(e.mediaId);
     g.fillStyle = e.bgc || (b ? '#ffffff' : '#e9e9e9'); g.fillRect(e.x, e.y, e.w, e.h);
     if (e.mediaId && !b) ensureBitmap(e.mediaId);
-    if (b) { const k = Math.max(e.w / b.width, e.h / b.height) * (e.is || 1), dw = b.width * k, dh = b.height * k; g.save(); if (hasFx(e)) { const t = g.getTransform(), f = imageFilter(e, Math.hypot(t.a, t.b) || 1); if (f !== 'none') g.filter = f; } g.imageSmoothingQuality = 'high'; g.globalAlpha *= e.io ?? 1; g.translate(e.x + e.w / 2 + (e.ix || 0), e.y + e.h / 2 + (e.iy || 0)); if (e.ir) g.rotate(e.ir * Math.PI / 180); if (e.ifx) g.scale(-1, 1); g.drawImage(b, -dw / 2, -dh / 2, dw, dh); g.restore(); }
+    const img = L => { const bb = L.mediaId && state.bitmaps.get(L.mediaId); if (L.mediaId && !bb) ensureBitmap(L.mediaId); if (!bb || L.hide) return; const k = Math.max(e.w / bb.width, e.h / bb.height) * (L.is || 1), dw = bb.width * k, dh = bb.height * k; g.save(); if (hasFx(e)) { const t = g.getTransform(), f = imageFilter(e, Math.hypot(t.a, t.b) || 1); if (f !== 'none') g.filter = f; } g.imageSmoothingQuality = 'high'; g.globalAlpha *= L.io ?? 1; g.translate(e.x + e.w / 2 + (L.ix || 0), e.y + e.h / 2 + (L.iy || 0)); if (L.ir) g.rotate(L.ir * Math.PI / 180); if (L.ifx) g.scale(-1, 1); g.drawImage(bb, -dw / 2, -dh / 2, dw, dh); g.restore(); };
+    img(e); for (const L of e.layers || []) img(L);   // 바탕 그림 위에 겹친 그림들 (같은 컷 모양 안에서)
     if (hasFx(e)) drawPanelFx(g, e);   // 분위기·스크린톤·효과선은 컷 모양 안쪽에만
     g.restore();
     if (e.bw) { g.lineWidth = e.bw; g.strokeStyle = e.bc || '#111'; g.lineJoin = 'miter'; shape(); g.stroke(); }
@@ -157,6 +158,8 @@ function drawEl0(g, e) {
     const b = e.mediaId && state.bitmaps.get(e.mediaId); if (e.mediaId && !b) ensureBitmap(e.mediaId);
     if (b) { const src = stickerPic(e, b); g.save(); g.globalAlpha *= e.op ?? 1; g.imageSmoothingQuality = 'high'; if (e.fx) { g.translate(e.x * 2 + e.w, 0); g.scale(-1, 1); } const o = src.pad || 0; g.drawImage(src.c, e.x - e.w * o, e.y - e.h * o, e.w * (1 + 2 * o), e.h * (1 + 2 * o)); g.restore(); }
   } else if (e.type === 'draw') { drawStrokes(g, e);
+  } else if (e.type === 'shape') { drawShape(g, e);
+  } else if (e.type === 'frame') { drawFrame(g, e);
   } else if (e.type === 'lines') {
     // 집중선: 네모 가장자리에서 가운데 타원을 향해 쐐기 모양 선이 모여요. 같은 씨앗이면 늘 같은 모양
     let sd = (e.seed || 1) >>> 0; const rnd = () => { sd = (sd * 1664525 + 1013904223) >>> 0; return sd / 4294967296; };
@@ -179,15 +182,60 @@ function drawStrokes(g, e) {
   g.save(); g.globalAlpha *= e.op ?? 1; g.lineCap = g.lineJoin = 'round'; const w = (e.size || 6) * k; if (e.ol) pass(w + e.ol * 2 * k, e.olc || '#ffffff'); pass(w, e.color || '#111111'); g.restore();
 }
 // 가리기 요소: 흰칠은 색으로 덮고, 모자이크·흐리게는 지금까지 그려진 그림의 그 자리를 읽어서 뭉개요 (화면에서도 내보낼 때도 같은 식)
+function coverShape(g, e) {   // 가릴 모양을 지금 색으로 칠해요: 네모·타원, 또는 붓으로 그은 획들
+  if (e.shape === 'brush') {
+    const kx = e.w / (e.bw0 || e.w || 1), ky = e.h / (e.bh0 || e.h || 1), w = (e.size || 40) * (kx + ky) / 2; g.lineCap = g.lineJoin = 'round'; g.lineWidth = w; g.strokeStyle = g.fillStyle;
+    for (const st of e.strokes || []) { if (st.length === 1) { g.beginPath(); g.arc(e.x + st[0][0] * kx, e.y + st[0][1] * ky, w / 2, 0, Math.PI * 2); g.fill(); continue; } g.beginPath(); g.moveTo(e.x + st[0][0] * kx, e.y + st[0][1] * ky); for (let i = 1; i < st.length; i++) g.lineTo(e.x + st[i][0] * kx, e.y + st[i][1] * ky); g.stroke(); }
+  } else { g.beginPath(); if (e.shape === 'ellipse') g.ellipse(e.x + e.w / 2, e.y + e.h / 2, e.w / 2, e.h / 2, 0, 0, Math.PI * 2); else g.rect(e.x, e.y, e.w, e.h); g.fill(); }
+}
 function drawCover(g, e) {
-  const path = () => { g.beginPath(); if (e.shape === 'ellipse') g.ellipse(e.x + e.w / 2, e.y + e.h / 2, e.w / 2, e.h / 2, 0, 0, Math.PI * 2); else g.rect(e.x, e.y, e.w, e.h); };
-  if ((e.kind || 'white') === 'white') { g.save(); g.fillStyle = e.color || '#ffffff'; path(); g.fill(); g.restore(); return; }
-  const t = g.getTransform(), k = Math.hypot(t.a, t.b) || 1, dx = Math.floor(t.a * e.x + t.e), dy = Math.floor(t.d * e.y + t.f), dw = Math.ceil(e.w * t.a), dh = Math.ceil(e.h * t.d); if (dw < 2 || dh < 2 || !g.canvas) return;
+  const t = g.getTransform(), k = Math.hypot(t.a, t.b) || 1, soft = e.soft || 0, kind = e.kind || 'white';
+  if (kind === 'white') { g.save(); g.fillStyle = e.color || '#ffffff'; if (soft) g.filter = `blur(${(soft * k).toFixed(1)}px)`; coverShape(g, e); g.restore(); return; }
+  if (!g.canvas) return; const pad = soft * 2 + 2, dx = Math.floor(t.a * (e.x - pad) + t.e), dy = Math.floor(t.d * (e.y - pad) + t.f), dw = Math.ceil((e.w + pad * 2) * t.a), dh = Math.ceil((e.h + pad * 2) * t.d);
   const x0 = Math.max(0, dx), y0 = Math.max(0, dy), x1 = Math.min(g.canvas.width, dx + dw), y1 = Math.min(g.canvas.height, dy + dh); if (x1 - x0 < 2 || y1 - y0 < 2) return;
-  const cw = x1 - x0, chh = y1 - y0, str = Math.max(2, (e.str ?? 18) * k), copy = document.createElement('canvas'); copy.width = cw; copy.height = chh; copy.getContext('2d').drawImage(g.canvas, x0, y0, cw, chh, 0, 0, cw, chh);
-  g.save(); path(); g.clip(); g.setTransform(1, 0, 0, 1, 0, 0);
-  if (e.kind === 'mosaic') { const sw = Math.max(1, Math.round(cw / str)), sh = Math.max(1, Math.round(chh / str)), sm = document.createElement('canvas'); sm.width = sw; sm.height = sh; const sg = sm.getContext('2d'); sg.imageSmoothingQuality = 'high'; sg.drawImage(copy, 0, 0, sw, sh); g.imageSmoothingEnabled = false; g.drawImage(sm, 0, 0, sw, sh, x0, y0, cw, chh); g.imageSmoothingEnabled = true; }
-  else { g.filter = `blur(${(str * 0.6).toFixed(1)}px)`; g.drawImage(copy, x0, y0); g.drawImage(copy, x0, y0); g.filter = 'none'; }
+  const cw = x1 - x0, chh = y1 - y0, str = Math.max(2, (e.str ?? 18) * k), mk = () => { const c = document.createElement('canvas'); c.width = cw; c.height = chh; return c; }, copy = mk(), fxc = mk(), fg = fxc.getContext('2d');
+  copy.getContext('2d').drawImage(g.canvas, x0, y0, cw, chh, 0, 0, cw, chh);
+  if (kind === 'mosaic') { const sw = Math.max(1, Math.round(cw / str)), sh = Math.max(1, Math.round(chh / str)), sm = document.createElement('canvas'); sm.width = sw; sm.height = sh; const sg = sm.getContext('2d'); sg.imageSmoothingQuality = 'high'; sg.drawImage(copy, 0, 0, sw, sh); fg.imageSmoothingEnabled = false; fg.drawImage(sm, 0, 0, sw, sh, 0, 0, cw, chh); }
+  else { fg.filter = `blur(${(str * 0.6).toFixed(1)}px)`; fg.drawImage(copy, 0, 0); fg.drawImage(copy, 0, 0); fg.filter = 'none'; }
+  // 가릴 모양만 남겨요 (가장자리를 부드럽게 하면 그만큼 번져서 남아요)
+  fg.globalCompositeOperation = 'destination-in'; fg.setTransform(t.a, t.b, t.c, t.d, t.e - x0, t.f - y0); fg.fillStyle = '#000'; if (soft) fg.filter = `blur(${(soft * k).toFixed(1)}px)`; coverShape(fg, e);
+  g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.drawImage(fxc, x0, y0); g.restore();
+}
+// 도형: 상자 안에 꽉 차게 그려요
+function shapePath(g, e) {
+  const { x, y, w, h: hh } = e, cx = x + w / 2, cy = y + hh / 2, P = pts => { pts.forEach(([fx, fy], i) => g[i ? 'lineTo' : 'moveTo'](x + fx * w, y + fy * hh)); g.closePath(); }; g.beginPath();
+  switch (e.kind) {
+    case 'ellipse': g.ellipse(cx, cy, w / 2, hh / 2, 0, 0, Math.PI * 2); break;
+    case 'round': g.roundRect(x, y, w, hh, Math.min(w, hh) * 0.22); break;
+    case 'tri': P([[0.5, 0], [1, 1], [0, 1]]); break;
+    case 'diamond': P([[0.5, 0], [1, 0.5], [0.5, 1], [0, 0.5]]); break;
+    case 'star': P(Array.from({ length: 10 }, (_, i) => { const a = -Math.PI / 2 + i * Math.PI / 5, r = i % 2 ? 0.2 : 0.5; return [0.5 + Math.cos(a) * r, 0.5 + Math.sin(a) * r / 0.95]; })); break;
+    case 'burst': P(Array.from({ length: 24 }, (_, i) => { const a = i * Math.PI / 12, r = i % 2 ? 0.36 : 0.5; return [0.5 + Math.cos(a) * r, 0.5 + Math.sin(a) * r]; })); break;
+    case 'arrow': P([[0, 0.3], [0.6, 0.3], [0.6, 0], [1, 0.5], [0.6, 1], [0.6, 0.7], [0, 0.7]]); break;
+    case 'heart': g.moveTo(cx, y + hh * 0.28); g.bezierCurveTo(cx - w * 0.05, y - hh * 0.05, x - w * 0.12, y + hh * 0.12, x + w * 0.02, y + hh * 0.42); g.bezierCurveTo(x + w * 0.1, y + hh * 0.68, cx - w * 0.12, y + hh * 0.82, cx, y + hh); g.bezierCurveTo(cx + w * 0.12, y + hh * 0.82, x + w * 0.9, y + hh * 0.68, x + w * 0.98, y + hh * 0.42); g.bezierCurveTo(x + w * 1.12, y + hh * 0.12, cx + w * 0.05, y - hh * 0.05, cx, y + hh * 0.28); g.closePath(); break;
+    default: g.rect(x, y, w, hh);
+  }
+}
+function drawShape(g, e) {
+  g.save(); g.globalAlpha *= e.op ?? 1; g.lineJoin = 'round'; shapePath(g, e);
+  if (e.fill) { if (e.fill2) { const gr = g.createLinearGradient(0, e.y, 0, e.y + e.h); gr.addColorStop(0, e.fill); gr.addColorStop(1, e.fill2); g.fillStyle = gr; } else g.fillStyle = e.fill; g.fill(); }
+  if (e.bw) { g.lineWidth = e.bw; g.strokeStyle = e.bc || '#111111'; g.stroke(); } g.restore();
+}
+// 카메라 틀: 뷰파인더·녹화·영화 띠·비디오테이프·필름. 상자 크기에 맞춰 그려요
+function drawFrame(g, e) {
+  const { x, y, w, h: hh } = e, u = Math.min(w, hh) / 100, col = e.color || '#ffffff', font = sz => `700 ${sz}px "Consolas", "Menlo", "Malgun Gothic", monospace`, txt = (t, tx, ty, sz, al = 'left') => { g.font = font(sz); g.textAlign = al; g.textBaseline = 'middle'; g.fillText(t, tx, ty); };
+  g.save(); g.globalAlpha *= e.op ?? 1; g.beginPath(); g.rect(x, y, w, hh); g.clip(); g.fillStyle = g.strokeStyle = col; g.lineWidth = Math.max(1, u * 0.9); g.lineCap = 'square';
+  const rec = (tx, ty) => { g.save(); g.fillStyle = '#ff2b2b'; g.beginPath(); g.arc(tx, ty, u * 2.2, 0, Math.PI * 2); g.fill(); g.restore(); txt('REC', tx + u * 4.5, ty, u * 5.5); };
+  if (e.kind === 'letterbox') { g.fillStyle = e.color2 || '#000000'; const b = hh * (e.bar ?? 12) / 100; g.fillRect(x, y, w, b); g.fillRect(x, y + hh - b, w, b); }
+  else if (e.kind === 'film') { g.fillStyle = e.color2 || '#000000'; const b = w * 0.08, n = Math.max(4, Math.round(hh / (b * 1.1))); g.fillRect(x, y, b, hh); g.fillRect(x + w - b, y, b, hh); g.fillStyle = col; for (let i = 0; i < n; i++) { const yy = y + (i + 0.25) * hh / n, sh = hh / n * 0.5; g.fillRect(x + b * 0.25, yy, b * 0.5, sh); g.fillRect(x + w - b * 0.75, yy, b * 0.5, sh); } }
+  else if (e.kind === 'vhs') { g.save(); g.globalAlpha *= 0.1; for (let yy = y; yy < y + hh; yy += u * 1.6) g.fillRect(x, yy, w, u * 0.5); g.restore(); txt('PLAY ▶', x + u * 6, y + u * 8, u * 6.5); txt(e.text || 'AM 12:00  JAN. 01 2026', x + u * 6, y + hh - u * 8, u * 5.5); txt('SP', x + w - u * 6, y + u * 8, u * 5.5, 'right'); }
+  else if (e.kind === 'rec') { rec(x + u * 7, y + u * 8); txt(e.text || '00:00:12:05', x + w - u * 6, y + u * 8, u * 5.5, 'right'); }
+  else {   // 뷰파인더
+    const m = u * 5, L = u * 12; for (const [sx, sy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) { const px = x + (sx ? w - m : m), py = y + (sy ? hh - m : m); g.beginPath(); g.moveTo(px + (sx ? -L : L), py); g.lineTo(px, py); g.lineTo(px, py + (sy ? -L : L)); g.stroke(); }
+    const cx = x + w / 2, cy = y + hh / 2; g.beginPath(); g.moveTo(cx - u * 4, cy); g.lineTo(cx + u * 4, cy); g.moveTo(cx, cy - u * 4); g.lineTo(cx, cy + u * 4); g.stroke();
+    rec(x + w - u * 26, y + u * 12); txt(e.text || '01:21/18:05', x + w - u * 9, y + u * 19, u * 4.5, 'right');
+    const bx = x + u * 22, by = y + u * 9.5; g.strokeRect(bx, by, u * 14, u * 6); g.fillRect(bx + u * 14, by + u * 1.8, u * 1.4, u * 2.4); for (let i = 0; i < 4; i++) g.fillRect(bx + u * 1.2 + i * u * 3.1, by + u * 1.2, u * 2.3, u * 3.6); txt('60min', bx, by + u * 12, u * 4.2);
+  }
   g.restore();
 }
 export function renderPage(g, pg) {
@@ -478,18 +526,69 @@ async function translateOne(lang) {
   try { const out = await translateTexts(es.map(e => e.text), lang, ''); es.forEach((e, i) => { if (typeof out[i] === 'string' && out[i].trim()) e.text = out[i]; }); commit(lang === 'polish' ? '대사 다듬기' : '대사 번역'); b.done(`대사 ${es.length}개를 바꿨어요. 마음에 안 들면 Ctrl+Z`); }
   catch (err) { b.done((err && err.message) || '바꾸지 못했어요.', 'err'); }
 }
-const TYPE_NAME = { panel: '컷', bubble: '말풍선', text: '글자', lines: '집중선', pic: '스티커', cover: '가리기', draw: '손그림' };
+const TYPE_NAME = { panel: '컷', bubble: '말풍선', text: '글자', lines: '집중선', pic: '스티커', cover: '가리기', draw: '손그림', shape: '도형', frame: '카메라 틀' };
 const nameOf = e => e.name || (e.cz ? '자동 흰칠' : e.type === 'bubble' || e.type === 'text' ? (String(e.text || '').split('\n')[0].slice(0, 12) || TYPE_NAME[e.type]) : e.type === 'panel' ? (e.mediaId ? ((mediaOf(e.mediaId) || {}).name || '컷').replace(/\.[a-z0-9]+$/i, '').slice(0, 14) : '빈 컷') : TYPE_NAME[e.type]);
+const SHAPE_KINDS = [['rect', '네모'], ['round', '둥근 네모'], ['ellipse', '동그라미'], ['tri', '세모'], ['diamond', '마름모'], ['star', '별'], ['burst', '폭발'], ['heart', '하트'], ['arrow', '화살표']];
+const FRAME_KINDS = [['viewfinder', '뷰파인더'], ['rec', '녹화 중 (REC)'], ['letterbox', '영화 띠 (위아래 검은 띠)'], ['vhs', '비디오테이프'], ['film', '필름']];
+function addShape(kind) {
+  const pg = pageOf(); if (!pg) return; const c = viewCenter(), sel0 = elOf(); let n;
+  if (kind === 'screen') { const b = sel0 && sel0.type === 'panel' ? sel0 : { x: 0, y: 0, w: pg.w, h: pg.h }; n = { id: uid('e'), type: 'shape', kind: 'rect', x: b.x, y: b.y, w: b.w, h: b.h, fill: '#000000', op: 0.5, bw: 0 }; }
+  else { const w = Math.round(pg.w * 0.25), hh = kind === 'arrow' ? Math.round(w * 0.55) : w; n = { id: uid('e'), type: 'shape', kind, x: Math.round(c.x - w / 2), y: Math.round(c.y - hh / 2), w, h: hh, fill: '#ffffff', bc: '#111111', bw: Math.max(2, Math.round(pg.w / 200)) }; }
+  pg.els.push(n); V.sel = n.id; V.more = null; V.tool = 'pick'; commit(kind === 'screen' ? '색 화면 넣기' : '도형 넣기');
+}
+// 카메라 틀은 고른 컷(없으면 페이지 전체) 위에 꼭 맞게 얹어요
+function addFrame(kind) {
+  const pg = pageOf(); if (!pg) return; const sel0 = elOf(), b = sel0 && sel0.type === 'panel' ? sel0 : { x: 0, y: 0, w: pg.w, h: Math.min(pg.h, Math.round(pg.w * 1.6)) };
+  const n = { id: uid('e'), type: 'frame', kind, x: b.x, y: b.y, w: b.w, h: b.h, color: '#ffffff' }; if (sel0 && sel0.type === 'panel') { if (!sel0.gid) sel0.gid = uid('g'); n.gid = sel0.gid; pg.els.splice(pg.els.indexOf(sel0) + 1, 0, n); } else pg.els.push(n);
+  V.sel = n.id; V.more = null; V.tool = 'pick'; commit('카메라 틀 넣기'); if (n.gid) toast('틀을 그 컷과 묶었어요. 컷을 옮기면 함께 움직여요.');
+}
+// 곡선으로 컷 자르기: 그은 길이 컷 테두리로 들어온 곳과 나간 곳을 찾아, 테두리를 두 갈래로 돌아 두 조각을 만들어요
+function sliceCurve(raw) {
+  const pg = pageOf(); if (!pg || raw.length < 2) return 0;
+  // 고르게 다시 찍고(10칸마다) 한 번 다듬은 뒤, 양 끝을 멀리 늘려 테두리를 확실히 지나가게 해요
+  let path = [raw[0]], left = 10; for (let i = 1; i < raw.length; i++) { const a = raw[i - 1], b = raw[i], d = Math.hypot(b[0] - a[0], b[1] - a[1]); let at = left; while (at <= d) { path.push([a[0] + (b[0] - a[0]) * at / d, a[1] + (b[1] - a[1]) * at / d]); at += 10; } left = at - d; } path.push(raw.at(-1));
+  for (let r = 0; r < 3 && path.length > 2; r++) path = path.map((q, i) => (i && i < path.length - 1 ? [(path[i - 1][0] + q[0] * 2 + path[i + 1][0]) / 4, (path[i - 1][1] + q[1] * 2 + path[i + 1][1]) / 4] : q));   // 손 떨림과 뾰족한 꺾임을 다듬어요
+  const ext = (a, b) => { const d = Math.hypot(a[0] - b[0], a[1] - b[1]) || 1; return [a[0] + (a[0] - b[0]) / d * 6000, a[1] + (a[1] - b[1]) / d * 6000]; }, total = path.reduce((v, q, i) => v + (i ? Math.hypot(q[0] - path[i - 1][0], q[1] - path[i - 1][1]) : 0), 0); if (total < 12) return 0;
+  const P = [ext(path[0], path[Math.min(3, path.length - 1)]), ...path, ext(path.at(-1), path[Math.max(0, path.length - 4)])], gap = settings.get('cutGap') ?? 12, picked0 = group().filter(e => e.type === 'panel'), made = [];
+  for (const e of (picked0.length ? picked0 : pg.els.filter(o => o.type === 'panel'))) {
+    if (e.rot) continue; const poly = polyOf(e), n = poly.length, hits = [];
+    for (let si = 0; si < P.length - 1; si++) for (let ei = 0; ei < n; ei++) { const a = P[si], b = P[si + 1], c = poly[ei], d = poly[(ei + 1) % n], rx = b[0] - a[0], ry = b[1] - a[1], qx = d[0] - c[0], qy = d[1] - c[1], den = rx * qy - ry * qx; if (Math.abs(den) < 1e-9) continue; const t = ((c[0] - a[0]) * qy - (c[1] - a[1]) * qx) / den, u = ((c[0] - a[0]) * ry - (c[1] - a[1]) * rx) / den; if (t >= 0 && t < 1 && u >= 0 && u < 1) hits.push({ s: si + t, ei, u, pt: [a[0] + rx * t, a[1] + ry * t] }); }
+    if (hits.length < 2) continue; hits.sort((x, y) => x.s - y.s); const A0 = hits[0], B0 = hits.at(-1); if (B0.s - A0.s < 0.01) continue;
+    // 사용자가 실제로 그은 부분이 이 컷을 지나갔을 때만 (늘린 끝만 스친 컷은 그대로)
+    if (B0.s < 1 || A0.s > P.length - 2) continue;
+    const inner = [A0.pt, ...P.slice(Math.floor(A0.s) + 1, Math.floor(B0.s) + 1), B0.pt], walk = (from, to, full) => { const out = []; let i = (from + 1) % n; if (from === to && !full) return out; do { out.push(poly[i]); i = (i + 1) % n; } while (i !== (to + 1) % n); return out; };
+    const same = A0.ei === B0.ei, side = (pts, sign) => {   // 길 쪽 가장자리를 간격의 반만큼 조각 안쪽으로 물려요
+      return pts.map((q, i) => { const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)], dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy) || 1, nx = -dy / l * sign, ny = dx / l * sign, end = i === 0 ? A0 : i === pts.length - 1 ? B0 : null;
+        if (end) { const c = poly[end.ei], d = poly[(end.ei + 1) % n], el = Math.hypot(d[0] - c[0], d[1] - c[1]) || 1, ex = (d[0] - c[0]) / el, ey = (d[1] - c[1]) / el, dot = ex * nx + ey * ny, k = gap / 2 / Math.max(0.3, Math.abs(dot)) * Math.sign(dot || 1); return [q[0] + ex * k, q[1] + ey * k]; }   // 끝점은 컷 테두리를 따라 물려서 테두리 밖으로 나가지 않게
+        return [q[0] + nx * gap / 2, q[1] + ny * gap / 2]; }); };
+    const build = (start, verts, pathPts) => [...verts, ...pathPts], area2 = pts => pts.reduce((v, q, i) => { const r = pts[(i + 1) % pts.length]; return v + q[0] * r[1] - r[0] * q[1]; }, 0);
+    const vA = walk(A0.ei, B0.ei, same && A0.u > B0.u), vB = walk(B0.ei, A0.ei, same && B0.u > A0.u), rev = [...inner].reverse();
+    // 조각 A: 들어온 점 → 테두리 → 나간 점 → 길을 거슬러. 조각 B: 나간 점 → 테두리 → 들어온 점 → 길을 따라
+    const sgn = pts => { const cx = pts.reduce((v, q) => v + q[0], 0) / pts.length, cy = pts.reduce((v, q) => v + q[1], 0) / pts.length, m = inner[Math.floor(inner.length / 2)], a = inner[Math.max(0, Math.floor(inner.length / 2) - 1)], b = inner[Math.min(inner.length - 1, Math.floor(inner.length / 2) + 1)]; return ((b[0] - a[0]) * (cy - m[1]) - (b[1] - a[1]) * (cx - m[0])) >= 0 ? 1 : -1; };
+    const box = e.poly ? null : [e.x, e.y, e.x + e.w, e.y + e.h], keepIn = pts => (box ? pts.map(q => [clamp(q[0], box[0], box[2]), clamp(q[1], box[1], box[3])]) : pts);   // 네모 컷이면 조각이 원래 컷 밖으로 나가지 않게
+    const sA = sgn(vA.length ? vA : [inner[0]]), parts = [[...vA, ...keepIn(side(inner, sA)).reverse()], [...vB, ...keepIn(side(inner, -sA))]].filter(q => q.length >= 3 && Math.abs(area2(q)) / 2 > 400); if (parts.length < 2) continue;
+    const m = e.mediaId ? mediaOf(e.mediaId) : null, k0 = m ? Math.max(e.w / m.w, e.h / m.h) * (e.is || 1) : 1, icx = e.x + e.w / 2 + (e.ix || 0), icy = e.y + e.h / 2 + (e.iy || 0), at = pg.els.indexOf(e);
+    const ns = parts.map((q, i) => { const x0 = Math.min(...q.map(r => r[0])), y0 = Math.min(...q.map(r => r[1])), x1 = Math.max(...q.map(r => r[0])), y1 = Math.max(...q.map(r => r[1])), w = Math.max(1, x1 - x0), hh = Math.max(1, y1 - y0), nn = { ...JSON.parse(JSON.stringify(e)), id: i ? uid('e') : e.id, x: x0, y: y0, w, h: hh, br: 0, poly: q.map(r => [(r[0] - x0) / w, (r[1] - y0) / hh]) }; delete nn.layers; if (m) { nn.is = k0 / Math.max(w / m.w, hh / m.h); nn.ix = icx - (x0 + w / 2); nn.iy = icy - (y0 + hh / 2); } return nn; });
+    pg.els.splice(at, 1, ...ns); made.push(...ns.map(x => x.id));
+  }
+  if (made.length) { setSel(made); commit('곡선으로 컷 자르기'); } else toast('선이 가로지른 컷이 없어요. 컷의 한쪽 끝에서 다른 쪽 끝까지 그어 주세요.');
+  return made.length;
+}
+const defLook = type => { const n = (settings.get('cutDef') || {})[type], st = n && styles().find(x => x.type === type && x.name === n); return st ? st.props : null; };
 // 화면 가운데에 곧바로 넣기 (위쪽 줄의 단추)
 function addAtCenter(kind) {
   const pg = pageOf(); if (!pg) return; const c = viewCenter(); let n;
   if (kind === 'panel') { const w = Math.round(pg.w * 0.6), hh = Math.round(w * 0.7); n = { id: uid('e'), type: 'panel', x: Math.round(c.x - w / 2), y: Math.round(c.y - hh / 2), w, h: hh, mediaId: null, ix: 0, iy: 0, is: 1, bw: 4, bc: '#111111' }; }
   else if (kind === 'bubble') { const w = Math.round(pg.w * 0.3), hh = Math.round(w * 0.58); n = newBubble(pg, { x: c.x - w / 2, y: c.y - hh / 2, w, h: hh }); }
-  else n = { id: uid('e'), type: 'text', x: Math.round(c.x - 60), y: Math.round(c.y - 20), w: 120, h: 40, text: '글자', size: Math.round(pg.w / 22), color: '#111111', sw: 3, sc: '#ffffff', bold: true };
+  else n = { id: uid('e'), type: 'text', x: Math.round(c.x - 60), y: Math.round(c.y - 20), w: 120, h: 40, text: '글자', size: Math.round(pg.w / 22), color: '#111111', sw: 3, sc: '#ffffff', bold: true, ...(defLook('text') || {}) };
   pg.els.push(n); V.sel = n.id; V.more = null; V.tool = 'pick'; commit({ panel: '컷 만들기', bubble: '말풍선 넣기', text: '글자 넣기' }[kind]);
   if (kind !== 'panel') setTimeout(editInPlace, 30);
 }
 const zoomBy = f => { if (!wrap || !pageOf()) return; const W = wrap.clientWidth, H = wrap.clientHeight, p = toPage(W / 2, H / 2), z = clamp(V.zoom * f, 0.02, 16); V.zoom = z; V.ox = W / 2 - p.x * z; V.oy = H / 2 - p.y * z; draw(); emit(); };
+
+// 컷 안에서 지금 다루는 그림: 겹친 그림을 골랐으면 그것, 아니면 바탕 그림
+const imgOf = e => ((e.layers || []).find(l => l.id === V.lay) || e);
+function addLayer(e, id) { const m = mediaOf(id); if (!m || e.type !== 'panel') return null; if (!e.mediaId) { Object.assign(e, { mediaId: id, ix: 0, iy: 0, is: 1 }); ensureBitmap(id); return e; } if ((e.layers || []).length >= 9) { toast('한 컷에는 그림을 열 장까지 겹칠 수 있어요.'); return null; } const L = { id: uid('y'), mediaId: id, ix: 0, iy: 0, is: Math.min(e.w / m.w, e.h / m.h) / Math.max(e.w / m.w, e.h / m.h) }; (e.layers || (e.layers = [])).push(L); ensureBitmap(id); V.lay = L.id; return L; }
 
 // ---- 말풍선 다루기 ----
 const isB = e => !!e && e.type === 'bubble';
@@ -497,7 +596,7 @@ const syncLook = e => { if (isB(e) && e.join) for (const o of joined(pageOf(), e
 // 새 말풍선: 마지막으로 고른 종류(V.look)를 입혀요. 선 굵기는 페이지 크기에 맞춰요
 const lineUnit = pg => Math.max(2, Math.round(pg.w / 300)) / 3;
 function newBubble(pg, d) {
-  const look = V.look || PRESETS[0].props;
+  const look = V.look || defLook('bubble') || PRESETS[0].props;
   return { id: uid('e'), type: 'bubble', x: Math.round(d.x), y: Math.round(d.y), w: Math.round(d.w), h: Math.round(d.h), text: '대사', size: Math.round(pg.w / 26), seed: 1 + Math.floor(Math.random() * 99999), ...look, bw: Math.round(look.bw * lineUnit(pg) * 2) / 2,
     tx: Math.round(d.x + d.w * 0.28), ty: Math.round(d.y + d.h + Math.min(d.h * 0.32, pg.w * 0.08)) };
 }
@@ -543,7 +642,7 @@ export const cutRoom = {
     const ro = new ResizeObserver(() => { if (V.fitted !== (pageOf() || {}).id) fit(); else draw(); }); ro.observe(wrap);
     cv.addEventListener('wheel', e => {
       e.preventDefault(); const r = cv.getBoundingClientRect(), sx = e.clientX - r.left, sy = e.clientY - r.top, pg = pageOf(), p = toPage(sx, sy), t = pg && (e.altKey || V.pan) ? (V.pan ? pg.els.find(x => x.id === V.pan) : hit(pg, p)) : null;
-      if (t && t.type === 'panel' && t.mediaId) { t.is = clamp((t.is || 1) * Math.exp(-e.deltaY * 0.0015), 0.05, 8); draw(); clearTimeout(V.wt); V.wt = setTimeout(() => commit('컷 안 그림 크기'), 400); return; }
+      if (t && t.type === 'panel' && t.mediaId) { const T = imgOf(t); T.is = clamp((T.is || 1) * Math.exp(-e.deltaY * 0.0015), 0.05, 8); draw(); clearTimeout(V.wt); V.wt = setTimeout(() => commit('컷 안 그림 크기'), 400); return; }
       if (!(e.ctrlKey || e.metaKey)) { if (e.shiftKey) V.ox -= e.deltaY || e.deltaX; else { V.oy -= e.deltaY; V.ox -= e.deltaX; } draw(); return; }   // 긴 페이지는 휠로 내려요. Ctrl+휠이 확대예요
       const z = clamp(V.zoom * Math.exp(-e.deltaY * 0.0015), 0.02, 16); V.zoom = z; V.ox = sx - p.x * z; V.oy = sy - p.y * z; draw(); tick();
     }, { passive: false });
@@ -553,23 +652,27 @@ export const cutRoom = {
       if (e.button === 1 || V.space) { const ox = V.ox, oy = V.oy; return drag(e, ev => { V.ox = ox + ev.clientX - e.clientX; V.oy = oy + ev.clientY - e.clientY; draw(); }); }
       if (e.button !== 0) return;
       if (V.tool === 'text') { const t = { id: uid('e'), type: 'text', x: Math.round(p.x - 60), y: Math.round(p.y - 20), w: 120, h: 40, text: '글자', size: Math.round(pg.w / 22), color: '#111111', sw: 3, sc: '#ffffff', bold: true }; pg.els.push(t); V.sel = t.id; V.tool = 'pick'; commit('글자 넣기'); return; }
-      if (V.tool === 'pen') {
-        const pen = settings.get('cutPen') || {}, pts = [[p.x, p.y]]; V.penLine = { pts, color: pen.color || '#111111', size: pen.size || Math.max(3, Math.round(pg.w / 160)) };
+      const cvr0 = settings.get('cutCover') || {}, brushCover = V.tool === 'cover' && cvr0.shape === 'brush';
+      if (V.tool === 'pen' || brushCover) {
+        const type = brushCover ? 'cover' : 'draw', pen = settings.get('cutPen') || {}, pts = [[p.x, p.y]], size = brushCover ? (cvr0.size || Math.round(pg.w / 14)) : (pen.size || Math.max(3, Math.round(pg.w / 160)));
+        V.penLine = { pts, color: brushCover ? 'rgba(255,79,163,.45)' : (pen.color || '#111111'), size };
         return drag(e, ev => { const q = at(ev), l = pts.at(-1); if (Math.hypot(q.x - l[0], q.y - l[1]) > 1.5 / V.zoom) { pts.push([q.x, q.y]); draw(); } }, () => {
-          const L = V.penLine; V.penLine = null; let cur2 = elOf(); if (!cur2 || cur2.type !== 'draw' || cur2.rot || cur2.id !== V.penEl) cur2 = null;
-          const old = cur2 ? cur2.strokes.map(st => st.map(([x, y]) => [cur2.x + x * cur2.w / cur2.bw0, cur2.y + y * cur2.h / cur2.bh0])) : [], all = [...old, L.pts], xs = all.flat().map(q => q[0]), ys = all.flat().map(q => q[1]), pad = (cur2 ? cur2.size : L.size) / 2 + 2;
+          const L = V.penLine; V.penLine = null; let c2 = elOf(); if (!c2 || c2.type !== type || c2.rot || c2.id !== V.penEl || (brushCover && c2.shape !== 'brush')) c2 = null;
+          const old = c2 ? c2.strokes.map(st => st.map(([x, y]) => [c2.x + x * c2.w / c2.bw0, c2.y + y * c2.h / c2.bh0])) : [], all = [...old, L.pts], xs = all.flat().map(q => q[0]), ys = all.flat().map(q => q[1]), pad = (c2 ? c2.size : size) / 2 + 2;
           const x0 = Math.min(...xs) - pad, y0 = Math.min(...ys) - pad, w = Math.max(...xs) + pad - x0, hh = Math.max(...ys) + pad - y0, strokes = all.map(st => st.map(([x, y]) => [Math.round((x - x0) * 10) / 10, Math.round((y - y0) * 10) / 10]));
-          if (cur2) Object.assign(cur2, { x: x0, y: y0, w, h: hh, bw0: w, bh0: hh, strokes }); else { cur2 = { id: uid('e'), type: 'draw', x: x0, y: y0, w, h: hh, bw0: w, bh0: hh, strokes, color: L.color, size: L.size }; pg.els.push(cur2); }
-          V.sel = cur2.id; V.more = null; V.penEl = cur2.id; commit('펜으로 그리기');
+          if (c2) Object.assign(c2, { x: x0, y: y0, w, h: hh, bw0: w, bh0: hh, strokes });
+          else { c2 = brushCover ? { id: uid('e'), type: 'cover', shape: 'brush', kind: cvr0.kind || 'mosaic', str: cvr0.str || 18, soft: cvr0.soft || 0, color: cvr0.color || '#ffffff', size, x: x0, y: y0, w, h: hh, bw0: w, bh0: hh, strokes } : { id: uid('e'), type: 'draw', x: x0, y: y0, w, h: hh, bw0: w, bh0: hh, strokes, color: L.color, size }; pg.els.push(c2); }
+          V.sel = c2.id; V.more = null; V.penEl = c2.id; commit(brushCover ? '가리기 붓' : '펜으로 그리기');
         });
       }
+      if (V.tool === 'slice' && V.curve) { const pts = [[p.x, p.y]]; V.penLine = { pts, color: '#ff4fa3', size: 2 / V.zoom }; return drag(e, ev => { const q = at(ev), l = pts.at(-1); if (Math.hypot(q.x - l[0], q.y - l[1]) > 2 / V.zoom) { pts.push([q.x, q.y]); draw(); } }, () => { V.penLine = null; if (!sliceCurve(pts)) draw(); }); }
       if (V.tool === 'slice') { V.cutLine = { a: p, b: p }; return drag(e, ev => { let q = at(ev); if (ev.shiftKey) { const ang = Math.round(Math.atan2(q.y - p.y, q.x - p.x) / (Math.PI / 12)) * (Math.PI / 12), L = Math.hypot(q.x - p.x, q.y - p.y); q = { x: p.x + Math.cos(ang) * L, y: p.y + Math.sin(ang) * L }; } V.cutLine.b = q; draw(); }, () => { const c = V.cutLine; V.cutLine = null; if (!sliceCut(c.a, c.b)) draw(); }); }
       if (V.tool === 'panel' || V.tool === 'bubble' || V.tool === 'lines' || V.tool === 'cover') {
         const kind = V.tool; V.draft = { x: p.x, y: p.y, w: 0, h: 0 };
         return drag(e, ev => { const q = at(ev); Object.assign(V.draft, { x: Math.min(p.x, q.x), y: Math.min(p.y, q.y), w: Math.abs(q.x - p.x), h: Math.abs(q.y - p.y) }); draw(); }, () => {
           const d = V.draft; V.draft = null; if (d.w < 12 || d.h < 12) { if (kind !== 'bubble') { draw(); return; } const bw = Math.round(pg.w * 0.3), bh = Math.round(bw * 0.58); Object.assign(d, { x: p.x - bw / 2, y: p.y - bh / 2, w: bw, h: bh }); }   // 말풍선은 그냥 눌러도 알맞은 크기로 놓여요
           const cvr = settings.get('cutCover') || {};
-          const n = kind === 'cover' ? { id: uid('e'), type: 'cover', x: Math.round(d.x), y: Math.round(d.y), w: Math.round(d.w), h: Math.round(d.h), kind: cvr.kind || 'mosaic', shape: cvr.shape || 'rect', str: cvr.str || 18, color: cvr.color || '#ffffff' } : kind === 'lines' ? { id: uid('e'), type: 'lines', x: Math.round(d.x), y: Math.round(d.y), w: Math.round(d.w), h: Math.round(d.h), color: '#111111', count: 90, hole: 45, thick: 1, seed: 1 + Math.floor(Math.random() * 99999) }
+          const n = kind === 'cover' ? { id: uid('e'), type: 'cover', x: Math.round(d.x), y: Math.round(d.y), w: Math.round(d.w), h: Math.round(d.h), kind: cvr.kind || 'mosaic', shape: cvr.shape === 'ellipse' ? 'ellipse' : 'rect', str: cvr.str || 18, soft: cvr.soft || 0, color: cvr.color || '#ffffff' } : kind === 'lines' ? { id: uid('e'), type: 'lines', x: Math.round(d.x), y: Math.round(d.y), w: Math.round(d.w), h: Math.round(d.h), color: '#111111', count: 90, hole: 45, thick: 1, seed: 1 + Math.floor(Math.random() * 99999) }
             : kind === 'panel' ? { id: uid('e'), type: 'panel', x: Math.round(d.x), y: Math.round(d.y), w: Math.round(d.w), h: Math.round(d.h), mediaId: null, ix: 0, iy: 0, is: 1, bw: 4, bc: '#111111' }
             : newBubble(pg, d);
           pg.els.push(n); V.sel = n.id; V.tool = 'pick'; if (kind === 'cover') V.tool = 'cover';   // 가리기는 이어서 여러 군데 하기 쉬우라고 도구를 그대로 둬요
@@ -607,7 +710,7 @@ export const cutRoom = {
       if (!inGroup && V.sel !== (t ? t.id : null)) { V.sel = t ? t.id : null; emit(); }
       if (!t) { V.draft = { x: p.x, y: p.y, w: 0, h: 0 }; return drag(e, ev => { const q = at(ev); Object.assign(V.draft, { x: Math.min(p.x, q.x), y: Math.min(p.y, q.y), w: Math.abs(q.x - p.x), h: Math.abs(q.y - p.y) }); draw(); }, () => { const d = V.draft; V.draft = null; if (d.w > 4 || d.h > 4) { setSel(pg.els.filter(o => o.x < d.x + d.w && o.x + o.w > d.x && o.y < d.y + d.h && o.y + o.h > d.y).map(o => o.id)); emit(); } else draw(); }); }   // 빈 곳을 끌면 걸친 요소를 모두 골라요
       if (inGroup) { const g0 = group().map(x => ({ x, x0: x.x, y0: x.y, tx0: x.tx, ty0: x.ty })); let mv = false; return drag(e, ev => { const dx = Math.round((ev.clientX - e.clientX) / V.zoom), dy = Math.round((ev.clientY - e.clientY) / V.zoom); if (dx || dy) mv = true; for (const o of g0) { o.x.x = o.x0 + dx; o.x.y = o.y0 + dy; if (o.x.type === 'bubble') { o.x.tx = o.tx0 + dx; o.x.ty = o.ty0 + dy; } } draw(); }, () => mv && commit('함께 옮기기')); }
-      if ((e.altKey || V.pan === t.id) && t.type === 'panel' && t.mediaId) { const ix = t.ix || 0, iy = t.iy || 0; let mv = false; return drag(e, ev => { t.ix = ix + (ev.clientX - e.clientX) / V.zoom; t.iy = iy + (ev.clientY - e.clientY) / V.zoom; mv = true; draw(); }, () => mv && commit('컷 안 그림 옮기기')); }
+      if ((e.altKey || V.pan === t.id) && t.type === 'panel' && t.mediaId) { const T = imgOf(t), ix = T.ix || 0, iy = T.iy || 0; let mv = false; return drag(e, ev => { T.ix = ix + (ev.clientX - e.clientX) / V.zoom; T.iy = iy + (ev.clientY - e.clientY) / V.zoom; mv = true; draw(); }, () => mv && commit('컷 안 그림 옮기기')); }
       const x0 = t.x, y0 = t.y, tx0 = t.tx, ty0 = t.ty; let mv = false;
       drag(e, ev => { let dx = Math.round((ev.clientX - e.clientX) / V.zoom), dy = Math.round((ev.clientY - e.clientY) / V.zoom); if (dx || dy) mv = true; if (!ev.altKey && !t.rot) { const q = snapEl(pg, t, x0 + dx, y0 + dy); dx = q.x - x0; dy = q.y - y0; } else V.guides = null; t.x = x0 + dx; t.y = y0 + dy; if (t.type === 'bubble') { t.tx = tx0 + dx; t.ty = ty0 + dy; } draw(); }, () => { V.guides = null; if (mv) commit('옮기기'); else draw(); });
     });
@@ -623,6 +726,8 @@ export const cutRoom = {
       if (e.dataTransfer.files && e.dataTransfer.files.length) { placeFiles(e.dataTransfer.files, p); return; }   // 컴퓨터의 그림 파일
       const sfx = e.dataTransfer.getData('application/x-potato-sfx'); if (sfx) { const [pk, i] = sfx.split('|'); import('../ui/sfxpanel.js').then(m => m.placeSfx(pk, +i, p)); return; }   // 효과음 패널에서 끌어온 것
       const id = e.dataTransfer.getData('application/x-potato-media'); if (!id) return; let ids = [id]; try { ids = JSON.parse(e.dataTransfer.getData('application/x-potato-medias')) || ids; } catch (_) { /* 한 장만 */ }
+      const over = [...pg.els].reverse().find(x => x.type === 'panel' && !x.hide && p.x >= x.x && p.y >= x.y && p.x <= x.x + x.w && p.y <= x.y + x.h);
+      if (e.shiftKey && over && over.mediaId) { let n = 0; for (const mid of ids.slice(0, 9)) if (addLayer(over, mid)) n++; if (n) { V.sel = over.id; V.more = null; commit('그림 겹치기'); toast('그 컷 위에 그림을 겹쳤어요. 오른쪽 겹친 그림에서 골라 옮기고 키워요.'); } return; }   // Shift를 누르고 놓으면 그 컷에 겹쳐요
       const t = ids.length === 1 && !e.shiftKey ? [...pg.els].reverse().find(x => x.type === 'panel' && p.x >= x.x && p.y >= x.y && p.x <= x.x + x.w && p.y <= x.y + x.h) : null;
       if (t) { t.mediaId = id; t.ix = 0; t.iy = 0; t.is = 1; ensureBitmap(id); V.sel = t.id; commit('컷에 그림 담기'); return; }
       // 빈 곳에 놓으면 그림 비율대로 새 컷이 생겨요 (여러 장이면 아래로 차례로)
@@ -631,17 +736,15 @@ export const cutRoom = {
     });
 
     const update = () => {
-      const pg = pageOf(), e = elOf(); if (V.pan && (!e || e.id !== V.pan)) V.pan = null; loadProjectFonts();
+      const pg = pageOf(), e = elOf(); if (V.pan && (!e || e.id !== V.pan)) V.pan = null; if (V.lay && !(e && (e.layers || []).some(l => l.id === V.lay))) V.lay = null; loadProjectFonts();
       const tb = (label, title, fn, ic, cls = '') => h('button.btn.small' + cls, { title, onclick: fn }, ic ? icon(ic, 14) : null, label);
       bar.hidden = !pg; bar.replaceChildren(
         tb('컷', '화면 가운데에 빈 컷을 넣어요. 보관함 그림을 끌어다 놓으면 그림으로 컷이 생겨요.', () => addAtCenter('panel'), 'cut'),
-        tb('컷 나누기', '컷 모양을 골라 이 페이지에 넣거나, 고른 컷을 둘·셋·넷으로 나눠요.', ev => showMenu([{ label: '모양 골라서 나누기… (12가지)', run: templateDialog }, '-', { label: '선을 그어 자르기 (비스듬히도)', keys: 'K', run: () => { V.tool = 'slice'; emit(); } }, '-', { head: '고른 컷 나누기' }, ...['cut.splitV', 'cut.splitH', 'cut.split3V', 'cut.split3H', 'cut.split4'].map(id => ({ label: { 'cut.splitV': '좌우 둘로', 'cut.splitH': '위아래 둘로', 'cut.split3V': '좌우 셋으로', 'cut.split3H': '위아래 셋으로', 'cut.split4': '넷으로' }[id], disabled: !(e && e.type === 'panel'), run: () => run(id) }))], ev.clientX, ev.clientY + 14)),
+        tb('컷 나누기', '컷 모양을 골라 이 페이지에 넣거나, 고른 컷을 둘·셋·넷으로 나눠요.', ev => showMenu([{ label: '모양 골라서 나누기… (12가지)', run: templateDialog }, '-', { label: '직선으로 자르기 (비스듬히도)', keys: 'K', run: () => { V.tool = 'slice'; V.curve = false; emit(); } }, { label: '곡선으로 자르기', run: () => { V.tool = 'slice'; V.curve = true; emit(); } }, '-', { head: '고른 컷 나누기' }, ...['cut.splitV', 'cut.splitH', 'cut.split3V', 'cut.split3H', 'cut.split4'].map(id => ({ label: { 'cut.splitV': '좌우 둘로', 'cut.splitH': '위아래 둘로', 'cut.split3V': '좌우 셋으로', 'cut.split3H': '위아래 셋으로', 'cut.split4': '넷으로' }[id], disabled: !(e && e.type === 'panel'), run: () => run(id) }))], ev.clientX, ev.clientY + 14)),
         tb('말풍선', '화면 가운데에 말풍선을 넣고 바로 대사를 적어요. 종류는 오른쪽 견본에서 골라요.', () => addAtCenter('bubble'), 'bubble'),
         tb('글자', '화면 가운데에 글자를 넣고 바로 적어요.', () => addAtCenter('text'), 'text'),
         tb('효과음', '효과음 글자를 견본에서 골라 넣어요. 그림으로 된 효과음은 왼쪽 효과음 탭에 있어요.', ev => showMenu([{ head: '글자로 만드는 효과음' }, ...SFX_PRESETS.map((sp, i) => ({ label: sp.n, run: () => addSfxText(i) }))], ev.clientX, ev.clientY + 14)),
-        tb('집중선', '끌어서 집중선을 넣는 도구로 바꿔요.', () => { V.tool = 'lines'; emit(); }, 'lines'),
-        tb('펜', '페이지 위에 손으로 그려요 (P).', () => { V.tool = 'pen'; V.penEl = null; emit(); }, 'brush'),
-        tb('가리기', '끌어서 흰칠·모자이크·흐리게로 가려요 (X).', () => { V.tool = 'cover'; emit(); }, 'cover'),
+        tb('도형·틀', '도형, 집중선, 카메라 틀을 넣어요.', ev => showMenu([{ head: '도형' }, ...SHAPE_KINDS.map(([k, t]) => ({ label: t, run: () => addShape(k) })), '-', { label: '색 화면 (검정·흰색·원하는 색으로 덮기)', run: () => addShape('screen') }, { label: '집중선 (끌어서 넣기)', keys: 'L', run: () => { V.tool = 'lines'; emit(); } }, '-', { head: '카메라 틀' }, ...FRAME_KINDS.map(([k, t]) => ({ label: t, run: () => addFrame(k) }))], ev.clientX, ev.clientY + 14), 'shape'),
         tb('자동 흰칠', '컷 속 그림에서 가릴 곳을 AI가 찾아 그 모양대로 가려요. 그림은 이 컴퓨터 안에서만 처리해요.', ev => showMenu([{ label: '이 페이지의 모든 컷', run: () => censorPanels(false) }, { label: '고른 컷만', disabled: !group().some(o => o.type === 'panel'), run: () => censorPanels(true) }, '-', { label: '이 페이지의 자동 흰칠 지우기', run: clearCensor }, { label: '자동 흰칠 설정…', run: () => run('ai.censorCfg') }], ev.clientX, ev.clientY + 14)),
         h('span.grow'),
         h('label.check', { title: '옮길 때 다른 요소와 페이지의 가장자리·가운데에 달라붙어요. Alt를 누르면 잠깐 꺼져요.' }, h('input', { type: 'checkbox', checked: settings.get('cutSnap') !== false, onchange: ev => settings.set('cutSnap', ev.target.checked) }), '자석'),
@@ -663,7 +766,18 @@ export const cutRoom = {
         g2.fillStyle = d.color; g2.font = '700 38px sans-serif'; g2.textAlign = 'center'; g2.textBaseline = 'middle'; g2.fillText('가', 112, 66);
         return h('button.bub-pre' + ((V.look || PRESETS[0].props) === pr.props ? '.on' : ''), { title: pr.name, 'aria-label': pr.name + ' 말풍선', onclick: () => applyLook(pr.props) }, c);
       }));
+      const toolSec = () => {
+        if (V.tool === 'cover') { const c = { kind: 'mosaic', shape: 'rect', str: 18, soft: 0, size: Math.round(pg.w / 14), color: '#ffffff', ...(settings.get('cutCover') || {}) }, set = (k, v) => { settings.set('cutCover', { ...c, [k]: v }); emit(); }, pick = (label, k, opts) => h('label.field', null, h('span.field-name.w', null, label), h('select.text', { 'aria-label': label, onchange: ev => set(k, ev.target.value) }, opts.map(([v, t]) => h('option', { value: v, selected: c[k] === v }, t)))), nm = (label, k, min, max) => h('label.field', null, h('span.field-name.w', null, label), h('input.num', { type: 'number', min, max, value: c[k], 'aria-label': label, onchange: ev => set(k, clamp(parseFloat(ev.target.value) || 0, min, max)) }));
+          return [h('h3.sec', null, '가리기 도구'), h('div.field-row', null, pick('가리는 법', 'kind', [['mosaic', '모자이크'], ['blur', '흐리게'], ['white', '흰칠 (색)']]), pick('가릴 모양', 'shape', [['rect', '네모'], ['ellipse', '타원'], ['brush', '붓으로 칠하기']])),
+            h('div.field-row', null, c.kind === 'white' ? h('label.field', null, h('span.field-name.w', null, '색'), h('input', { type: 'color', value: c.color, 'aria-label': '가리는 색', onchange: ev => set('color', ev.target.value) })) : nm('세기', 'str', 4, 120), nm('부드럽게', 'soft', 0, 60)), c.shape === 'brush' ? nm('붓 굵기', 'size', 4, 600) : null,
+            h('p.panel-note', null, c.shape === 'brush' ? '그림 위를 칠하면 칠한 자리가 가려져요. 이어서 칠하면 한 가리기에 모여요.' : '그림 위를 끌면 그 네모(타원)만큼 가려져요.')].filter(Boolean); }
+        if (V.tool === 'pen') { const c = { color: '#111111', size: Math.max(3, Math.round(pg.w / 160)), ...(settings.get('cutPen') || {}) };
+          return [h('h3.sec', null, '펜'), h('div.field-row', null, h('label.field', null, h('span.field-name.w', null, '색'), h('input', { type: 'color', value: c.color, 'aria-label': '펜 색', onchange: ev => { settings.set('cutPen', { ...c, color: ev.target.value }); emit(); } })), h('label.field', null, h('span.field-name.w', null, '굵기'), h('input.num', { type: 'number', min: 1, max: 200, value: c.size, 'aria-label': '펜 굵기', onchange: ev => { settings.set('cutPen', { ...c, size: clamp(parseFloat(ev.target.value) || 6, 1, 200) }); emit(); } })))]; }
+        if (V.tool === 'slice') return [h('h3.sec', null, '선으로 자르기'), h('div.btn-row', { role: 'radiogroup' }, h('button.btn.small' + (V.curve ? '' : '.primary'), { onclick: () => { V.curve = false; emit(); } }, '직선으로'), h('button.btn.small' + (V.curve ? '.primary' : ''), { onclick: () => { V.curve = true; emit(); } }, '곡선으로')), h('p.panel-note', null, V.curve ? '컷을 가로질러 구불구불 그으면 그 선을 따라 나뉘어요.' : '컷을 가로질러 끌면 그 직선으로 나뉘어요. Shift는 15도씩.')];
+        return [];
+      };
       side.replaceChildren(...(!pg ? [h('p.empty', null, '페이지를 만들면 설정이 여기 보여요.')] : !e ? [
+        ...toolSec(),
         h('h3.sec', null, '페이지'),
         h('label.field', null, h('span.field-name.w', null, '이름'), h('input.text', { type: 'text', value: pg.name, 'aria-label': '페이지 이름', onchange: ev => { pg.name = ev.target.value.trim() || pg.name; commit('페이지 이름'); } })),
         h('label.field', null, h('span.field-name.w', null, '크기'), h('select.text', { 'aria-label': '페이지 크기', onchange: ev => { const s = SIZES[+ev.target.value]; if (s) { pg.w = s[0]; pg.h = s[1]; V.fitted = null; commit('페이지 크기'); } } }, [h('option', { value: -1, selected: true }, `${pg.w} × ${pg.h}`), ...SIZES.map(([, , t], i) => h('option', { value: i }, t))])),
@@ -687,9 +801,17 @@ export const cutRoom = {
         ...(e.type === 'panel' ? [h('div.field-row', null, num('테두리', 'bw', e, 1, { min: 0, max: 80 }), col('테두리색', 'bc', '#111111')),
           h('div.field-row', null, num('모서리', 'br', e, 2, { min: 0, max: 2000 }), h('label.check', { title: '그림이 비치거나 모자란 곳에 깔리는 색이에요' }, h('input', { type: 'checkbox', checked: !!e.bgc, 'aria-label': '바탕 칠하기', onchange: ev => { e.bgc = ev.target.checked ? '#ffffff' : ''; commit('바탕 칠하기'); } }), e.bgc ? h('input', { type: 'color', value: e.bgc, 'aria-label': '바탕색', onchange: ev => { e.bgc = ev.target.value; commit('바탕색'); } }) : '바탕 칠하기')),
           h('h3.sec', null, '컷 안의 그림'),
-          h('div.btn-row', null, h('button.btn.small', { disabled: !e.mediaId, title: '컷을 빈틈없이 채워요', onclick: () => { Object.assign(e, { ix: 0, iy: 0, is: 1 }); commit('꽉 채우기'); } }, '꽉 채우기'), h('button.btn.small', { disabled: !e.mediaId, title: '그림 전체가 컷 안에 보이게 줄여요', onclick: () => { const m = mediaOf(e.mediaId); if (!m) return; Object.assign(e, { ix: 0, iy: 0, is: Math.min(e.w / m.w, e.h / m.h) / Math.max(e.w / m.w, e.h / m.h) }); commit('전체 보이기'); } }, '전체 보이기'), h('button.btn.small', { disabled: !e.mediaId, title: '컷을 그림 비율에 맞춰요 (폭은 그대로)', onclick: () => { const m = mediaOf(e.mediaId); if (!m) return; e.h = Math.round(e.w * m.h / m.w); Object.assign(e, { ix: 0, iy: 0, is: 1 }); commit('그림 비율로'); } }, '그림 비율로')),
-          e.mediaId && h('div.field-row', null, h('label.field', null, h('span.field-name.w', null, '확대 %'), h('input.num', { type: 'number', min: 5, max: 800, step: 5, value: Math.round((e.is || 1) * 100), 'aria-label': '확대', onchange: ev => { e.is = clamp((parseFloat(ev.target.value) || 100) / 100, 0.05, 8); commit('컷 안 그림 크기'); } })), num('그림 회전', 'ir', e, 1, { min: -180, max: 180 })),
-          e.mediaId && h('div.field-row', null, h('label.field', null, h('span.field-name.w', null, '진하기 %'), h('input.num', { type: 'number', min: 0, max: 100, step: 5, value: Math.round((e.io ?? 1) * 100), 'aria-label': '그림 진하기', onchange: ev => { e.io = clamp((parseFloat(ev.target.value) || 0) / 100, 0, 1); commit('그림 진하기'); } })), chk('좌우 뒤집기', 'ifx')),
+          ...(() => { const T = imgOf(e), Tm = mediaOf(T.mediaId), lay = T !== e, setT = (k, v, label) => { T[k] = v; commit(label); };
+            return [
+              (e.layers || []).length ? h('div.el-list', { role: 'list', 'aria-label': '겹친 그림' }, [...e.layers].reverse().map(L => h('div.el-row' + (L.hide ? '.off' : ''), { role: 'listitem' },
+                h('button.icon-btn' + (L.hide ? '' : '.on'), { title: L.hide ? '보이기' : '숨기기', 'aria-label': '겹친 그림 ' + (L.hide ? '보이기' : '숨기기'), onclick: () => { L.hide = !L.hide; if (!L.hide) delete L.hide; commit(L.hide ? '숨기기' : '보이기'); } }, icon('eye')),
+                h('button.el-name' + (V.lay === L.id ? '.on' : ''), { title: '눌러서 이 그림을 다뤄요', onclick: () => { V.lay = L.id; emit(); } }, h('small', null, '겹침'), ((mediaOf(L.mediaId) || {}).name || '그림')),
+                h('button.icon-btn', { title: '이 그림 빼기', 'aria-label': '겹친 그림 빼기', onclick: () => { e.layers = e.layers.filter(x => x !== L); if (!e.layers.length) delete e.layers; if (V.lay === L.id) V.lay = null; commit('겹친 그림 빼기'); } }, icon('close')))).concat([h('div.el-row', { role: 'listitem' }, h('span'), h('button.el-name' + (lay ? '' : '.on'), { title: '눌러서 바탕 그림을 다뤄요', onclick: () => { V.lay = null; emit(); } }, h('small', null, '바탕'), ((mediaOf(e.mediaId) || {}).name || '그림')), h('span'))])) : null,
+              h('div.btn-row', null, h('button.btn.small', { disabled: !T.mediaId, title: '컷을 빈틈없이 채워요', onclick: () => { Object.assign(T, { ix: 0, iy: 0, is: 1 }); commit('꽉 채우기'); } }, '꽉 채우기'), h('button.btn.small', { disabled: !T.mediaId, title: '그림 전체가 컷 안에 보이게 줄여요', onclick: () => { if (!Tm) return; Object.assign(T, { ix: 0, iy: 0, is: Math.min(e.w / Tm.w, e.h / Tm.h) / Math.max(e.w / Tm.w, e.h / Tm.h) }); commit('전체 보이기'); } }, '전체 보이기'), !lay && h('button.btn.small', { disabled: !e.mediaId, title: '컷을 그림 비율에 맞춰요 (폭은 그대로)', onclick: () => { if (!Tm) return; e.h = Math.round(e.w * Tm.h / Tm.w); Object.assign(e, { ix: 0, iy: 0, is: 1 }); commit('그림 비율로'); } }, '그림 비율로')),
+              T.mediaId && h('div.field-row', null, h('label.field', null, h('span.field-name.w', null, '확대 %'), h('input.num', { type: 'number', min: 5, max: 800, step: 5, value: Math.round((T.is || 1) * 100), 'aria-label': '확대', onchange: ev => setT('is', clamp((parseFloat(ev.target.value) || 100) / 100, 0.05, 8), '컷 안 그림 크기') })), num('그림 회전', 'ir', T, 1, { min: -180, max: 180 })),
+              T.mediaId && h('div.field-row', null, h('label.field', null, h('span.field-name.w', null, '진하기 %'), h('input.num', { type: 'number', min: 0, max: 100, step: 5, value: Math.round((T.io ?? 1) * 100), 'aria-label': '그림 진하기', onchange: ev => setT('io', clamp((parseFloat(ev.target.value) || 0) / 100, 0, 1), '그림 진하기') })), h('label.check', null, h('input', { type: 'checkbox', checked: !!T.ifx, onchange: ev => setT('ifx', ev.target.checked, '좌우 뒤집기') }), '좌우 뒤집기')),
+              h('div.btn-row', null, h('button.btn.small', { disabled: !e.mediaId || !picked.size, title: '보관함에서 고른 그림을 이 컷 위에 겹쳐요. 그림을 Shift를 누른 채 컷에 끌어다 놓아도 돼요.', onclick: () => { let n = 0; for (const id of [...picked].slice(0, 9)) if (addLayer(e, id)) n++; if (n) commit('그림 겹치기'); } }, '고른 그림 겹치기')),
+            ].filter(Boolean); })(),
           h('div.btn-row', null, h('button.btn.small' + (V.pan === e.id ? '.primary' : ''), { disabled: !e.mediaId, title: '켜 두면 컷 안의 그림을 끌어 옮기고 휠로 키워요. 컷을 두 번 눌러도 돼요.', onclick: () => { V.pan = V.pan === e.id ? null : e.id; emit(); } }, V.pan === e.id ? '그림 옮기기 끝내기' : '그림 옮기기'), h('button.btn.small', { disabled: !e.mediaId, onclick: () => { e.mediaId = null; commit('그림 빼기'); } }, '그림 빼기')),
           e.poly && h('div.btn-row', null, h('button.btn.small', { title: '선으로 잘라 비스듬해진 컷을 다시 네모로 만들어요', onclick: () => { delete e.poly; commit('사각형으로 되돌리기'); } }, '사각형으로 되돌리기')),
           h('h3.sec', null, '분위기와 효과'),
@@ -732,14 +854,24 @@ export const cutRoom = {
           h('div.field-row', null, num('굵기 %', 'tailW', e, 2, { min: 4, max: 70, def: 20 }), num('휘어짐', 'tailBend', e, 5, { min: -100, max: 100, def: 28 })),
           h('p.panel-note', null, '꼬리 끝의 노란 점을 끌어 말하는 사람 쪽으로 돌려요. 말풍선 여럿을 Shift로 함께 고르면 이어 붙일 수 있어요.'),
           (group().filter(isB).length > 1 || e.join) && h('div.btn-row', null, h('button.btn.small', { disabled: group().filter(isB).length < 2, onclick: () => run('cut.join') }, '이어 붙이기'), h('button.btn.small', { disabled: !e.join, onclick: () => run('cut.unjoin') }, '떼어 내기'))] : []),
+        ...(e.type === 'shape' ? [h('label.field', null, h('span.field-name.w', null, '모양'), h('select.text', { 'aria-label': '도형 모양', onchange: ev => { e.kind = ev.target.value; commit('도형 모양'); } }, SHAPE_KINDS.map(([v, t]) => h('option', { value: v, selected: e.kind === v }, t)))),
+          h('div.field-row', null, h('label.check', null, h('input', { type: 'checkbox', checked: !!e.fill, 'aria-label': '칠하기', onchange: ev => { e.fill = ev.target.checked ? '#ffffff' : ''; commit('칠하기'); } }), e.fill ? h('input', { type: 'color', value: e.fill, 'aria-label': '칠 색', onchange: ev => { e.fill = ev.target.value; commit('칠 색'); } }) : '칠하기'), e.fill ? h('label.check', { title: '아래로 갈수록 다른 색으로' }, h('input', { type: 'checkbox', checked: !!e.fill2, 'aria-label': '아래쪽 색 쓰기', onchange: ev => { e.fill2 = ev.target.checked ? '#000000' : ''; commit('아래쪽 색'); } }), e.fill2 ? h('input', { type: 'color', value: e.fill2, 'aria-label': '아래쪽 색', onchange: ev => { e.fill2 = ev.target.value; commit('아래쪽 색'); } }) : '아래쪽 색') : h('span')),
+          h('div.field-row', null, num('테두리', 'bw', e, 1, { min: 0, max: 80 }), col('테두리색', 'bc', '#111111')),
+          h('label.field', null, h('span.field-name.w', null, '진하기 %'), h('input.num', { type: 'number', min: 0, max: 100, step: 5, value: Math.round((e.op ?? 1) * 100), 'aria-label': '진하기', onchange: ev => { e.op = clamp((parseFloat(ev.target.value) || 0) / 100, 0, 1); commit('진하기'); } }))] : []),
+        ...(e.type === 'frame' ? [h('label.field', null, h('span.field-name.w', null, '틀'), h('select.text', { 'aria-label': '틀 종류', onchange: ev => { e.kind = ev.target.value; commit('틀 종류'); } }, FRAME_KINDS.map(([v, t]) => h('option', { value: v, selected: e.kind === v }, t)))),
+          h('div.field-row', null, col('색', 'color', '#ffffff'), e.kind === 'letterbox' || e.kind === 'film' ? col('띠 색', 'color2', '#000000') : h('span')),
+          e.kind === 'letterbox' ? num('띠 높이 %', 'bar', e, 1, { min: 2, max: 40, def: 12 }) : null,
+          ['viewfinder', 'rec', 'vhs'].includes(e.kind) ? h('label.field', null, h('span.field-name.w', null, '적힌 글'), h('input.text', { type: 'text', value: e.text || '', placeholder: e.kind === 'vhs' ? 'AM 12:00  JAN. 01 2026' : '00:00:12:05', 'aria-label': '틀에 적힌 글', onchange: ev => { e.text = ev.target.value; commit('틀 글'); } })) : null,
+          h('label.field', null, h('span.field-name.w', null, '진하기 %'), h('input.num', { type: 'number', min: 0, max: 100, step: 5, value: Math.round((e.op ?? 1) * 100), 'aria-label': '진하기', onchange: ev => { e.op = clamp((parseFloat(ev.target.value) || 0) / 100, 0, 1); commit('진하기'); } }))] : []),
         ...(e.type === 'draw' ? [h('div.field-row', null, h('label.field', null, h('span.field-name.w', null, '색'), h('input', { type: 'color', value: e.color || '#111111', 'aria-label': '펜 색', onchange: ev => { e.color = ev.target.value; settings.set('cutPen', { ...(settings.get('cutPen') || {}), color: e.color }); commit('펜 색'); } })), h('label.field', null, h('span.field-name.w', null, '굵기'), h('input.num', { type: 'number', min: 1, max: 200, value: e.size || 6, 'aria-label': '펜 굵기', onchange: ev => { e.size = clamp(parseFloat(ev.target.value) || 6, 1, 200); settings.set('cutPen', { ...(settings.get('cutPen') || {}), size: e.size }); commit('펜 굵기'); } }))),
           h('div.field-row', null, num('테두리', 'ol', e, 1, { min: 0, max: 60 }), col('테두리색', 'olc', '#ffffff')),
           h('div.btn-row', null, h('button.btn.small', { disabled: (e.strokes || []).length < 2, title: '마지막에 그은 획을 지워요', onclick: () => { e.strokes.pop(); commit('마지막 획 지우기'); } }, '마지막 획 지우기')),
           h('p.panel-note', null, '펜 도구(P)로 이어서 그으면 이 그림에 더해져요. 새 그림으로 시작하려면 다른 곳을 눌러 고른 것을 풀어요.')] : []),
         ...(e.type === 'cover' ? [h('div.field-row', null, h('label.field', null, h('span.field-name.w', null, '가리는 법'), h('select.text', { 'aria-label': '가리는 법', onchange: ev => { e.kind = ev.target.value; settings.set('cutCover', { ...(settings.get('cutCover') || {}), kind: e.kind }); commit('가리는 법'); } }, [['mosaic', '모자이크'], ['blur', '흐리게'], ['white', '흰칠 (색)']].map(([v, t]) => h('option', { value: v, selected: (e.kind || 'white') === v }, t)))),
-            h('label.field', null, h('span.field-name.w', null, '모양'), h('select.text', { 'aria-label': '가리기 모양', onchange: ev => { e.shape = ev.target.value; settings.set('cutCover', { ...(settings.get('cutCover') || {}), shape: e.shape }); commit('가리기 모양'); } }, [['rect', '네모'], ['ellipse', '타원']].map(([v, t]) => h('option', { value: v, selected: (e.shape || 'rect') === v }, t))))),
-          e.kind === 'white' ? h('div.field-row', null, col('색', 'color', '#ffffff')) : num('세기', 'str', e, 2, { min: 4, max: 120, def: 18 }),
-          h('p.panel-note', null, '가리기 도구(X)는 끌 때마다 하나씩 생겨요. 모자이크와 흐리게는 그 밑에 있는 그림을 가려요.')] : []),
+            h('label.field', null, h('span.field-name.w', null, '모양'), h('select.text', { 'aria-label': '가리기 모양', disabled: e.shape === 'brush', onchange: ev => { e.shape = ev.target.value; settings.set('cutCover', { ...(settings.get('cutCover') || {}), shape: e.shape }); commit('가리기 모양'); } }, (e.shape === 'brush' ? [['brush', '붓으로 칠한 것']] : [['rect', '네모'], ['ellipse', '타원']]).map(([v, t]) => h('option', { value: v, selected: (e.shape || 'rect') === v }, t))))),
+          h('div.field-row', null, e.kind === 'white' ? col('색', 'color', '#ffffff') : num('세기', 'str', e, 2, { min: 4, max: 120, def: 18 }), num('부드럽게', 'soft', e, 1, { min: 0, max: 60 })),
+          e.shape === 'brush' ? h('div.field-row', null, num('붓 굵기', 'size', e, 2, { min: 4, max: 600, def: 40 }), h('button.btn.small', { disabled: (e.strokes || []).length < 2, onclick: () => { e.strokes.pop(); commit('마지막 획 지우기'); } }, '마지막 획 지우기')) : null,
+          h('p.panel-note', null, e.shape === 'brush' ? '가리기 도구(X)로 이어서 칠하면 이 가리기에 더해져요. 모자이크와 흐리게는 그 밑에 있는 그림을 가려요.' : '모자이크와 흐리게는 그 밑에 있는 그림을 가려요. 붓으로 칠하려면 가리기 도구(X)를 고르고 오른쪽에서 모양을 붓으로 바꿔요.')] : []),
         ...(e.type === 'lines' ? [h('div.field-row', null, num('선 수', 'count'), num('굵기', 'thick', e, 0.1)), h('div.field-row', null, num('가운데 빈 곳 %', 'hole'), col('색', 'color', '#111111')), h('div.btn-row', null, h('button.btn.small', { onclick: () => { e.seed = 1 + Math.floor(Math.random() * 99999); commit('집중선 다시 뿌리기'); } }, '다르게 뿌리기'))] : []),
         ...(e.type === 'text' ? [
           h('div.bub-grid.txt-grid', { role: 'group', 'aria-label': '글자 모양' }, [...TEXT_STYLES, ...SFX_PRESETS].map((st, i) => {
@@ -768,9 +900,15 @@ export const cutRoom = {
             h('div.field-row', null, chk('배경 띠', 'boxOn'), e.boxOn ? col('띠 색', 'boxColor', '#000000') : h('span')),
             e.boxOn ? h('div.field-row', null, num('띠 진하기', 'boxA', e, 5, { min: 0, max: 100, def: 65 }), num('띠 여백', 'boxPad', e, 5, { min: 0, max: 120, def: 30 })) : null)] : []),
         ...(e.type === 'bubble' || e.type === 'text' ? [h('div.btn-row', null, h('button.btn.small', { title: '고른 대사만 제미나이로 번역하거나 다듬어요', onclick: ev => showMenu(LANGS.map(([v, t]) => ({ label: t, run: () => translateOne(v) })), ev.clientX, ev.clientY + 14) }, 'AI로 번역·다듬기…'))] : []),
-        ...(e.type === 'bubble' || e.type === 'text' ? [h('h3.sec', null, '모양 묶음'),
-          h('div.btn-row', null, h('select.text', { 'aria-label': '모양 묶음', style: 'flex:1;width:auto', onchange: ev => { const st = styles().filter(x => x.type === e.type)[+ev.target.value]; if (st) { Object.assign(e, st.props); commit('모양 묶음 입히기'); } } }, [h('option', { value: -1, selected: true }, styles().some(x => x.type === e.type) ? '저장한 모양 고르기' : '저장한 모양이 없어요'), ...styles().filter(x => x.type === e.type).map((x, i) => h('option', { value: i }, x.name))]),
-            h('button.btn.small', { title: '지금 이 요소의 글자 크기·색·테두리·모양을 이름 붙여 저장해요', onclick: async () => { const name = await askText('모양 묶음 이름', e.type === 'bubble' ? '기본 말풍선' : '기본 글자', '저장'); if (!name) return; const props = {}; STYLE_KEYS[e.type].forEach(k => { if (e[k] !== undefined) props[k] = e[k]; }); settings.set('cutStyles', [...styles().filter(x => !(x.type === e.type && x.name === name)), { name, type: e.type, props }]); emit(); toast(`'${name}' 모양을 저장했어요.`); } }, '지금 모양 저장'))] : []),
+        ...(e.type === 'bubble' || e.type === 'text' ? [h('h3.sec', null, '내 모양 (저장해 두고 다시 쓰기)'),
+          styles().some(x => x.type === e.type) ? h('div.my-styles', null, styles().filter(x => x.type === e.type).map(st => {
+            const c = h('canvas'), g2 = c.getContext('2d'), def = (settings.get('cutDef') || {})[e.type] === st.name; c.width = 112; c.height = 64;
+            try { if (e.type === 'text') { const smp = { id: 'my' + st.name, text: '가나', color: '#111111', sc: '#ffffff', ...st.props, size: 40, vert: false, arc: st.props.arc ? 30 : 0, sw: Math.round((st.props.sw || 0) * 40 / (st.props.size || 40)), sw2: Math.round((st.props.sw2 || 0) * 40 / (st.props.size || 40)) }; g2.translate(56, 32); g2.scale(0.9, 0.9); drawLettering(g2, smp, 0, 0); }
+              else { g2.scale(0.5, 0.5); const d = { x: 22, y: 12, w: 180, h: 104, seed: 12, tx: 58, ty: 152, tail: true, ...st.props }; drawBubbles(g2, [d]); g2.fillStyle = d.color || '#111'; g2.font = '700 38px sans-serif'; g2.textAlign = 'center'; g2.textBaseline = 'middle'; g2.fillText('가', 112, 66); } } catch (_) { /* 견본만 비어요 */ }
+            return h('div.my-style', null, h('button.bub-pre', { title: `'${st.name}' 모양 입히기`, 'aria-label': st.name + ' 모양 입히기', onclick: () => { for (const o of group().filter(x => x.type === e.type)) { Object.assign(o, st.props); syncLook(o); } commit('내 모양 입히기'); } }, c), h('span.my-name', { title: st.name }, st.name),
+              h('button.icon-btn' + (def ? '.on' : ''), { title: def ? '새로 넣을 때 기본에서 빼기' : '새로 넣는 ' + (e.type === 'bubble' ? '말풍선' : '글자') + '을 이 모양으로', 'aria-label': st.name + (def ? ' 기본에서 빼기' : ' 기본으로'), 'aria-pressed': String(def), onclick: () => { const d = { ...(settings.get('cutDef') || {}) }; if (def) delete d[e.type]; else d[e.type] = st.name; settings.set('cutDef', d); emit(); } }, def ? '★' : '☆'),
+              h('button.icon-btn', { title: '이 모양 지우기', 'aria-label': st.name + ' 모양 지우기', onclick: () => { settings.set('cutStyles', styles().filter(x => x !== st)); emit(); } }, icon('close'))); })) : h('p.panel-note', null, '지금 모양이 마음에 들면 저장해 두세요. 다른 작업에서도 한 번에 입힐 수 있어요.'),
+          h('div.btn-row', null, h('button.btn.small', { title: '지금 이 요소의 글자 크기·색·테두리·모양을 이름 붙여 저장해요', onclick: async () => { const name = await askText('내 모양 이름', e.type === 'bubble' ? '기본 말풍선' : '기본 글자', '저장'); if (!name) return; const props = {}; STYLE_KEYS[e.type].forEach(k => { if (e[k] !== undefined) props[k] = e[k]; }); settings.set('cutStyles', [...styles().filter(x => !(x.type === e.type && x.name === name)), { name, type: e.type, props }]); emit(); toast(`'${name}' 모양을 저장했어요.`); } }, '지금 모양 저장'))] : []),
         h('h3.sec', null, '자리'),
         h('div.btn-row', { role: 'group', 'aria-label': '정렬' }, [['l', '왼쪽'], ['cx', '가로 가운데'], ['r', '오른쪽'], ['t', '위'], ['cy', '세로 가운데'], ['b', '아래']].map(([k, t]) => h('button.btn.small', { title: group().length > 1 ? '고른 것들을 서로 ' + t + '에 맞춰요' : '페이지의 ' + t + '에 맞춰요', onclick: () => alignSel(k) }, t))),
         group().length > 2 && h('div.btn-row', null, h('button.btn.small', { onclick: () => distributeSel('x') }, '가로 간격 똑같이'), h('button.btn.small', { onclick: () => distributeSel('y') }, '세로 간격 똑같이')),
