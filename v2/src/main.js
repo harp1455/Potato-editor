@@ -158,7 +158,7 @@ function helpDialog() {
   dialog({ title: '사용법', wide: true, buttons: [{ label: '단축키 보기', run: () => { settingsDialog('keys'); } }, { label: '닫기', primary: true }], body: h('div.help', null,
     ...sec('시작하기', [['그림 넣기', '그림이나 폴더를 창에 끌어다 놓거나, 파일 메뉴의 그림 열기·폴더째 넣기를 써요. 넣은 그림은 왼쪽 보관함에 모여요.'], ['작업실', '위쪽 단추나 Alt+1~5로 이미지, 컷, 영상, 캐릭터, 일괄 처리를 오가요.'], ['명령 찾기', 'Ctrl+K를 누르고 하고 싶은 일을 적으면 어느 메뉴에 있든 바로 찾아요.'], ['저장', '작업은 저절로 저장돼요. 파일 메뉴의 작업 목록에서 다른 작업을 열거나 백업해요.']]),
     ...sec('이미지 작업실', [['고르기', '네모·동그라미·올가미·마법봉·마법 붓·AI로 고르기. Shift는 더하기, Alt는 빼기예요.'], ['고른 곳에 하는 일', '고르기 메뉴에서 새 레이어로, 지우기, 흐리게, 모자이크, 색 채우기, 그림판 자르기, 가림막.'], ['보정', '레이어를 고르면 오른쪽 속성에 밝기·대비·곡선이 나와요. 아무것도 안 고르면 전체 보정이에요.'], ['AI', 'AI 메뉴에 배경 지우기, 화질 키우기, AI로 지우기, 자동 흰칠, NovelAI, 제미나이가 있어요.']]),
-    ...sec('컷 작업실', [['도구', 'V 고르기, C 컷, B 말풍선, T 글자, L 집중선. Shift를 누르고 누르면 여러 개를 함께 골라요.'], ['대사', '컷 메뉴에서 번역, 다듬기, 대사 초안, 그림 속 글자 번역을 해요.']]),
+    ...sec('컷 작업실', [['도구', 'V 고르기, C 컷, B 말풍선, T 글자, L 집중선. Shift를 누르고 누르면 여러 개를 함께 골라요. 화살표로 1칸씩, Shift와 함께면 10칸씩 옮겨요.'], ['말풍선', '오른쪽의 종류 견본을 고르고 끌거나 눌러서 놓아요. 두 번 누르거나 Enter를 누르면 그 자리에서 대사를 고쳐요. 꼬리 끝의 노란 점을 끌어 방향을 바꾸고, 말풍선 여럿을 함께 골라 이어 붙일 수 있어요. 모양·선(펜, 붓, 스케치, 점선)·겹줄·번짐·손맛을 따로 바꿀 수 있어요.'], ['대사', '컷 메뉴에서 번역, 다듬기, 대사 초안, 그림 속 글자 번역을 해요.']]),
     ...sec('영상 작업실', [['장면', '보관함에서 그림을 골라 장면으로 넣어요. 장면마다 길이, 겹쳐 바뀜, 화면 움직임을 정해요.'], ['자막·소리·얹는 그림', '오른쪽 칸에서 넣어요. 움직임 점으로 시간에 따라 바뀌게 할 수 있어요.'], ['내보내기', 'Ctrl+M. MP4, GIF, WebP로 저장해요.']]),
     ...sec('캐릭터 작업실', [['차례', '① 뼈대 맞추기 → ② 부위 나누기 → ③ 움직임 만들기. 다 되면 영상 작업실로 보내거나 파일로 내보내요.']])) });
 }
@@ -209,7 +209,7 @@ function planDialog() {
     ['이미지 작업실', '고르는 도구, 보정, AI 도구, NovelAI는 들어왔고, 가림막·고급 보정·AI 지우개·자동 흰칠이 남았어요', '지금'],
     ['캐릭터 작업실', '배경과 인물 나누기, AI로 외곽선 따기, 고른 곳 가져오기, 뼈대와 움직임, 메운 자리를 NovelAI로 바로 다시 그리기', '지금'],
     ['영상 작업실', '장면 잇기와 MP4·WebP·GIF 내보내기는 들어왔고, 글자·넘김 효과·소리·AI 중간 장면이 남았어요', '지금'],
-    ['컷 작업실', '페이지, 컷, 말풍선, 글자, 대사 번역은 들어왔고, 그림 속 글자 번역·효과음·말풍선 모양 묶음·API 금액이 남았어요', '지금'],
+    ['컷 작업실', '페이지, 컷, 손그림 말풍선(종류 견본·이어 붙이기·그 자리에서 고치기), 글자, 대사 번역, 그림 속 글자 번역, 효과음, 모양 묶음이 들어왔어요', '지금'],
     ['일괄 처리 작업실', '배경 지우기, 화질 키우기, 크기·형식 바꾸기, NAI 정보 지우기를 여러 장에 한 번에', '지금'],
     ['8.x 작업 가져오기', '8.x에서 "작업 파일 저장"으로 만든 파일을 파일 메뉴에서 가져와요. 그림은 보관함으로, 페이지는 컷 작업실로', '지금'],
   ];
@@ -376,7 +376,8 @@ async function start() {
     if (k === 'layouts') renderDock(els.work, els.center);
     refresh();
   });
-  addEventListener('keydown', e => { if (document.querySelector('.dlg-back') && (!/^Ctrl\+K$/.test(keyName(e)) || document.querySelector('.pal-dlg'))) return; if (handleKey(e)) closeMenu(); });
+  addEventListener('keydown', e => { if (document.querySelector('#vsStudio:not([hidden])')) return;   // 영상 자막 번역 창이 떠 있으면 밑의 편집기는 키를 받지 않아요
+    if (document.querySelector('.dlg-back') && (!/^Ctrl\+K$/.test(keyName(e)) || document.querySelector('.pal-dlg'))) return; if (handleKey(e)) closeMenu(); });
   document.addEventListener('focusout', e => { if (!isRendering() && e.target.closest && e.target.closest('.zone-body')) setTimeout(() => updatePanels()); });
   addEventListener('beforeunload', () => { if (!state.saved) saveNow(); });
   document.addEventListener('contextmenu', e => { if (!e.target.closest('input, textarea, .viewport, .layer')) e.preventDefault(); });

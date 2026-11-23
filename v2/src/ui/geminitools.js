@@ -8,7 +8,7 @@ import { speak, animate, generate } from '../api/gemini.js';
 import { runJob } from '../core/ai.js';
 import { flatten, layerPic, layerFromBlob } from '../rooms/image.js';
 import { download } from '../core/files.js';
-import { dialog, toast, busy } from './overlay.js';
+import { dialog, toast, busy, confirmBox } from './overlay.js';
 
 export const DUB_MODELS = [['gemini-3.8-flash-tts', '3.8 Flash (연기력 좋음)'], ['gemini-3.8-flash-lite-tts', '3.8 Flash-Lite (빠르고 쌈)']];
 const VOICES = [['Charon', '남', '또렷한'], ['Puck', '남', '밝은'], ['Fenrir', '남', '들뜬'], ['Orus', '남', '단단한'], ['Enceladus', '남', '숨소리 섞인'], ['Iapetus', '남', '맑은'], ['Umbriel', '남', '느긋한'], ['Algieba', '남', '부드러운'], ['Algenib', '남', '거친'], ['Rasalgethi', '남', '차분히 설명하는'], ['Alnilam', '남', '단호한'], ['Schedar', '남', '고른'], ['Achird', '남', '친근한'], ['Zubenelgenubi', '남', '편한'], ['Sadachbia', '남', '생기 있는'], ['Sadaltager', '남', '지적인'],
@@ -122,7 +122,7 @@ function videoDialog() {
           h('button.btn.small.primary', { disabled: !src, onclick: async () => download(await idb.get('blobs', 'vid:' + v.id), `${v.name} 영상 ${v.id.slice(-4)}.mp4`) }, 'MP4로 저장'),
           h('button.btn.small', { disabled: !src, title: '영상을 장면들로 풀어 영상 작업실에 넣어요. 거기서 자막·소리·효과를 더하고 다시 내보낼 수 있어요.', onclick: async () => { const b = await idb.get('blobs', 'vid:' + v.id), { clipToScenes } = await import('../rooms/video.js'); d.close(); settings.set('room', 'video'); clipToScenes(new File([b], `${v.name} AI 영상.mp4`, { type: b.type || 'video/mp4' })); } }, '영상 작업실로 보내기'),
           h('button.btn.small', { onclick: () => { ta.value = v.prompt; ta.focus(); } }, '이 말로 다시 쓰기'), h('span.grow'),
-          h('button.icon-btn', { title: '이 영상 지우기', 'aria-label': `${v.name} 영상 지우기`, onclick: async () => { state.project.videos = vids().filter(x => x !== v); await idb.del('blobs', 'vid:' + v.id); if (urls.get(v.id)) URL.revokeObjectURL(urls.get(v.id)); urls.delete(v.id); commit('AI 영상 지우기'); paint(); } }, icon('trash'))) : null));
+          h('button.icon-btn', { title: '이 영상 지우기', 'aria-label': `${v.name} 영상 지우기`, onclick: async () => { if (!await confirmBox('AI 영상 지우기', `'${v.name}' 영상을 지워요. 영상 파일까지 지워서 되돌리기로 돌아오지 않아요.`, '지우기', true)) return; state.project.videos = vids().filter(x => x !== v); await idb.del('blobs', 'vid:' + v.id); if (urls.get(v.id)) URL.revokeObjectURL(urls.get(v.id)); urls.delete(v.id); commit('AI 영상 지우기'); paint(); } }, icon('trash'))) : null));
     }
     if (!rows.length) rows.push(h('p.empty', null, '아직 만든 영상이 없어요. 왼쪽에서 움직임을 적고 영상 만들기를 누르면, 만드는 과정과 결과가 여기에 나와요.'));
     list.replaceChildren(...rows);

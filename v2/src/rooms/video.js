@@ -201,6 +201,7 @@ const clipTracks = s => s.scenes.filter(x => x.clip && (x.vol ?? 1) > 0).map(x =
 const allTracks = s => [...tracksOf(s), ...clipTracks(s)];
 function ownTracks(s) { if (!s.audios) { s.audios = tracksOf(s).map(a => ({ ...a })); delete s.audio; } return s.audios; }
 const AUD = new Map();   // id → { el, len, peaks }
+const AUDBAD = new Set();   // 파일을 찾지 못한 소리
 const AUDP = new Map();   // 불러오는 중인 것 (같은 소리를 두 번 만들지 않게: 겹쳐 만들면 먼저 튼 것이 멈추지 않아요)
 function audOf(a) { let p = AUDP.get(a.id); if (!p) { p = audLoad(a); AUDP.set(a.id, p); } return p; }
 async function audLoad(a) {
@@ -220,7 +221,7 @@ const lenOf = (a, o) => Math.max(0.05, a.dur ?? ((o && o.len) || 0) - (a.from ||
 function syncAudio(s, restart) {
   const live = new Set();
   for (const a of s ? allTracks(s) : []) {
-    live.add(a.id); const o = AUD.get(a.id); if (!o) { audOf(a).then(() => syncAudio(seqOf())); continue; }
+    live.add(a.id); const o = AUD.get(a.id); if (!o) { if (!AUDBAD.has(a.id)) audOf(a).then(() => { if (AUD.get(a.id)) syncAudio(seqOf()); else AUDBAD.add(a.id); }).catch(() => AUDBAD.add(a.id)); continue; }   // 소리 파일이 사라졌으면 그 소리만 건너뛰어요 (다시 찾느라 멈추지 않게)
     const on = V.playing && V.t >= a.t0 && V.t < a.t0 + lenOf(a, o); { const L = lenOf(a, o), q = V.t - a.t0; o.el.volume = clamp((a.vol ?? 1) * Math.min(1, a.fin ? q / a.fin : 1, a.fout ? (L - q) / a.fout : 1), 0, 1); }
     if (on && (o.el.paused || restart)) { o.el.currentTime = (a.from || 0) + (V.t - a.t0); o.el.play().catch(() => {}); } else if (!on && !o.el.paused) o.el.pause();
   }
@@ -298,9 +299,10 @@ function exportDialog() {
       F.fmt !== 'mp4' ? h('label.check', null, h('input', { type: 'checkbox', checked: F.loop, onchange: e => { F.loop = e.target.checked; } }), '계속 되풀이') : h('span')));
   drawBox();
   dialog({ title: '영상 내보내기', body: box, buttons: [{ label: '취소' }, { label: '내보내기', primary: true, run: () => { (async () => {
+    if (EXPORTING) { toast('이미 내보내는 중이에요. 끝난 뒤에 다시 해 주세요.'); return; }
     play(false); const b = busy('파일을 만드는 중이에요.'); EXPORTING = true;
     try {
-      await Promise.all(s.scenes.map(x => x.clip ? clipOf(x.clip).wait : ensureBitmap(x.mediaId)));
+      await Promise.all([...s.scenes.map(x => x.clip ? clipOf(x.clip).wait : ensureBitmap(x.mediaId)), ...(s.overs || []).filter(o => o.mediaId).map(o => ensureBitmap(o.mediaId))]);
       const audio = F.fmt === 'mp4' ? await audioBuffer(s, total(s)).catch(() => null) : null;
       const blob = await encodeRender({ W: s.w, H: s.h, fps: s.fps, total: total(s), render: async (g, t, w, hh) => { await clipPrep(s, t); renderSeq(g, s, t, w, hh); } }, F.fmt, { size: F.size, loop: F.loop, quality: 90, audio }, p => b.set(`파일을 만드는 중이에요. ${Math.round(p * 100)}%`));
       b.done(''); const ok = await download(blob, `${s.name}.${F.fmt}`); if (ok) toast(`'${s.name}.${F.fmt}'로 내보냈어요.`);
@@ -404,7 +406,7 @@ export const videoRoom = {
         h('h3.sec', null, '소리'),
         ...tracksOf(s).map((a0, ti) => { const A = () => ownTracks(s)[ti]; return h('div.cap', null, h('p.clip-text', { title: a0.name }, a0.name), waveBox(new Proxy(a0, { set: (_, k, v) => { A()[k] = v; a0[k] = v; return true; } })),
           h('div.field-row', null, num('영상의', +(a0.t0 || 0).toFixed(2), 0.1, 0, v => { A().t0 = Math.max(0, v); commit('소리 시작'); }, '초부터'), num('크기', Math.round((a0.vol ?? 1) * 100), 5, 0, v => { A().vol = clamp(v, 0, 200) / 100; commit('소리 크기'); }, '%')),
-          h('div.field-row', null, num('서서히 커짐', a0.fin || 0, 0.1, 0, v => { A().fin = clamp(v, 0, 30); commit('소리 서서히'); }, '초'), num('서서히 작아짐', a0.fout || 0, 0.1, 0, v => { A().fout = clamp(v, 0, 30); commit('소리 서서히'); }, '초')),
+          h('div.field-row', null, num('점점 크게', a0.fin || 0, 0.1, 0, v => { A().fin = clamp(v, 0, 30); commit('소리 서서히'); }, '초'), num('점점 작게', a0.fout || 0, 0.1, 0, v => { A().fout = clamp(v, 0, 30); commit('소리 서서히'); }, '초')),
           h('div.btn-row', null, h('button.btn.small', { onclick: () => { A().t0 = +V.t.toFixed(2); commit('소리 시작'); } }, '지금 시각부터 나오게'), h('span.grow'), h('button.icon-btn', { title: '소리 빼기', 'aria-label': `${a0.name} 빼기`, onclick: () => { ownTracks(s).splice(ti, 1); commit('소리 빼기'); } }, icon('trash')))); }),
         h('button.btn.small', { onclick: () => run('video.audio') }, '소리 파일 넣기'),
         tracksOf(s).length ? h('p.panel-note', null, '소리는 MP4로 내보낼 때만 들어가요. 여러 개를 넣으면 겹쳐서 나와요.') : null,

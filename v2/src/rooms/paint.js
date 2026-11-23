@@ -36,10 +36,12 @@ async function begin(c, to) {
   const l = to || await target(c), old = await ensureBitmap(l.mediaId), w = document.createElement('canvas'); w.width = old.width; w.height = old.height; const g = w.getContext('2d'); g.drawImage(old, 0, 0);
   state.bitmaps.set(l.mediaId, w);
   // 레이어가 옮겨졌거나 크기가 바뀌었어도 그림판 자리 그대로 그려지게
-  const toLayer = p => ({ x: (p.x - l.x) / l.scale, y: (p.y - l.y) / l.scale });
+  // 그림판 좌표 → 레이어 그림 좌표: 옮기기·크기뿐 아니라 돌리기·뒤집기도 거꾸로 풀어요
+  const M = new DOMMatrix().translate(w.width / 2, w.height / 2).scale((l.flipX ? -1 : 1) / l.scale, (l.flipY ? -1 : 1) / l.scale).rotate(-(l.rot || 0)).translate(-(l.x + w.width * l.scale / 2), -(l.y + w.height * l.scale / 2));
+  const toLayer = p => { const q = M.transformPoint(new DOMPoint(p.x, p.y)); return { x: q.x, y: q.y }; }, fromCanvas = g2 => g2.setTransform(M);
   const done = async label => { const oldId = l.mediaId, m = await addMedia(new File([await new Promise(r => w.toBlob(r, 'image/png'))], '그리기.png', { type: 'image/png' }), null, { hidden: true }); state.bitmaps.set(oldId, old); await ensureBitmap(m.id); l.mediaId = m.id; commit(label); if (++strokes % 20 === 0) tidyMedia(); };   // 스무 번 그을 때마다, 되돌리기로도 못 돌아가는 옛 그림을 치워요
   const cancel = () => { state.bitmaps.set(l.mediaId, old); };
-  return { l, g, w, toLayer, done, cancel, k: 1 / l.scale };
+  return { l, g, w, toLayer, fromCanvas, done, cancel, k: 1 / l.scale };
 }
 function drawShape(g, kind, a, b, o, k = 1) {
   g.save(); g.lineWidth = o.size * k; g.lineCap = g.lineJoin = 'round'; g.strokeStyle = g.fillStyle = o.color; g.globalAlpha = o.alpha / 100; g.beginPath();
@@ -97,7 +99,7 @@ async function applyCover(c, d, api) {
   }
   if (kind === 'erase') {   // 고른 레이어의 그림을 지워요 (그 레이어의 새 그림으로 바뀌고, 되돌릴 수 있어요)
     const l = layerOf(); if (!l || l.locked) { const { toast } = await import('../ui/overlay.js'); toast('지울 레이어를 먼저 골라 주세요.'); return; }
-    const S = await begin(c, l); S.g.save(); S.g.globalCompositeOperation = 'destination-out'; S.g.setTransform(S.k, 0, 0, S.k, -l.x * S.k, -l.y * S.k); S.g.drawImage(maskOf(soft), 0, 0); S.g.restore(); await S.done(COVER_LABEL.erase); return;
+    const S = await begin(c, l); S.g.save(); S.g.globalCompositeOperation = 'destination-out'; S.fromCanvas(S.g); S.g.drawImage(maskOf(soft), 0, 0); S.g.restore(); await S.done(COVER_LABEL.erase); return;
   }
   const m = maskOf(kind === 'heal' ? Math.max(soft, 2) : soft), out = mkc(c.w, c.h), g = out.getContext('2d'), k = Math.max(0.1, o.cstr / 50);
   if (kind === 'white') { g.fillStyle = o.ccolor; g.fillRect(0, 0, c.w, c.h); }
@@ -119,7 +121,7 @@ async function applyCover(c, d, api) {
     const b = coverBox(c, d, soft * 3 + 2), t = mkc(b.w, b.h); t.getContext('2d').drawImage(out, -b.x, -b.y);
     const l = await api.layerFromBlob(c, await new Promise(r => t.toBlob(r, 'image/png')), '흰칠', { x: b.x, y: b.y, hidden: true }); if (l) { l.cover = true; await ensureBitmap(l.mediaId); } commit('흰칠'); return;
   }
-  const S = await begin(c); S.g.save(); S.g.setTransform(S.k, 0, 0, S.k, -S.l.x * S.k, -S.l.y * S.k); S.g.drawImage(out, 0, 0); S.g.restore();
+  const S = await begin(c); S.g.save(); S.fromCanvas(S.g); S.g.drawImage(out, 0, 0); S.g.restore();
   await S.done(COVER_LABEL[kind]);
 }
 // 끌어서 윤곽 따기: 끈 네모 안의 물건 모양을 AI가 따서 그 모양대로 가려요

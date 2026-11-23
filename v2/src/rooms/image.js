@@ -137,12 +137,12 @@ function masked(l, bmp) {
 // 고른 곳을 레이어 그림의 자리로 옮긴 마스크 (레이어 그림과 같은 크기)
 export async function selInLayer(l) {
   const bmp = await ensureBitmap(l.mediaId), s = layerSize(l), c = document.createElement('canvas'); c.width = bmp.width; c.height = bmp.height;
-  const g = c.getContext('2d'); g.translate(c.width / 2, c.height / 2); g.scale(c.width / s.w, c.height / s.h); g.rotate(-l.rot * Math.PI / 180); g.translate(-(l.x + s.w / 2), -(l.y + s.h / 2)); g.drawImage(sel.cv, 0, 0); return c;
+  const g = c.getContext('2d'); g.translate(c.width / 2, c.height / 2); g.scale(c.width / s.w, c.height / s.h); g.scale(l.flipX ? -1 : 1, l.flipY ? -1 : 1); g.rotate(-l.rot * Math.PI / 180); g.translate(-(l.x + s.w / 2), -(l.y + s.h / 2)); g.drawImage(sel.cv, 0, 0); return c;
 }
 export async function layerPic(l) { const bmp = await ensureBitmap(l.mediaId); if (!l.maskId) return bmp; await ensureBitmap(l.maskId); return masked(l, bmp); }
 async function maskFromSel(invert) {
   const l = layerOf(), bmp = await ensureBitmap(l.mediaId), s = layerSize(l), c = document.createElement('canvas'); c.width = bmp.width; c.height = bmp.height;
-  const g = c.getContext('2d'); g.translate(c.width / 2, c.height / 2); g.scale(c.width / s.w, c.height / s.h); g.rotate(-l.rot * Math.PI / 180); g.translate(-(l.x + s.w / 2), -(l.y + s.h / 2)); g.drawImage(sel.cv, 0, 0);
+  const g = c.getContext('2d'); g.translate(c.width / 2, c.height / 2); g.scale(c.width / s.w, c.height / s.h); g.scale(l.flipX ? -1 : 1, l.flipY ? -1 : 1); g.rotate(-l.rot * Math.PI / 180); g.translate(-(l.x + s.w / 2), -(l.y + s.h / 2)); g.drawImage(sel.cv, 0, 0);
   g.setTransform(1, 0, 0, 1, 0, 0);
   if (invert) { g.globalCompositeOperation = 'source-out'; g.fillStyle = '#000'; g.fillRect(0, 0, c.width, c.height); }
   if (l.maskId) { const old = await ensureBitmap(l.maskId); g.globalCompositeOperation = 'destination-in'; g.drawImage(old, 0, 0, c.width, c.height); }   // 이미 가린 곳은 계속 가려요
@@ -332,7 +332,7 @@ async function selErase() {
   const m = mediaOf(l), bmp = await ensureBitmap(l.mediaId), s = layerSize(l);
   const t = document.createElement('canvas'); t.width = m.w; t.height = m.h; const g = t.getContext('2d');
   g.drawImage(bmp, 0, 0); g.globalCompositeOperation = 'destination-out';
-  g.translate(m.w / 2, m.h / 2); g.scale(1 / l.scale, 1 / l.scale); g.rotate(-l.rot * Math.PI / 180); g.translate(-(l.x + s.w / 2), -(l.y + s.h / 2));
+  g.translate(m.w / 2, m.h / 2); g.scale(1 / l.scale, 1 / l.scale); g.scale(l.flipX ? -1 : 1, l.flipY ? -1 : 1); g.rotate(-l.rot * Math.PI / 180); g.translate(-(l.x + s.w / 2), -(l.y + s.h / 2));
   g.drawImage(sel.cv, 0, 0);
   const nm = await addMedia(new File([await toBlob(t)], m.name.replace(/\.[a-z0-9]+$/i, '') + ' 고침.png', { type: 'image/png' }), m.folder || null, { hidden: true });
   l.mediaId = nm.id; await ensureBitmap(nm.id);

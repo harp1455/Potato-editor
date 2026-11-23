@@ -52,8 +52,8 @@ function framesDialog(frames, fps, name) {
     { label: '닫기' },
     { label: '영상 작업실로 보내기', run: () => { (async () => {
       const b = busy(`장면을 영상 작업실로 보내는 중이에요. 0 / ${frames.length}`);
-      const n = await addFrames(frames, fps, name, (i, t) => b.set(`장면을 영상 작업실로 보내는 중이에요. ${i} / ${t}`));
-      b.done(`장면 ${n}개를 영상 작업실에 넣었어요.`); settings.set('room', 'video');
+      try { const n = await addFrames(frames, fps, name, (i, t) => b.set(`장면을 영상 작업실로 보내는 중이에요. ${i} / ${t}`)); b.done(`장면 ${n}개를 영상 작업실에 넣었어요.`); settings.set('room', 'video'); }
+      catch (e) { b.done('영상 작업실로 보내지 못했어요. ' + ((e && e.message) || ''), 'err'); }
     })(); } },
     { label: '파일로 저장', primary: true, run: save },
   ] });
@@ -84,7 +84,7 @@ export async function rigOpen(src, name, key, selMask) {
 function selOnLayer(l, m) {
   if (!sel.any || sel.id !== (canvasOf() || {}).id) return null;
   const t = document.createElement('canvas'); t.width = m.w; t.height = m.h; const g = t.getContext('2d'), w = m.w * l.scale, hh = m.h * l.scale;
-  g.translate(m.w / 2, m.h / 2); g.scale(1 / l.scale, 1 / l.scale); g.rotate(-l.rot * Math.PI / 180); g.translate(-(l.x + w / 2), -(l.y + hh / 2)); g.drawImage(sel.cv, 0, 0);
+  g.translate(m.w / 2, m.h / 2); g.scale(1 / l.scale, 1 / l.scale); g.scale(l.flipX ? -1 : 1, l.flipY ? -1 : 1); g.rotate(-l.rot * Math.PI / 180); g.translate(-(l.x + w / 2), -(l.y + hh / 2)); g.drawImage(sel.cv, 0, 0);
   return t;
 }
 async function rigLayer(l) { const m = mediaOf(l), bmp = await ensureBitmap(l.mediaId); if (bmp) rigOpen(bmp, l.name, state.project.id + ':m' + m.id, () => selOnLayer(l, m)); }

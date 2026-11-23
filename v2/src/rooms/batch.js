@@ -16,6 +16,7 @@ const EXT = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' };
 const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
 
 function targets() {
+  if (B.from !== 'all' && B.from !== 'picked' && !(state.project.folders || []).some(f => f.id === B.from)) B.from = 'all';   // 다른 작업의 폴더나 지운 폴더를 가리키면 전체로
   if (B.from === 'picked') return state.project.media.filter(m => picked.has(m.id) && !m.hidden);
   if (B.from !== 'all') return mediaIn(B.from);
   return mediaIn(null);
