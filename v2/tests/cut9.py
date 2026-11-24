@@ -1,5 +1,5 @@
 # 컷 작업실 시험 3: 가리기 붓·부드럽게, 도형·카메라 틀, 곡선으로 자르기, 컷 안에 그림 겹치기, 내 모양(미리보기·기본)
-import os, struct, sys, tempfile, zlib
+import json, os, shutil, struct, sys, tempfile, zlib
 from playwright.sync_api import sync_playwright
 HERE = os.path.dirname(os.path.abspath(__file__))
 PAGE = 'file://' + os.path.join(HERE, '..', '..', 'dist', 'v2', 'index.html')
@@ -64,6 +64,102 @@ with sync_playwright() as pw:
     page.keyboard.press('Escape'); nb = P(page, ELS + ".filter(e => e.type === 'bubble').length"); page.click('.vid-side >> text=대사 한꺼번에 넣기'); page.fill('.dlg textarea', '안녕?\n오랜만이야.\n잘 지냈어?'); page.click('.dlg-foot >> text=말풍선으로 넣기')
     bs = P(page, ELS + ".filter(e => e.type === 'bubble')"); assert len(bs) == nb + 3 and [b['text'] for b in bs[-3:]] == ['안녕?', '오랜만이야.', '잘 지냈어?'] and bs[-3]['x'] < bs[-2]['x'] and bs[-2]['y'] > bs[-3]['y'] + bs[-3]['h'], bs[-3:]
     page.wait_for_timeout(150); shot(page, '105-script')
+    # 카메라 틀은 가장자리만 눌려요: 가운데를 누르면 밑의 컷이 골라지고, 가장자리나 요소 목록으로는 틀이 골라져요
+    page.keyboard.press('Escape'); P(page, "(() => { const p = %s; p.els = p.els.filter(e => e.type === 'panel'); delete p.els[0].gid; __potato.cut.pick(p.els[0].id); })()" % PG)
+    page.click('.cut-bar >> text=도형·틀'); page.click('.menu-item >> text=뷰파인더'); pid = P(page, ELS + "[0].id"); fid = P(page, ELS + "[1].id"); assert P(page, ELS + "[1].type") == 'frame'
+    SEL = lambda: P(page, "__potato.cut.sel()"); none = lambda: (P(page, "__potato.cut.pick(null)"), page.wait_for_timeout(60))
+    none(); page.mouse.click(SX(400), SY(325)); assert SEL() == pid, '틀 가운데를 누르면 컷이 골라져야 해요'
+    none(); page.mouse.click(SX(112), SY(250)); assert SEL() == fid, '틀 가장자리를 누르면 틀이 골라져야 해요'   # 띠: 450의 8% = 36
+    none(); page.mouse.click(SX(100 + 600 - 20), SY(100 + 450 - 20)); assert SEL() == fid   # 모서리 쪽 띠
+    none(); page.mouse.click(SX(100 + 60), SY(100 + 60)); assert SEL() == pid   # 띠 바로 안쪽은 컷
+    none(); page.click('.vid-side .el-name >> text=카메라 틀'); assert SEL() == fid and page.locator('.vid-side select[aria-label="틀 종류"]').count() == 1
+    # 묶이지 않은 틀(페이지 전체)도 같아요. 틀을 숨기지 않아도 밑의 컷을 끌어 옮길 수 있어요
+    none(); page.click('.cut-bar >> text=도형·틀'); page.click('.menu-item >> text=녹화 중'); f2 = P(page, ELS + ".at(-1)"); assert f2['type'] == 'frame' and f2['w'] == P(page, PG + ".w") and 'gid' not in f2
+    none(); page.mouse.click(SX(400), SY(325)); assert SEL() == pid
+    none(); page.mouse.click(SX(6), SY(700)); assert SEL() == f2['id']
+    none(); page.mouse.move(SX(400), SY(325)); page.mouse.down(); page.mouse.move(SX(440), SY(325), steps=4); page.mouse.up(); assert abs(P(page, ELS + "[0].x") - 140) < 4 and P(page, ELS + ".at(-1).x") == 0; page.keyboard.press('Control+z'); assert P(page, ELS + "[0].x") == 100
+    # 색 화면은 꽉 찬 도형이라 그대로 눌려요. 설정에 '요소 목록에서 잠그라'는 안내가 있고, 잠그면 밑의 컷이 눌려요
+    P(page, "(() => { const p = %s; p.els = p.els.filter(e => e.type === 'panel'); delete p.els[0].gid; __potato.cut.pick(p.els[0].id); })()" % PG); page.click('.cut-bar >> text=도형·틀'); page.click('.menu-item >> text=색 화면')
+    scr = P(page, ELS + ".at(-1)"); assert scr['type'] == 'shape' and scr['screen'] and (scr['x'], scr['w']) == (100, 600)
+    assert page.locator('.vid-side .panel-note >> text=요소 목록에서 이 화면을 잠가 주세요').count() == 1
+    none(); page.mouse.click(SX(400), SY(325)); assert SEL() == scr['id']
+    none(); page.click('.vid-side button[aria-label="도형 잠그기"]'); page.mouse.click(SX(400), SY(325)); assert SEL() == pid
+    P(page, "__potato.cut.pick('%s')" % P(page, "(() => { const p = %s; p.els.push({ id: 'star1', type: 'shape', kind: 'star', x: 0, y: 600, w: 80, h: 80, fill: '#ffffff', bw: 2 }); __potato.emit(); return 'star1'; })()" % PG)); page.wait_for_timeout(80)
+    assert page.locator('.vid-side select[aria-label="도형 모양"]').count() == 1 and page.locator('.vid-side .panel-note >> text=이 화면을 잠가').count() == 0   # 보통 도형에는 안내가 없어요
+    shot(page, '106-frame-hit'); assert not errs, errs
+    # 대사 하나만 AI로 번역 (흉내 응답): 고른 말풍선의 글만 바뀌고, Ctrl+Z로 되돌아와요
+    P(page, """(() => { const p = %s; p.els = p.els.filter(e => e.type === 'panel'); p.els.push({ id: 'tb1', type: 'bubble', shape: 'ellipse', x: 150, y: 600, w: 240, h: 150, text: '안녕?', size: 28, color: '#111111', fill: '#ffffff', bc: '#111111', bw: 3 }, { id: 'tb2', type: 'bubble', shape: 'ellipse', x: 450, y: 600, w: 240, h: 150, text: '그대로', size: 28, color: '#111111', fill: '#ffffff', bc: '#111111', bw: 3 });
+        __potato.settings.set('apiKey', 'k'); window.__f0 = window.fetch; window.__sent = []; window.fetch = async (u, o) => { const b = JSON.parse(o.body); __sent.push({ u: String(u), b }); const lines = JSON.parse(b.contents[0].parts[0].text);
+        return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify(lines.map(t => 'EN:' + t)) }] }, finishReason: 'STOP' }] }), { status: 200 }); }; __potato.store.commit('시험 준비'); __potato.cut.pick('tb1'); })()""" % PG)
+    page.click('.vid-side >> text=AI로 번역·다듬기…'); page.click('.menu-item >> text=영어'); page.wait_for_function(PG + ".els.find(e => e.id === 'tb1').text === 'EN:안녕?'")
+    sent = P(page, "__sent"); assert len(sent) == 1 and json.loads(sent[0]['b']['contents'][0]['parts'][0]['text']) == ['안녕?'] and any('English' in x['text'] for x in sent[0]['b']['systemInstruction']['parts']), sent
+    assert P(page, PG + ".els.find(e => e.id === 'tb2').text") == '그대로'; page.wait_for_selector('.toast >> text=대사 1개를 바꿨어요')
+    page.keyboard.press('Control+z'); assert P(page, PG + ".els.find(e => e.id === 'tb1').text") == '안녕?'
+    page.keyboard.press('Control+Shift+z'); assert P(page, PG + ".els.find(e => e.id === 'tb1').text") == 'EN:안녕?'; page.keyboard.press('Control+z')
+    # 제미나이가 줄 수를 틀리게 돌려주면 글은 그대로 두고 까닭을 알려 줘요
+    P(page, "(() => { window.fetch = async () => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: '[]' }] }, finishReason: 'STOP' }] }), { status: 200 }); })()")
+    page.click('.vid-side >> text=AI로 번역·다듬기…'); page.click('.menu-item >> text=일본어'); page.wait_for_selector('.toast >> text=0줄이 돌아왔어요'); assert P(page, PG + ".els.find(e => e.id === 'tb1').text") == '안녕?'
+    P(page, "(() => { window.fetch = window.__f0; })()"); assert not errs, errs
+    # 8.x 작업 가져오기: 손그림·가리기·도형도 2.0의 같은 요소로 들어와요. 2.0에 없는 것(선, 도장 붓, 그림 없는 스티커)만 건너뛰어요
+    pt = lambda u, v, w, *x: [u, v, w, *x]
+    old = {'app': 'potato-editor', 'v': 3, 'imageOrder': [], 'images': [], 'fonts': [], 'doc': {'name': '옛 요소', 'mode': 'cut', 'cur': 0, 'folders': [], 'pages': [{'id': 'p1', 'name': '페이지 1', 'w': 800, 'h': 1280, 'bg': '#ffffff', 'els': [
+        {'id': 'a', 'type': 'panel', 'x': 40, 'y': 40, 'w': 720, 'h': 500, 'bw': 6, 'bc': '#222222', 'fill': '#88aacc'},
+        {'id': 'd1', 'type': 'draw', 'x': 100, 'y': 600, 'w': 200, 'h': 100, 'rot': 0, 's0': 100, 'color': '#ff0000', 'ow': 3, 'oc': '#ffffff', 'op': 80, 'strokes': [[pt(0, 0, 4), pt(0.5, 1, 6), pt(1, 0.5, 8)], [pt(0.25, 0.25, 6)]]},
+        {'id': 'f1', 'type': 'fx', 'kind': 'mosaic', 'str': 20, 'color': '#ffffff', 'soft': 4, 'x': 100, 'y': 100, 'w': 300, 'h': 200, 'rot': 0, 's0': 122.474487, 'strokes': [[pt(0.1, 0.5, 30), pt(0.9, 0.5, 30)], [pt(0.5, 0.2, 30, 1), pt(0.5, 0.8, 30)]], 'shapes': []},
+        {'id': 'f2', 'type': 'fx', 'kind': 'paint', 'str': 14, 'color': '#ffeeee', 'soft': 6, 'x': 400, 'y': 200, 'w': 200, 'h': 100, 'rot': 0, 's0': 141.42, 'strokes': [], 'shapes': [[0.5, 0.5, 0.25, 0.5]], 'auto': True, 'inPanel': 'a'},
+        {'id': 'f3', 'type': 'fx', 'kind': 'blur', 'str': 12, 'color': '#ffffff', 'soft': 4, 'pad': 2, 'x': 500, 'y': 350, 'w': 120, 'h': 90, 'rot': 0, 's0': 103.9, 'strokes': [], 'shapes': [], 'polys': [[[0, 0], [1, 0.2], [0.5, 1]]]},
+        {'id': 'f4', 'type': 'fx', 'kind': 'clone', 'str': 14, 'soft': 4, 'x': 0, 'y': 0, 'w': 50, 'h': 50, 's0': 50, 'strokes': [[pt(0.5, 0.5, 20)]], 'shapes': []},
+        {'id': 's1', 'type': 'shape', 'x': 100, 'y': 800, 'w': 150, 'h': 150, 'rot': 15, 'kind': 'star', 'fillOn': True, 'fill': '#ffd400', 'stroke': '#222222', 'sw': 5, 'radius': 24, 'pts': 5, 'inner': 45, 'gradOn': False, 'fill2': '#000000', 'gradDir': 'v', 'op': 70},
+        {'id': 's2', 'type': 'shape', 'kind': 'rect', 'x': 0, 'y': 0, 'w': 800, 'h': 1280, 'rot': 0, 'pass': True, 'name': '그라디언트 화면', 'fillOn': True, 'fill': '#000000', 'fillA': 0, 'fill2': '#000000', 'fill2A': 85, 'gradOn': True, 'gradDir': 'v', 'stroke': '#000000', 'sw': 0, 'op': 100},
+        {'id': 's3', 'type': 'shape', 'x': 300, 'y': 900, 'w': 200, 'h': 24, 'rot': 30, 'kind': 'arrow', 'fillOn': False, 'fill': '#ffffff', 'stroke': '#0044ff', 'sw': 6, 'op': 100},
+        {'id': 's4', 'type': 'shape', 'x': 300, 'y': 1000, 'w': 200, 'h': 24, 'rot': 0, 'kind': 'line', 'fillOn': False, 'stroke': '#000000', 'sw': 6, 'op': 100},
+        {'id': 's5', 'type': 'shape', 'x': 550, 'y': 800, 'w': 100, 'h': 100, 'rot': 0, 'kind': 'ellipse', 'fillOn': False, 'fill': '#ffffff', 'stroke': '#00aa00', 'sw': 4, 'op': 100},
+        {'id': 'st', 'type': 'stamp', 'x': 0, 'y': 0, 'w': 50, 'h': 50}]}]}}
+    oldf = os.path.join(D, '옛 요소.json'); open(oldf, 'w', encoding='utf-8').write(json.dumps(old, ensure_ascii=False)); np = P(page, "__potato.state.project.pages.length")
+    with page.expect_file_chooser() as fc: P(page, "__potato.run('file.import8')")
+    fc.value.set_files(oldf); page.wait_for_function("__potato.state.project.pages.length === %d" % (np + 1)); es = P(page, "__potato.state.project.pages.at(-1).els")
+    assert [e['type'] for e in es] == ['panel', 'draw', 'cover', 'cover', 'cover', 'shape', 'shape', 'shape', 'shape'], [e['type'] for e in es]
+    d1 = es[1]; assert (d1['x'], d1['y'], d1['w'], d1['h'], d1['bw0'], d1['bh0']) == (100, 600, 200, 100, 200, 100) and d1['strokes'] == [[[0, 0], [100, 100], [200, 50]], [[50, 25]]] and d1['color'] == '#ff0000' and d1['ol'] == 3 and d1['olc'] == '#ffffff' and abs(d1['op'] - 0.8) < 1e-6, d1
+    assert abs(d1['size'] - 6 * (20000 ** 0.5) / 100) < 0.06, d1['size']   # 점 굵기 평균(6) × 지금 크기 ÷ s0
+    c1, c2, c3 = es[2:5]; assert c1['kind'] == 'mosaic' and c1['shape'] == 'brush' and c1['str'] == 20 and c1['soft'] == 0 and c1['strokes'] == [[[30, 100], [270, 100]]] and (c1['bw0'], c1['bh0']) == (300, 200) and abs(c1['size'] - 60) < 0.1, c1   # 지우개 획은 빠져요
+    assert c2['kind'] == 'white' and c2['shape'] == 'ellipse' and (c2['x'], c2['y'], c2['w'], c2['h']) == (450, 200, 100, 100) and c2['soft'] == 6 and c2['color'] == '#ffeeee', c2
+    assert c3['kind'] == 'blur' and c3['shape'] == 'rect' and (c3['x'], c3['y'], c3['w'], c3['h']) == (500, 350, 120, 90) and c3['str'] == 20 and c3['soft'] == 4, c3   # 윤곽 모양은 상자 전체 네모로
+    s1, s2, s3, s5 = es[5:9]; assert s1['kind'] == 'star' and s1['fill'] == '#ffd400' and s1['fill2'] == '' and s1['bc'] == '#222222' and s1['bw'] == 5 and abs(s1['op'] - 0.7) < 1e-6 and s1['rot'] == 15, s1
+    assert s2['kind'] == 'rect' and s2['fill'] == '#00000000' and s2['fill2'] == '#000000d9' and s2['bw'] == 0 and 'op' not in s2, s2
+    assert s3['kind'] == 'arrow' and s3['fill'] == '#0044ff' and s3['bw'] == 0 and s3['rot'] == 30 and s5['kind'] == 'ellipse' and s5['fill'] == '' and s5['bc'] == '#00aa00' and s5['bw'] == 4, (s3, s5)
+    page.wait_for_selector('.toast >> text=요소 3개'); page.wait_for_selector('.toast >> text=건너뛰었어요'); page.wait_for_timeout(300)
+    # 화면에 실제로 그려져요: 흰칠 타원 가운데는 그 색(위에 덮인 화면만큼 어둡게), 그라디언트 화면은 위가 비치고 아래가 어두워요, 손그림의 빨간 획
+    box = page.locator('.viewport').bounding_box(); P(page, "__potato.cut.pick(null)"); page.wait_for_timeout(200)
+    w1 = P(page, px % (SX(500), SY(250))); assert all(abs(a - b) <= 4 for a, b in zip(w1, [213, 198, 198])), w1   # 흰칠 색(#ffeeee) 위에 그라디언트 화면이 17%쯤 덮여요
+    top = P(page, px % (SX(20), SY(10))); bot = P(page, px % (SX(20), SY(1270))); assert min(top) > 245 and max(bot) < 60, (top, bot)
+    r = P(page, px % (SX(100), SY(600))); assert r[0] > r[1] + 60 and r[0] > r[2] + 60, r   # 획이 시작하는 점은 빨강
+    for e in es[1:]: P(page, "__potato.cut.pick('%s')" % e['id']); page.wait_for_timeout(60)   # 하나씩 골라도 설정이 오류 없이 그려져요
+    shot(page, '107-import8-more'); assert not errs, errs
+    P(page, "(() => { const p = __potato.state.project; p.pages.pop(); p.activePage = p.pages[0].id; __potato.emit(); })()"); page.wait_for_timeout(300)
+    # 글꼴 파일 넣기: 글꼴 목록의 '글꼴 파일 넣기…'로 TTF를 고르면 작업에 저장되고 그 말풍선에 쓰여요. 다시 열어도 글꼴이 올라와 있어요
+    FONT = os.path.join(D, '감자시험글꼴.ttf'); shutil.copy('/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf', FONT)
+    FOK = "(() => [...document.fonts].some(f => f.family.replace(/\"/g, '') === '감자시험글꼴' && f.status === 'loaded') && document.fonts.check('28px \"감자시험글꼴\"'))()"
+    assert not P(page, "[...document.fonts].some(f => f.family.includes('감자시험글꼴'))")
+    P(page, "__potato.cut.pick('tb1')"); page.wait_for_selector('.vid-side select[aria-label="글꼴"]')
+    with page.expect_file_chooser() as fc: page.select_option('.vid-side select[aria-label="글꼴"]', label='글꼴 파일 넣기… (TTF·OTF·WOFF)')
+    fc.value.set_files(FONT); page.wait_for_function("(__potato.state.project.fonts || []).length === 1"); page.wait_for_selector('.toast >> text=글꼴을 이 작업에 넣었어요')
+    fo = P(page, "__potato.state.project.fonts[0]"); assert fo['name'] == '감자시험글꼴' and fo['id'], fo
+    assert P(page, PG + ".els.find(e => e.id === 'tb1').font") == '"감자시험글꼴"' and P(page, FOK)
+    assert P(page, "document.querySelector('.vid-side select[aria-label=\"글꼴\"]').value") == '"감자시험글꼴"' and page.locator('.vid-side optgroup[label="이 작업에 넣은 글꼴"] option').count() == 1
+    assert P(page, "__potato.store.idb.get('blobs', 'font:%s').then(b => b.size)" % fo['id']) == os.path.getsize(FONT)
+    page.keyboard.press('Control+z'); assert not P(page, PG + ".els.find(e => e.id === 'tb1').font") and not P(page, "__potato.state.project.fonts")   # 되돌리면 넣은 글꼴도 목록에서 함께 빠져요 (그림 넣기와 같아요)
+    page.keyboard.press('Control+Shift+z'); assert P(page, PG + ".els.find(e => e.id === 'tb1').font") == '"감자시험글꼴"' and len(P(page, "__potato.state.project.fonts")) == 1
+    # 같은 글꼴 파일을 다른 말풍선에서 또 넣으면 두 번 저장하지 않고 그 글꼴만 골라 줘요
+    P(page, "__potato.cut.pick('tb2')"); page.wait_for_timeout(80)
+    with page.expect_file_chooser() as fc: page.select_option('.vid-side select[aria-label="글꼴"]', label='글꼴 파일 넣기… (TTF·OTF·WOFF)')
+    fc.value.set_files(FONT); page.wait_for_selector('.toast >> text=이미 이 작업에 있어요'); assert len(P(page, "__potato.state.project.fonts")) == 1 and P(page, PG + ".els.find(e => e.id === 'tb2').font") == '"감자시험글꼴"'
+    # 글꼴이 아닌 파일은 알려 주고 넣지 않아요
+    with page.expect_file_chooser() as fc: page.select_option('.vid-side select[aria-label="글꼴"]', label='글꼴 파일 넣기… (TTF·OTF·WOFF)')
+    fc.value.set_files(A); page.wait_for_selector('.toast >> text=글꼴 파일을 읽지 못했어요'); assert len(P(page, "__potato.state.project.fonts")) == 1
+    shot(page, '108-font-file'); assert not errs, errs
+    P(page, "__potato.run('file.save')"); page.wait_for_function("__potato.state.saved"); page.reload(); page.wait_for_function("window.__potato && __potato.cut && (__potato.state.project.fonts || []).length === 1")
+    P(page, "__potato.settings.set('room', 'cut')"); page.wait_for_function(FOK); assert P(page, PG + ".els.find(e => e.id === 'tb1').font") == '"감자시험글꼴"'
+    page.wait_for_timeout(200); shot(page, '109-font-reloaded')
     assert not errs, errs
     br.close()
 print('통과')

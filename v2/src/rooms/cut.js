@@ -23,7 +23,8 @@ async function loadProjectFonts() {
 }
 function addFontFile(then) {
   const i = h('input', { type: 'file', accept: '.ttf,.otf,.woff,.woff2' }); i.onchange = async () => { const f = i.files[0]; if (!f) return;
-    try { const name = f.name.replace(/\.[a-z0-9]+$/i, '').replace(/["\\]/g, '').slice(0, 40) || '내 글꼴', ff = new FontFace(name, await f.arrayBuffer()); await ff.load(); document.fonts.add(ff); const { idb } = await import('../core/store.js'), id = uid('f'); await idb.put('blobs', 'font:' + id, f); fontsLoaded.add(id); (state.project.fonts || (state.project.fonts = [])).push({ id, name }); then(`"${name}"`); toast(`'${name}' 글꼴을 이 작업에 넣었어요.`); }
+    try { const name = f.name.replace(/\.[a-z0-9]+$/i, '').replace(/["\\]/g, '').slice(0, 40) || '내 글꼴'; if ((state.project.fonts || []).some(x => x.name === name)) { then(`"${name}"`); toast(`'${name}' 글꼴은 이미 이 작업에 있어요. 그 글꼴로 바꿨어요.`); return; }   // 같은 글꼴을 또 넣으면 두 번 저장하지 않아요
+      const ff = new FontFace(name, await f.arrayBuffer()); await ff.load(); document.fonts.add(ff); const { idb } = await import('../core/store.js'), id = uid('f'); await idb.put('blobs', 'font:' + id, f); fontsLoaded.add(id); (state.project.fonts || (state.project.fonts = [])).push({ id, name }); then(`"${name}"`); toast(`'${name}' 글꼴을 이 작업에 넣었어요.`); }
     catch (_) { toast('글꼴 파일을 읽지 못했어요. TTF, OTF, WOFF 파일을 넣어 주세요.', 'err'); } }; i.click();
 }
 // 내 컴퓨터 글꼴: 브라우저가 허락하면 깔려 있는 글꼴 이름을 받아 와서 목록에 더해요 (이름만 기억해요)
@@ -276,7 +277,9 @@ function draw() {
   ctx.restore();
 }
 const toPage = (sx, sy) => ({ x: (sx - V.ox) / V.zoom, y: (sy - V.oy) / V.zoom });
-const hit = (pg, p0) => { for (let i = pg.els.length - 1; i >= 0; i--) { const e = pg.els[i], p = toLocal(e, p0); if (e.hide || e.lock) continue; if ((p.x >= e.x && p.y >= e.y && p.x <= e.x + e.w && p.y <= e.y + e.h) || (e.type === 'bubble' && e.tail && inBubble(e, p0.x, p0.y))) return e; } return null; };
+// 카메라 틀은 컷 위에 얹는 거라, 가장자리 띠(짧은 변의 8%, 화면에서 적어도 10px)만 눌려요. 가운데를 누르면 밑에 있는 컷이 골라져요. 틀은 가장자리나 요소 목록에서 골라요
+const frameMid = (e, p) => { if (e.type !== 'frame') return false; const b = Math.min(Math.max(Math.min(e.w, e.h) * 0.08, 10 / V.zoom), Math.min(e.w, e.h) / 2); return p.x > e.x + b && p.y > e.y + b && p.x < e.x + e.w - b && p.y < e.y + e.h - b; };
+const hit = (pg, p0) => { for (let i = pg.els.length - 1; i >= 0; i--) { const e = pg.els[i], p = toLocal(e, p0); if (e.hide || e.lock || frameMid(e, p)) continue; if ((p.x >= e.x && p.y >= e.y && p.x <= e.x + e.w && p.y <= e.y + e.h) || (e.type === 'bubble' && e.tail && inBubble(e, p0.x, p0.y))) return e; } return null; };
 
 // ---- 번역: 페이지의 대사를 모아 제미나이에 보내고, 같은 차례로 받아 넣어요 ----
 const LANGS = [['polish', '번역하지 않고 다듬기만'], ['Korean', '한국어'], ['English', '영어'], ['Japanese', '일본어'], ['Simplified Chinese', '중국어 (간체)'], ['Traditional Chinese', '중국어 (번체)'], ['Spanish', '스페인어']];
@@ -532,7 +535,7 @@ const SHAPE_KINDS = [['rect', '네모'], ['round', '둥근 네모'], ['ellipse',
 const FRAME_KINDS = [['viewfinder', '뷰파인더'], ['rec', '녹화 중 (REC)'], ['letterbox', '영화 띠 (위아래 검은 띠)'], ['vhs', '비디오테이프'], ['film', '필름']];
 function addShape(kind) {
   const pg = pageOf(); if (!pg) return; const c = viewCenter(), sel0 = elOf(); let n;
-  if (kind === 'screen') { const b = sel0 && sel0.type === 'panel' ? sel0 : { x: 0, y: 0, w: pg.w, h: pg.h }; n = { id: uid('e'), type: 'shape', kind: 'rect', x: b.x, y: b.y, w: b.w, h: b.h, fill: '#000000', op: 0.5, bw: 0 }; }
+  if (kind === 'screen') { const b = sel0 && sel0.type === 'panel' ? sel0 : { x: 0, y: 0, w: pg.w, h: pg.h }; n = { id: uid('e'), type: 'shape', kind: 'rect', x: b.x, y: b.y, w: b.w, h: b.h, fill: '#000000', op: 0.5, bw: 0, screen: true }; }
   else { const w = Math.round(pg.w * 0.25), hh = kind === 'arrow' ? Math.round(w * 0.55) : w; n = { id: uid('e'), type: 'shape', kind, x: Math.round(c.x - w / 2), y: Math.round(c.y - hh / 2), w, h: hh, fill: '#ffffff', bc: '#111111', bw: Math.max(2, Math.round(pg.w / 200)) }; }
   pg.els.push(n); V.sel = n.id; V.more = null; V.tool = 'pick'; commit(kind === 'screen' ? '색 화면 넣기' : '도형 넣기');
 }
@@ -872,7 +875,8 @@ export const cutRoom = {
         ...(e.type === 'shape' ? [h('label.field', null, h('span.field-name.w', null, '모양'), h('select.text', { 'aria-label': '도형 모양', onchange: ev => { e.kind = ev.target.value; commit('도형 모양'); } }, SHAPE_KINDS.map(([v, t]) => h('option', { value: v, selected: e.kind === v }, t)))),
           h('div.field-row', null, h('label.check', null, h('input', { type: 'checkbox', checked: !!e.fill, 'aria-label': '칠하기', onchange: ev => { e.fill = ev.target.checked ? '#ffffff' : ''; commit('칠하기'); } }), e.fill ? h('input', { type: 'color', value: e.fill, 'aria-label': '칠 색', onchange: ev => { e.fill = ev.target.value; commit('칠 색'); } }) : '칠하기'), e.fill ? h('label.check', { title: '아래로 갈수록 다른 색으로' }, h('input', { type: 'checkbox', checked: !!e.fill2, 'aria-label': '아래쪽 색 쓰기', onchange: ev => { e.fill2 = ev.target.checked ? '#000000' : ''; commit('아래쪽 색'); } }), e.fill2 ? h('input', { type: 'color', value: e.fill2, 'aria-label': '아래쪽 색', onchange: ev => { e.fill2 = ev.target.value; commit('아래쪽 색'); } }) : '아래쪽 색') : h('span')),
           h('div.field-row', null, num('테두리', 'bw', e, 1, { min: 0, max: 80 }), col('테두리색', 'bc', '#111111')),
-          h('label.field', null, h('span.field-name.w', null, '진하기 %'), h('input.num', { type: 'number', min: 0, max: 100, step: 5, value: Math.round((e.op ?? 1) * 100), 'aria-label': '진하기', onchange: ev => { e.op = clamp((parseFloat(ev.target.value) || 0) / 100, 0, 1); commit('진하기'); } }))] : []),
+          h('label.field', null, h('span.field-name.w', null, '진하기 %'), h('input.num', { type: 'number', min: 0, max: 100, step: 5, value: Math.round((e.op ?? 1) * 100), 'aria-label': '진하기', onchange: ev => { e.op = clamp((parseFloat(ev.target.value) || 0) / 100, 0, 1); commit('진하기'); } })),
+          e.screen ? h('p.panel-note', null, '색 화면 밑에 있는 컷이나 말풍선을 누르려면, 요소 목록에서 이 화면을 잠가 주세요.') : null] : []),
         ...(e.type === 'frame' ? [h('label.field', null, h('span.field-name.w', null, '틀'), h('select.text', { 'aria-label': '틀 종류', onchange: ev => { e.kind = ev.target.value; commit('틀 종류'); } }, FRAME_KINDS.map(([v, t]) => h('option', { value: v, selected: e.kind === v }, t)))),
           h('div.field-row', null, col('색', 'color', '#ffffff'), e.kind === 'letterbox' || e.kind === 'film' ? col('띠 색', 'color2', '#000000') : h('span')),
           e.kind === 'letterbox' ? num('띠 높이 %', 'bar', e, 1, { min: 2, max: 40, def: 12 }) : null,

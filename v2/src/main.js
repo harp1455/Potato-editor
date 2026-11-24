@@ -49,7 +49,7 @@ function registerCmds() {
     const i = h('input', { type: 'file', accept: '.json,application/json' });
     i.onchange = async () => { const f = i.files[0]; if (!f) return; const b = busy('8.x 작업을 가져오는 중이에요.');
       try { const { import8 } = await import('./core/import8.js'); const r = await import8(f, (n, t) => b.set(`그림을 옮기는 중이에요. ${n} / ${t}`));
-        b.done(`'${r.name}'에서 그림 ${r.images}장${r.pages ? `, 페이지 ${r.pages}쪽` : ''}을 가져왔어요.` + (r.skipped ? ` 2.0에 아직 없는 요소 ${r.skipped}개(스티커, 손그림, 효과 등)는 건너뛰었어요.` : '') + (r.failed ? ` 그림 ${r.failed}장은 읽지 못했어요.` : ''));
+        b.done(`'${r.name}'에서 그림 ${r.images}장${r.pages ? `, 페이지 ${r.pages}쪽` : ''}을 가져왔어요.` + (r.skipped ? ` 2.0에 아직 없는 요소 ${r.skipped}개(선, 붓 효과, 그림 없는 스티커 등)는 건너뛰었어요.` : '') + (r.failed ? ` 그림 ${r.failed}장은 읽지 못했어요.` : ''));
         if (r.pages) settings.set('room', 'cut'); }
       catch (e) { b.done(e.message || '가져오지 못했어요.', 'err'); } };
     i.click(); } });
